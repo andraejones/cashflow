@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cashflow Calendar</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="calendar">
+        <div class="header">
+            <button id="prevMonth" class="nav-btn">&#10094;</button>
+            <span id="currentMonth"></span>
+            <button id="nextMonth" class="nav-btn">&#10095;</button>
+        </div>
+
+        <div id="monthSummary"></div>
+
+        <div id="calendarDays" class="days"></div>
+
+        <div id="calendarOptions"></div>
+    </div>
+
+    <div id="transactionModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h3 id="modalDate"></h3>
+            <div id="transactionForm">
+                <input type="date" id="transactionDate">
+                <input type="number" id="transactionAmount" placeholder="Amount" step="0.01">
+                <select id="transactionType">
+                    <option value="expense">Expense</option>
+                    <option value="income">Income</option>
+                </select>
+                <input type="text" id="transactionDescription" placeholder="Description">
+                <select id="transactionRecurrence">
+                    <option value="once">One-time</option>
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly">Monthly</option>
+                    <option value="yearly">Yearly</option>
+                </select>
+                <button onclick="addTransaction()">Add Transaction</button>
+            </div>
+            <div id="modalTransactions"></div>
+        </div>
+    </div>
+
+    <div id="searchModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h3>Search Transactions</h3>
+            <input type="text" id="searchInput" placeholder="Enter search term">
+            <button id="searchButton" onclick="performSearch()">Search</button>
+            <button id="clearSearchButton" onclick="clearSearch()" disabled>Clear Results</button>
+            <div id="searchResults"></div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
