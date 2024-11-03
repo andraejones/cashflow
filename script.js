@@ -43,31 +43,93 @@ function updateMonthlyBalances() {
     const sortedMonths = Object.keys(monthlyBalances).sort();
     let previousBalance = 0;
 
-    sortedMonths.forEach((monthKey, index) => {
+    sortedMonths.forEach((monthKey) => {
         const [year, month] = monthKey.split('-').map(Number);
         let monthIncome = 0;
         let monthExpense = 0;
+        let runningBalance = previousBalance;
+        let lastBalanceSet = null;
+        let lastBalanceDate = null;
 
+        // Process each day of the month
         for (let day = 1; day <= 31; day++) {
             const dateString = `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+            
             if (transactions[dateString]) {
+                let balanceSet = false;
+                let dailyBalance = runningBalance;
+
+                // First pass: Look for balance transactions
+                transactions[dateString].forEach(t => {
+                    if (t.type === 'balance') {
+                        balanceSet = true;
+                        dailyBalance = t.amount;
+                        lastBalanceSet = t.amount;
+                        lastBalanceDate = dateString;
+                    }
+                });
+
+                // Second pass: Process income and expenses
                 transactions[dateString].forEach(t => {
                     if (t.type === 'income') {
                         monthIncome += t.amount;
-                    } else {
+                        if (!balanceSet) {
+                            dailyBalance += t.amount;
+                        }
+                    } else if (t.type === 'expense') {
                         monthExpense += t.amount;
+                        if (!balanceSet) {
+                            dailyBalance -= t.amount;
+                        }
                     }
                 });
+
+                runningBalance = dailyBalance;
             }
         }
 
-        monthlyBalances[monthKey] = {
-            startingBalance: previousBalance,
-            endingBalance: previousBalance + monthIncome - monthExpense
-        };
+        // Calculate the month's starting and ending balances
+        if (lastBalanceSet !== null) {
+            // If we had a balance transaction in this month
+            monthlyBalances[monthKey] = {
+                startingBalance: lastBalanceDate === `${year}-${month.toString().padStart(2, '0')}-01` 
+                    ? lastBalanceSet 
+                    : previousBalance,
+                endingBalance: runningBalance
+            };
+        } else {
+            // If no balance transactions, calculate based on income and expenses
+            monthlyBalances[monthKey] = {
+                startingBalance: previousBalance,
+                endingBalance: previousBalance + monthIncome - monthExpense
+            };
+        }
 
+        // Set the previous balance for the next month
         previousBalance = monthlyBalances[monthKey].endingBalance;
     });
+
+    // Handle future months that don't exist yet
+    const today = new Date();
+    const currentMonth = `${today.getFullYear()}-${today.getMonth() + 1}`;
+    const lastMonth = sortedMonths[sortedMonths.length - 1];
+
+    if (lastMonth && currentMonth > lastMonth) {
+        const [lastYear, lastMonthNum] = lastMonth.split('-').map(Number);
+        let nextDate = new Date(lastYear, lastMonthNum, 1);
+        const endDate = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+
+        while (nextDate < endDate) {
+            const nextMonthKey = `${nextDate.getFullYear()}-${nextDate.getMonth() + 1}`;
+            if (!monthlyBalances[nextMonthKey]) {
+                monthlyBalances[nextMonthKey] = {
+                    startingBalance: previousBalance,
+                    endingBalance: previousBalance
+                };
+            }
+            nextDate.setMonth(nextDate.getMonth() + 1);
+        }
+    }
 
     saveData();
 }
@@ -118,6 +180,7 @@ function generateCalendar() {
         monthlyBalances[monthKey] = { startingBalance: previousBalance, endingBalance: previousBalance };
     }
     let currentBalance = monthlyBalances[monthKey].startingBalance;
+    let runningBalance = currentBalance;
 
     applyRecurringTransactions(year, month);
 
@@ -133,18 +196,33 @@ function generateCalendar() {
         let dailyIncome = 0;
         let dailyExpense = 0;
         let transactionCount = 0;
+        let balanceSet = false;
 
         if (transactions[dateString]) {
             transactionCount = transactions[dateString].length;
+            
+            // First pass: Check for balance transactions
+            transactions[dateString].forEach(t => {
+                if (t.type === 'balance') {
+                    balanceSet = true;
+                    runningBalance = t.amount;
+                }
+            });
+
+            // Second pass: Process income and expenses
             transactions[dateString].forEach(t => {
                 if (t.type === 'income') {
                     dailyIncome += t.amount;
                     monthlyIncome += t.amount;
-                    currentBalance += t.amount;
-                } else {
+                    if (!balanceSet) {
+                        runningBalance += t.amount;
+                    }
+                } else if (t.type === 'expense') {
                     dailyExpense += t.amount;
                     monthlyExpense += t.amount;
-                    currentBalance -= t.amount;
+                    if (!balanceSet) {
+                        runningBalance -= t.amount;
+                    }
                 }
             });
         }
@@ -152,12 +230,14 @@ function generateCalendar() {
         day.querySelector('.day-content').innerHTML = `
             ${dailyIncome > 0 ? `<div class="income">+${dailyIncome.toFixed(2)}</div>` : ''}
             ${dailyExpense > 0 ? `<div class="expense">-${dailyExpense.toFixed(2)}</div>` : ''}
-            <div class="balance">${currentBalance.toFixed(2)}</div>
+            <div class="balance">${runningBalance.toFixed(2)}</div>
             ${transactionCount > 0 ? `<div class="transaction-count">(${transactionCount})</div>` : ''}
         `;
 
         day.addEventListener('click', () => showTransactionDetails(dateString));
         calendarDays.appendChild(day);
+
+        currentBalance = runningBalance;
     }
 
     const remainingDays = 42 - (firstDay + daysInMonth);
@@ -223,9 +303,12 @@ function showTransactionDetails(date) {
     const transactionDate = document.getElementById('transactionDate');
     const modalTransactions = document.getElementById('modalTransactions');
     const modalDate = document.getElementById('modalDate');
+    const transactionType = document.getElementById('transactionType');
 
+    // Set the date in the hidden input
     transactionDate.value = date;
     
+    // Format the date for display
     const [year, month, day] = date.split('-').map(Number);
     const dateObj = new Date(Date.UTC(year, month - 1, day));
     
@@ -239,30 +322,52 @@ function showTransactionDetails(date) {
     modalDate.textContent = formattedDate;
     modalTransactions.innerHTML = '';
 
+    // Reset and update transaction type dropdown
+    transactionType.innerHTML = `
+        <option value="expense">Expense</option>
+        <option value="income">Income</option>
+        <option value="balance">Balance</option>
+    `;
+
+    // Check if there's already a balance transaction for this date
+    const hasBalanceTransaction = transactions[date]?.some(t => t.type === 'balance');
+
+    // Display existing transactions
     if (transactions[date]) {
         transactions[date].forEach((t, index) => {
             const transactionDiv = document.createElement('div');
             const isRecurring = isRecurringTransaction(t, date);
+            
+            // Create the transaction display HTML
             transactionDiv.innerHTML = `
-                <span class="${t.type}">${t.type === 'income' ? '+' : '-'}$${t.amount.toFixed(2)}</span>
+                <span class="${t.type}">
+                    ${t.type === 'balance' ? '=' : t.type === 'income' ? '+' : '-'}
+                    $${t.amount.toFixed(2)}
+                </span>
                 ${t.description ? ` - ${t.description}` : ''}
-                ${isRecurring ? '(Recurring)' : ''}
+                ${isRecurring ? ' (Recurring)' : ''}
                 <span class="edit-btn" onclick="showEditForm('${date}', ${index})">Edit</span>
                 <span class="delete-btn" onclick="deleteTransaction('${date}', ${index})">Delete</span>
-                <div class="edit-form" id="edit-form-${date}-${index}">
-                    <input type="number" id="edit-amount-${date}-${index}" value="${t.amount}">
+                <div class="edit-form" id="edit-form-${date}-${index}" style="display: none;">
+                    <input type="number" id="edit-amount-${date}-${index}" 
+                           value="${t.amount}" step="0.01" min="0">
                     <select id="edit-type-${date}-${index}">
                         <option value="expense" ${t.type === 'expense' ? 'selected' : ''}>Expense</option>
                         <option value="income" ${t.type === 'income' ? 'selected' : ''}>Income</option>
+                        <option value="balance" ${t.type === 'balance' ? 'selected' : ''}>Balance</option>
                     </select>
-                    <input type="text" id="edit-description-${date}-${index}" value="${t.description}">
-                    ${isRecurring ? `
+                    <input type="text" id="edit-description-${date}-${index}" 
+                           value="${t.description || ''}" placeholder="Description">
+                    ${isRecurring && t.type !== 'balance' ? `
                         <select id="edit-recurrence-${date}-${index}">
                             <option value="this">Edit this occurrence only</option>
                             <option value="future">Edit this and future occurrences</option>
                         </select>
                     ` : ''}
                     <button onclick="saveEdit('${date}', ${index})">Save</button>
+                    <button onclick="document.getElementById('edit-form-${date}-${index}').style.display='none'">
+                        Cancel
+                    </button>
                 </div>
             `;
             modalTransactions.appendChild(transactionDiv);
@@ -271,7 +376,44 @@ function showTransactionDetails(date) {
         modalTransactions.innerHTML = '<p>No transactions for this date.</p>';
     }
 
+    // Update the recurrence dropdown visibility based on transaction type
+    const recurrenceSelect = document.getElementById('transactionRecurrence');
+    transactionType.addEventListener('change', function() {
+        if (this.value === 'balance') {
+            recurrenceSelect.value = 'once';
+            recurrenceSelect.style.display = 'none';
+            transactionDescription.value = 'Ending Balance';
+            transactionDescription.style.display = 'none';
+        } else {
+            recurrenceSelect.style.display = '';
+        }
+    });
+
+    // Set initial recurrence dropdown visibility
+    if (transactionType.value === 'balance') {
+        recurrenceSelect.value = 'once';
+        recurrenceSelect.style.display = 'none';
+    } else {
+        recurrenceSelect.style.display = '';
+    }
+
+    // Show the modal
     modal.style.display = 'block';
+
+    // Update form state based on existing balance transaction
+    if (hasBalanceTransaction) {
+        const balanceOption = transactionType.querySelector('option[value="balance"]');
+        if (balanceOption) {
+            balanceOption.disabled = true;
+            balanceOption.title = 'Only one balance transaction allowed per day';
+        }
+    } else {
+        const balanceOption = transactionType.querySelector('option[value="balance"]');
+        if (balanceOption) {
+            balanceOption.disabled = false;
+            balanceOption.title = '';
+        }
+    }
 }
 
 function isRecurringTransaction(transaction, date) {
@@ -488,35 +630,94 @@ function addTransaction() {
     const description = document.getElementById('transactionDescription').value;
     const recurrence = document.getElementById('transactionRecurrence').value;
 
-    if (!date || isNaN(amount) || amount <= 0) {
-        alert('Please enter valid date and amount');
+    // Basic validation
+    if (!date || isNaN(amount) || amount < 0) {
+        alert('Please enter a valid date and amount (must be 0 or greater)');
         return;
     }
 
-    if (recurrence === 'once') {
-        if (!transactions[date]) {
-            transactions[date] = [];
+    // Additional validation for balance transactions
+    if (type === 'balance') {
+        // Check if a balance transaction already exists for this date
+        if (transactions[date]?.some(t => t.type === 'balance')) {
+            alert('Only one balance transaction is allowed per day. Please edit the existing balance transaction instead.');
+            return;
         }
-        transactions[date].push({ amount, type, description });
-    } else {
-        recurringTransactions.push({
-            startDate: date,
-            amount,
-            type,
-            description,
-            recurrence
-        });
+
+        // Prevent recurring balance transactions
+        if (recurrence !== 'once') {
+            alert('Balance transactions cannot be recurring. Please select "One-time" for balance transactions.');
+            document.getElementById('transactionRecurrence').value = 'once';
+            return;
+        }
     }
 
+    // Initialize transactions array for this date if it doesn't exist
+    if (!transactions[date]) {
+        transactions[date] = [];
+    }
+
+    // Handle one-time transactions
+    if (recurrence === 'once') {
+        // For balance transactions, remove any existing balance transaction first
+        if (type === 'balance') {
+            transactions[date] = transactions[date].filter(t => t.type !== 'balance');
+        }
+
+        // Add the new transaction
+        const newTransaction = {
+            amount: amount,
+            type: type,
+            description: description
+        };
+
+        // For balance transactions, add it at the start of the array
+        if (type === 'balance') {
+            transactions[date].unshift(newTransaction);
+        } else {
+            transactions[date].push(newTransaction);
+        }
+    }
+    // Handle recurring transactions (not allowed for balance type)
+    else if (type !== 'balance') {
+        const newRecurringTransaction = {
+            startDate: date,
+            amount: amount,
+            type: type,
+            description: description,
+            recurrence: recurrence
+        };
+
+        recurringTransactions.push(newRecurringTransaction);
+    }
+
+    // Update the calendar and save data
     generateCalendar();
-    
+    saveData();
+
+    // Reset form fields
     document.getElementById('transactionAmount').value = '';
     document.getElementById('transactionDescription').value = '';
     document.getElementById('transactionRecurrence').value = 'once';
+    
+    // Show success notification
+    const typeText = type === 'balance' ? 'balance set' : 
+                    type === 'income' ? 'income' : 'expense';
+    showNotification(`Successfully added ${typeText} of $${amount.toFixed(2)}`);
 
-    saveData();
-
+    // Close the modal
     document.getElementById('transactionModal').style.display = 'none';
+
+    // Special handling for balance transactions
+    if (type === 'balance') {
+        // Force a full update of monthly balances when adding a balance transaction
+        updateMonthlyBalances();
+        // Regenerate the calendar to reflect the new balance
+        generateCalendar();
+    }
+
+    // Return true to indicate successful transaction addition
+    return true;
 }
 
 function findRecurringTransaction(transaction, date) {
