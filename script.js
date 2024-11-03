@@ -378,6 +378,8 @@ function showTransactionDetails(date) {
 
     // Update the recurrence dropdown visibility based on transaction type
     const recurrenceSelect = document.getElementById('transactionRecurrence');
+    const transactionDescription = document.getElementById('transactionDescription');
+    
     transactionType.addEventListener('change', function() {
         if (this.value === 'balance') {
             recurrenceSelect.value = 'once';
@@ -386,9 +388,11 @@ function showTransactionDetails(date) {
             transactionDescription.style.display = 'none';
         } else {
             recurrenceSelect.style.display = '';
+            transactionDescription.style.display = '';
+            transactionDescription.value = '';
+            transactionDescription.placeholder = 'Description';
         }
     });
-
     // Set initial recurrence dropdown visibility
     if (transactionType.value === 'balance') {
         recurrenceSelect.value = 'once';
@@ -890,77 +894,6 @@ function clearSearch() {
     searchResults.innerHTML = '';
     clearButton.disabled = true;
 }
-
-/* async function saveToCloud() {
-    const data = {
-        transactions: transactions,
-        monthlyBalances: monthlyBalances,
-        recurringTransactions: recurringTransactions,
-        lastUpdated: new Date().toISOString()
-    };
-    
-    try {
-        const response = await fetch(`https://api.github.com/gists/${GIST_ID}`, {
-            method: 'PATCH',
-            headers: {
-                'Authorization': `token ${GITHUB_TOKEN}`,
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                files: {
-                    'cashflow_data.json': {
-                        content: JSON.stringify(data, null, 2)
-                    }
-                }
-            })
-        });
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        alert('Data saved to cloud successfully!');
-        
-    } catch (error) {
-        console.error('Error saving to cloud:', error);
-        alert('Failed to save to cloud. Data saved locally only.');
-    }
-}
-
-async function loadFromCloud() {
-    try {
-        const response = await fetch(`https://api.github.com/gists/${GIST_ID}`, {
-            headers: {
-                'Authorization': `token ${GITHUB_TOKEN}`
-            }
-        });
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const gist = await response.json();
-        const content = gist.files['cashflow_data.json'].content;
-        const data = JSON.parse(content);
-        
-        // Update local data
-        transactions = data.transactions || {};
-        monthlyBalances = data.monthlyBalances || {};
-        recurringTransactions = data.recurringTransactions || [];
-        
-        // Save to local storage as backup
-        saveData();
-        
-        // Refresh the calendar
-        generateCalendar();
-        
-        alert('Data loaded from cloud successfully!');
-        
-    } catch (error) {
-        console.error('Error loading from cloud:', error);
-        alert('Failed to load from cloud. Using local data.');
-    }
-}
-*/
 
 document.querySelectorAll('.close').forEach(closeBtn => {
     closeBtn.onclick = function() {
