@@ -377,6 +377,11 @@ function showTransactionDetails(date) {
   const modalTransactions = document.getElementById("modalTransactions");
   const modalDate = document.getElementById("modalDate");
   const transactionType = document.getElementById("transactionType");
+    const transactionDescriptionInt = document.getElementById(
+    "transactionDescription"
+  );
+
+  transactionDescriptionInt.style.display = "";
 
   // Set the date in the hidden input
   transactionDate.value = date;
