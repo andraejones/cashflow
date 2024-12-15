@@ -247,9 +247,13 @@ function generateCalendar() {
     let dailyExpense = 0;
     let transactionCount = 0;
     let balanceSet = false;
+    let hasSkippedTransactions = false;
 
     if (transactions[dateString]) {
       transactionCount = transactions[dateString].length;
+
+      // Check for skipped transactions
+      hasSkippedTransactions = transactions[dateString].some((t) => t.skipped);
 
       // First pass: Check for balance transactions
       transactions[dateString].forEach((t) => {
@@ -295,6 +299,11 @@ function generateCalendar() {
             ${
               transactionCount > 0
                 ? `<div class="transaction-count">(${transactionCount})</div>`
+                : ""
+            }
+            ${
+              hasSkippedTransactions
+                ? '<div class="skip-indicator">★</div>'
                 : ""
             }
         `;
@@ -1422,7 +1431,9 @@ function toggleSkipTransaction(date, index) {
   const transaction = transactions[date][index];
   transaction.skipped = !transaction.skipped;
 
-  showNotification(`Transaction ${transaction.skipped ? "skipped" : "unskipped"}`);
+  showNotification(
+    `Transaction ${transaction.skipped ? "skipped" : "unskipped"}`
+  );
 
   saveData();
   generateCalendar();
