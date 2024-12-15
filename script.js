@@ -82,15 +82,18 @@ function updateMonthlyBalances() {
 
         // Second pass: Process income and expenses
         transactions[dateString].forEach((t) => {
-          if (t.type === "income") {
-            monthIncome += t.amount;
-            if (!balanceSet) {
-              dailyBalance += t.amount;
-            }
-          } else if (t.type === "expense") {
-            monthExpense += t.amount;
-            if (!balanceSet) {
-              dailyBalance -= t.amount;
+          if (!t.skipped) {
+            // Only process non-skipped transactions
+            if (t.type === "income") {
+              monthIncome += t.amount;
+              if (!balanceSet) {
+                dailyBalance += t.amount;
+              }
+            } else if (t.type === "expense") {
+              monthExpense += t.amount;
+              if (!balanceSet) {
+                dailyBalance -= t.amount;
+              }
             }
           }
         });
@@ -258,17 +261,20 @@ function generateCalendar() {
 
       // Second pass: Process income and expenses
       transactions[dateString].forEach((t) => {
-        if (t.type === "income") {
-          dailyIncome += t.amount;
-          monthlyIncome += t.amount;
-          if (!balanceSet) {
-            runningBalance += t.amount;
-          }
-        } else if (t.type === "expense") {
-          dailyExpense += t.amount;
-          monthlyExpense += t.amount;
-          if (!balanceSet) {
-            runningBalance -= t.amount;
+        if (!t.skipped) {
+          // Only process non-skipped transactions
+          if (t.type === "income") {
+            dailyIncome += t.amount;
+            monthlyIncome += t.amount;
+            if (!balanceSet) {
+              runningBalance += t.amount;
+            }
+          } else if (t.type === "expense") {
+            dailyExpense += t.amount;
+            monthlyExpense += t.amount;
+            if (!balanceSet) {
+              runningBalance -= t.amount;
+            }
           }
         }
       });
@@ -377,7 +383,7 @@ function showTransactionDetails(date) {
   const modalTransactions = document.getElementById("modalTransactions");
   const modalDate = document.getElementById("modalDate");
   const transactionType = document.getElementById("transactionType");
-    const transactionDescriptionInt = document.getElementById(
+  const transactionDescriptionInt = document.getElementById(
     "transactionDescription"
   );
 
@@ -428,9 +434,12 @@ function showTransactionDetails(date) {
 
       // Create the transaction display HTML
       transactionDiv.innerHTML = `
-        <span class="${t.type}">
+        <span class="${t.type} ${t.skipped ? "skipped" : ""}" style="opacity: ${
+        t.skipped ? "0.5" : "1"
+      }">
           ${t.type === "balance" ? "=" : t.type === "income" ? "+" : "-"}
           $${t.amount.toFixed(2)}
+          ${t.skipped ? " (Skipped)" : ""}
         </span>
         ${t.description ? ` - ${t.description}` : ""}
         ${
@@ -440,6 +449,15 @@ function showTransactionDetails(date) {
         }
         <span class="edit-btn" onclick="showEditForm('${date}', ${index})">Edit</span>
         <span class="delete-btn" onclick="deleteTransaction('${date}', ${index})">Delete</span>
+        ${
+          isRecurring
+            ? `
+          <span class="skip-btn" onclick="toggleSkipTransaction('${date}', ${index})">
+            ${t.skipped ? "Unskip" : "Skip"}
+          </span>
+        `
+            : ""
+        }
         <div class="edit-form" id="edit-form-${date}-${index}" style="display: none;">
                     <input type="number" id="edit-amount-${date}-${index}" 
                            value="${t.amount}" step="0.01" min="0">
@@ -662,40 +680,49 @@ function saveEdit(date, index) {
 }
 
 function deleteTransaction(date, index) {
-  if (
-    confirm(
-      "Are you sure you want to delete this transaction? If it's a recurring transaction, all future occurrences will be deleted as well."
-    )
-  ) {
+  if (confirm("Are you sure you want to delete this transaction?")) {
     const transaction = transactions[date][index];
+    const transactionDate = new Date(date);
 
-    const recurringIndex = recurringTransactions.findIndex(
-      (rt) =>
-        rt.amount === transaction.amount &&
-        rt.type === transaction.type &&
-        rt.description === transaction.description &&
-        new Date(rt.startDate) <= new Date(date)
-    );
+    if (transaction.isRecurring) {
+      // Find the original recurring transaction
+      const recurringIndex = recurringTransactions.findIndex(
+        (rt) =>
+          rt.amount === (transaction.originalAmount || transaction.amount) &&
+          rt.type === (transaction.originalType || transaction.type) &&
+          rt.description ===
+            (transaction.originalDescription || transaction.description) &&
+          new Date(rt.startDate) <= transactionDate
+      );
 
-    if (recurringIndex !== -1) {
-      recurringTransactions.splice(recurringIndex, 1);
+      if (recurringIndex !== -1) {
+        // Set the end date of the recurring transaction to the day before deletion
+        const endDate = new Date(transactionDate);
+        endDate.setDate(endDate.getDate() - 1);
+        recurringTransactions[recurringIndex].endDate = endDate
+          .toISOString()
+          .split("T")[0];
 
-      Object.keys(transactions).forEach((dateKey) => {
-        if (new Date(dateKey) >= new Date(date)) {
-          transactions[dateKey] = transactions[dateKey].filter(
-            (t) =>
-              !(
-                t.amount === transaction.amount &&
-                t.type === transaction.type &&
-                t.description === transaction.description
-              )
-          );
-          if (transactions[dateKey].length === 0) {
-            delete transactions[dateKey];
+        // Remove only future occurrences
+        Object.keys(transactions).forEach((dateKey) => {
+          if (new Date(dateKey) >= transactionDate) {
+            transactions[dateKey] = transactions[dateKey].filter(
+              (t) =>
+                !(
+                  t.isRecurring &&
+                  t.amount === transaction.amount &&
+                  t.type === transaction.type &&
+                  t.description === transaction.description
+                )
+            );
+            if (transactions[dateKey].length === 0) {
+              delete transactions[dateKey];
+            }
           }
-        }
-      });
+        });
+      }
     } else {
+      // Handle non-recurring transaction deletion
       transactions[date].splice(index, 1);
       if (transactions[date].length === 0) {
         delete transactions[date];
@@ -709,9 +736,29 @@ function deleteTransaction(date, index) {
   }
 }
 
+// Add this function to track skipped states
+function getSkippedStates() {
+  const skippedStates = {};
+  for (const date in transactions) {
+    transactions[date].forEach((t) => {
+      if (t.skipped && t.isRecurring) {
+        const key = `${t.amount}-${t.type}-${t.description}`;
+        if (!skippedStates[date]) {
+          skippedStates[date] = {};
+        }
+        skippedStates[date][key] = true;
+      }
+    });
+  }
+  return skippedStates;
+}
+
 function applyRecurringTransactions(year, month) {
   const startOfMonth = new Date(Date.UTC(year, month, 1));
   const endOfMonth = new Date(Date.UTC(year, month + 1, 0));
+
+  // Save skipped states before clearing recurring transactions
+  const skippedStates = getSkippedStates();
 
   for (let day = 1; day <= endOfMonth.getUTCDate(); day++) {
     const dateString = `${year}-${(month + 1).toString().padStart(2, "0")}-${day
@@ -749,12 +796,17 @@ function applyRecurringTransactions(year, month) {
           );
 
           if (!existingModifiedTransaction) {
-            transactions[dateString].push({
+            const key = `${rt.amount}-${rt.type}-${rt.description}`;
+            const newTransaction = {
               amount: rt.amount,
               type: rt.type,
               description: rt.description,
               isRecurring: true,
-            });
+              // Restore skipped state if it exists
+              skipped: skippedStates[dateString]?.[key] || false,
+            };
+
+            transactions[dateString].push(newTransaction);
           }
         }
 
@@ -1364,6 +1416,18 @@ function shouldApplyRecurringTransaction(rt, startDate, currentDate) {
     default:
       return false;
   }
+}
+
+function toggleSkipTransaction(date, index) {
+  const transaction = transactions[date][index];
+  transaction.skipped = !transaction.skipped;
+
+  showNotification(`Transaction ${transaction.skipped ? "skipped" : "unskipped"}`);
+
+  saveData();
+  generateCalendar();
+  showTransactionDetails(date);
+  scheduleCloudSave(); // Add this line to trigger delayed cloud save
 }
 
 document
