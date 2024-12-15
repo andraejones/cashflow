@@ -414,3 +414,14 @@ body {
   cursor: pointer;
   color: #3498db;
 }
+
+.has-skipped {
+  position: relative;
+  padding-right: 15px;
+}
+
+.skip-indicator {
+  color: #f39c12;
+  font-size: 12px;
+  margin-top: 2px;
+}
