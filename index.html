@@ -8,35 +8,63 @@
     />
     <title>Cashflow Calendar</title>
     <link rel="stylesheet" href="styles.css" />
+    <meta
+      name="description"
+      content="Personal cashflow tracking and management calendar"
+    />
   </head>
   <body>
-    <div class="calendar">
-      <div class="header">
-        <button id="prevMonth" class="nav-btn">&#10094;</button>
-        <span id="currentMonth"></span>
-        <button id="nextMonth" class="nav-btn">&#10095;</button>
+    <div class="calendar" role="application" aria-label="Cashflow calendar">
+      <div class="header" role="heading" aria-level="1">
+        <button id="prevMonth" class="nav-btn" aria-label="Previous month">
+          &#10094;
+        </button>
+        <span id="currentMonth" role="heading" aria-level="2"></span>
+        <button id="nextMonth" class="nav-btn" aria-label="Next month">
+          &#10095;
+        </button>
       </div>
 
-      <div id="monthSummary"></div>
+      <div id="monthSummary" role="region" aria-label="Monthly summary"></div>
 
-      <div id="calendarDays" class="days"></div>
+      <div
+        id="calendarDays"
+        class="days"
+        role="grid"
+        aria-label="Calendar days"
+      ></div>
 
-      <div id="calendarOptions"></div>
+      <div
+        id="calendarOptions"
+        role="toolbar"
+        aria-label="Calendar options"
+      ></div>
     </div>
 
-    <div id="transactionModal" class="modal">
+    <div
+      id="transactionModal"
+      class="modal"
+      role="dialog"
+      aria-labelledby="modalDate"
+      aria-hidden="true"
+    >
       <div class="modal-content">
-        <span class="close">&times;</span>
-        <h3 id="modalDate"></h3>
-        <div id="transactionForm">
-          <input type="date" id="transactionDate" />
+        <span class="close" aria-label="Close">&times;</span>
+        <h3 id="modalDate" tabindex="-1"></h3>
+        <div id="transactionForm" role="form" aria-label="Add transaction">
+          <input
+            type="date"
+            id="transactionDate"
+            aria-label="Transaction date"
+          />
           <input
             type="number"
             id="transactionAmount"
             placeholder="Amount"
             step="0.01"
+            aria-label="Transaction amount"
           />
-          <select id="transactionType">
+          <select id="transactionType" aria-label="Transaction type">
             <option value="expense">Expense</option>
             <option value="income">Income</option>
             <option value="balance">Balance</option>
@@ -45,33 +73,193 @@
             type="text"
             id="transactionDescription"
             placeholder="Description"
+            aria-label="Transaction description"
           />
-          <select id="transactionRecurrence">
+          <select
+            id="transactionRecurrence"
+            aria-label="Transaction recurrence"
+          >
             <option value="once">One-time</option>
             <option value="daily">Daily</option>
             <option value="weekly">Weekly</option>
+            <option value="bi-weekly">Bi-weekly</option>
             <option value="monthly">Monthly</option>
+            <option value="semi-monthly">Twice a month</option>
+            <option value="quarterly">Quarterly</option>
+            <option value="semi-annual">Semi-annually</option>
             <option value="yearly">Yearly</option>
+            <option value="custom">Custom...</option>
           </select>
-          <button onclick="addTransaction()">Add Transaction</button>
+          <button onclick="addTransaction()" aria-label="Add transaction">
+            Add Transaction
+          </button>
         </div>
-        <div id="modalTransactions"></div>
+        <div
+          id="modalTransactions"
+          role="region"
+          aria-label="Transactions for selected date"
+        ></div>
       </div>
     </div>
 
-    <div id="searchModal" class="modal">
+    <div
+      id="searchModal"
+      class="modal"
+      role="dialog"
+      aria-labelledby="searchModalTitle"
+      aria-hidden="true"
+    >
       <div class="modal-content">
-        <span class="close">&times;</span>
-        <h3>Search Transactions</h3>
-        <input type="text" id="searchInput" placeholder="Enter search term" />
-        <button id="searchButton" onclick="performSearch()">Search</button>
-        <button id="clearSearchButton" onclick="clearSearch()" disabled>
-          Clear Results
-        </button>
-        <div id="searchResults"></div>
+        <span class="close" aria-label="Close">&times;</span>
+        <h3 id="searchModalTitle">Search Transactions</h3>
+
+        <div class="search-form">
+          <div class="search-input-container">
+            <input
+              type="text"
+              id="searchInput"
+              placeholder="Enter search term"
+              aria-label="Search term"
+            />
+            <button id="searchButton" class="primary-button">Search</button>
+            <button id="clearSearchButton" class="secondary-button" disabled>
+              Clear
+            </button>
+          </div>
+
+          <button
+            id="advancedSearchToggle"
+            aria-expanded="false"
+            class="text-button"
+          >
+            Show Advanced Options
+          </button>
+
+          <div id="advancedSearchControls" style="display: none">
+            <div class="advanced-search-grid">
+              <div class="search-filter-group">
+                <label for="dateRangeFrom">From Date:</label>
+                <input type="date" id="dateRangeFrom" aria-label="From date" />
+              </div>
+
+              <div class="search-filter-group">
+                <label for="dateRangeTo">To Date:</label>
+                <input type="date" id="dateRangeTo" aria-label="To date" />
+              </div>
+
+              <div class="search-filter-group">
+                <label for="transactionTypeFilter">Transaction Type:</label>
+                <select
+                  id="transactionTypeFilter"
+                  aria-label="Transaction type"
+                >
+                  <option value="">All Types</option>
+                  <option value="income">Income</option>
+                  <option value="expense">Expense</option>
+                  <option value="balance">Balance</option>
+                </select>
+              </div>
+
+              <div class="search-filter-group">
+                <label for="searchSortBy">Sort By:</label>
+                <select id="searchSortBy" aria-label="Sort results by">
+                  <option value="dateDesc">Date (Newest First)</option>
+                  <option value="dateAsc">Date (Oldest First)</option>
+                  <option value="amountDesc">Amount (Highest First)</option>
+                  <option value="amountAsc">Amount (Lowest First)</option>
+                  <option value="description">Description</option>
+                </select>
+              </div>
+
+              <div class="search-filter-group">
+                <label for="minAmountFilter">Min Amount:</label>
+                <input
+                  type="number"
+                  id="minAmountFilter"
+                  step="0.01"
+                  min="0"
+                  aria-label="Minimum amount"
+                />
+              </div>
+
+              <div class="search-filter-group">
+                <label for="maxAmountFilter">Max Amount:</label>
+                <input
+                  type="number"
+                  id="maxAmountFilter"
+                  step="0.01"
+                  min="0"
+                  aria-label="Maximum amount"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="searchResults" role="region" aria-live="polite"></div>
+
+        <div
+          id="paginationControls"
+          style="display: none"
+          class="pagination-controls"
+        >
+          <button
+            id="prevPageButton"
+            class="pagination-button"
+            aria-label="Previous page"
+          >
+            &laquo; Previous
+          </button>
+          <span id="currentPageInfo" class="pagination-info">Page 1 of 1</span>
+          <button
+            id="nextPageButton"
+            class="pagination-button"
+            aria-label="Next page"
+          >
+            Next &raquo;
+          </button>
+        </div>
+
+        <div class="search-actions">
+          <button id="exportResultsButton" class="secondary-button" disabled>
+            Export Results
+          </button>
+        </div>
       </div>
     </div>
 
-    <script src="script.js"></script>
+    <!-- Utility modules -->
+    <script src="js/utils.js"></script>
+
+    <!-- Core data modules -->
+    <script src="js/transaction-store.js"></script>
+    <script src="js/recurring-manager.js"></script>
+    <script src="js/calculation-service.js"></script>
+
+    <!-- UI modules -->
+    <script src="js/transaction-ui.js"></script>
+    <script src="js/calendar-ui.js"></script>
+    <script src="js/search-ui.js"></script>
+    <script src="js/cloud-sync.js"></script>
+
+    <!-- Main application -->
+    <script src="js/app.js"></script>
+    
+    <!-- Initial HTML cleanup -->
+    <script>
+      // Run this immediately to clean up any HTML artifacts showing as text
+      document.addEventListener("DOMContentLoaded", function() {
+        const bodyChildren = document.body.childNodes;
+        for (let i = 0; i < bodyChildren.length; i++) {
+          const node = bodyChildren[i];
+          if (node.nodeType === Node.TEXT_NODE && 
+              (node.textContent.includes("<div") || 
+               node.textContent.includes("modal-content"))) {
+            document.body.removeChild(node);
+            i--; // Adjust for the removed node
+          }
+        }
+      });
+    </script>
   </body>
 </html>
