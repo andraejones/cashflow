@@ -444,7 +444,9 @@ class RecurringTransactionManager {
       }
     });
 
-    this.store.saveData();
+    // Save data WITHOUT marking as a data modification
+    // This is just applying recurring transactions during UI refresh
+    this.store.saveData(false);
   }
 
   /**

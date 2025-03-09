@@ -7,11 +7,13 @@ class TransactionUI {
    * @param {TransactionStore} store - The transaction store
    * @param {RecurringTransactionManager} recurringManager - Recurring transaction manager
    * @param {Function} onUpdate - Callback function when transactions are updated
+   * @param {CloudSync} cloudSync - Cloud sync manager (optional)
    */
-  constructor(store, recurringManager, onUpdate) {
+  constructor(store, recurringManager, onUpdate, cloudSync = null) {
     this.store = store;
     this.recurringManager = recurringManager;
     this.onUpdate = onUpdate;
+    this.cloudSync = cloudSync;
     this.daySpecificOptions = [
       { value: "1-0", label: "First Sunday" },
       { value: "1-1", label: "First Monday" },
@@ -990,6 +992,11 @@ class TransactionUI {
 
       this.showTransactionDetails(date);
       this.onUpdate();
+      
+      // Trigger cloud sync on edit
+      if (this.cloudSync) {
+        this.cloudSync.scheduleCloudSave();
+      }
 
       Utils.showNotification("Transaction updated successfully");
     } catch (error) {
@@ -1033,6 +1040,11 @@ class TransactionUI {
 
     this.showTransactionDetails(date);
     this.onUpdate();
+    
+    // Trigger cloud sync on delete
+    if (this.cloudSync) {
+      this.cloudSync.scheduleCloudSave();
+    }
 
     Utils.showNotification("Transaction deleted successfully");
   }
@@ -1054,6 +1066,11 @@ class TransactionUI {
 
     this.showTransactionDetails(date);
     this.onUpdate();
+    
+    // Trigger cloud sync on skip toggle
+    if (this.cloudSync) {
+      this.cloudSync.scheduleCloudSave();
+    }
 
     Utils.showNotification(
       `Transaction ${newStatus ? "skipped" : "unskipped"} successfully`
@@ -1187,6 +1204,11 @@ class TransactionUI {
 
       // Update the calendar
       this.onUpdate();
+      
+      // Trigger cloud sync on add
+      if (this.cloudSync) {
+        this.cloudSync.scheduleCloudSave();
+      }
 
       // Show success notification
       const typeText =

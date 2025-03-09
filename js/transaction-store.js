@@ -30,10 +30,10 @@ class TransactionStore {
   /**
    * Trigger all registered save callbacks
    */
-  triggerSaveCallbacks() {
+  triggerSaveCallbacks(isDataModified = false) {
     this.onSaveCallbacks.forEach(callback => {
       try {
-        callback();
+        callback(isDataModified);
       } catch (error) {
         console.error("Error in save callback:", error);
       }
@@ -97,8 +97,9 @@ class TransactionStore {
 
   /**
    * Save data to storage
+   * @param {boolean} isDataModified - Whether the data was modified by a user action (default: true)
    */
-  saveData() {
+  saveData(isDataModified = true) {
     try {
       this.storage.setItem("transactions", JSON.stringify(this.transactions));
       this.storage.setItem(
@@ -114,8 +115,9 @@ class TransactionStore {
         JSON.stringify(this.skippedTransactions)
       );
       
-      // Trigger callbacks for auto-save
-      this.triggerSaveCallbacks();
+      // Trigger callbacks with the isDataModified flag
+      // This helps callbacks distinguish between UI refreshes and actual data changes
+      this.triggerSaveCallbacks(isDataModified);
     } catch (error) {
       console.error("Error saving data to storage:", error);
     }

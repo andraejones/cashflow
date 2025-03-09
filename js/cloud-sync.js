@@ -15,8 +15,10 @@ class CloudSync {
     
     // Register callback with store to be notified when data changes
     if (typeof this.store.registerSaveCallback === 'function') {
-      this.store.registerSaveCallback(() => {
-        if (this.autoSyncEnabled) {
+      this.store.registerSaveCallback((isDataModified) => {
+        // Only schedule cloud save when data is actually modified
+        // and not just during UI refresh or month navigation
+        if (this.autoSyncEnabled && isDataModified) {
           this.scheduleCloudSave();
         }
       });
