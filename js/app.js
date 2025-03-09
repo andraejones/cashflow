@@ -16,11 +16,17 @@ class CashflowApp {
       this.recurringManager
     );
 
-    // Create UI components with update callbacks
+    // Create cloud sync before UI components
+    this.cloudSync = new CloudSync(this.store, () => this.updateUI());
+
+    // Create UI components with update callbacks that include cloud sync
     this.transactionUI = new TransactionUI(
       this.store,
       this.recurringManager,
-      () => this.updateUI()
+      () => {
+        this.updateUI();
+        this.cloudSync.scheduleCloudSave(); // Schedule auto-save after transaction changes
+      }
     );
 
     this.calendarUI = new CalendarUI(
@@ -35,8 +41,6 @@ class CashflowApp {
       this.recurringManager,
       this.transactionUI
     );
-
-    this.cloudSync = new CloudSync(this.store, () => this.updateUI());
 
     // Initialize the app
     this.init();
@@ -159,6 +163,10 @@ class CashflowApp {
               // Invalidate caches after import
               this.calculationService.invalidateCache();
               this.updateUI();
+              
+              // Schedule cloud sync after import
+              this.cloudSync.scheduleCloudSave();
+              
               Utils.showNotification("Data imported successfully!");
             } else {
               throw new Error("Invalid file format");
@@ -209,6 +217,9 @@ class CashflowApp {
         
         // Update the UI
         this.updateUI();
+        
+        // Schedule a cloud sync to update cloud data too (if credentials are re-entered)
+        this.cloudSync.scheduleCloudSave();
         
         Utils.showNotification("All data has been reset.");
       }

@@ -12,8 +12,32 @@ class TransactionStore {
     this.monthlyBalances = {};
     this.recurringTransactions = [];
     this.skippedTransactions = {};
+    this.onSaveCallbacks = [];
 
     this.loadData();
+  }
+
+  /**
+   * Register a callback to be called after data is saved
+   * @param {Function} callback - Callback function
+   */
+  registerSaveCallback(callback) {
+    if (typeof callback === 'function') {
+      this.onSaveCallbacks.push(callback);
+    }
+  }
+
+  /**
+   * Trigger all registered save callbacks
+   */
+  triggerSaveCallbacks() {
+    this.onSaveCallbacks.forEach(callback => {
+      try {
+        callback();
+      } catch (error) {
+        console.error("Error in save callback:", error);
+      }
+    });
   }
 
   /**
@@ -89,6 +113,9 @@ class TransactionStore {
         "skippedTransactions",
         JSON.stringify(this.skippedTransactions)
       );
+      
+      // Trigger callbacks for auto-save
+      this.triggerSaveCallbacks();
     } catch (error) {
       console.error("Error saving data to storage:", error);
     }
