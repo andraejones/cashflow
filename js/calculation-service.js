@@ -208,8 +208,9 @@ class CalculationService {
     // Force recalculation of summaries
     this.invalidateCache();
 
-    // Save the updated balances
-    this.store.saveData();
+    // Save the updated balances WITHOUT marking as a data modification
+    // This is a calculated value, not a user-entered transaction
+    this.store.saveData(false);
   }
 
   /**

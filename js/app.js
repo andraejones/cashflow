@@ -19,14 +19,14 @@ class CashflowApp {
     // Create cloud sync before UI components
     this.cloudSync = new CloudSync(this.store, () => this.updateUI());
 
-    // Create UI components with update callbacks that include cloud sync
+    // Create UI components with update callbacks
     this.transactionUI = new TransactionUI(
       this.store,
       this.recurringManager,
       () => {
         this.updateUI();
-        this.cloudSync.scheduleCloudSave(); // Schedule auto-save after transaction changes
-      }
+      },
+      this.cloudSync
     );
 
     this.calendarUI = new CalendarUI(
@@ -164,8 +164,7 @@ class CashflowApp {
               this.calculationService.invalidateCache();
               this.updateUI();
               
-              // Schedule cloud sync after import
-              this.cloudSync.scheduleCloudSave();
+              // Import already triggers saveData, which will schedule cloud sync if needed
               
               Utils.showNotification("Data imported successfully!");
             } else {
@@ -218,8 +217,7 @@ class CashflowApp {
         // Update the UI
         this.updateUI();
         
-        // Schedule a cloud sync to update cloud data too (if credentials are re-entered)
-        this.cloudSync.scheduleCloudSave();
+        // Reset already triggers saveData, which will schedule cloud sync if needed
         
         Utils.showNotification("All data has been reset.");
       }
