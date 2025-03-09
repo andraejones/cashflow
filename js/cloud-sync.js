@@ -11,6 +11,55 @@ class CloudSync {
     this.store = store;
     this.onUpdate = onUpdate;
     this.saveTimeout = null;
+    this.autoSyncEnabled = true;
+    
+    // Register callback with store to be notified when data changes
+    if (typeof this.store.registerSaveCallback === 'function') {
+      this.store.registerSaveCallback(() => {
+        if (this.autoSyncEnabled) {
+          this.scheduleCloudSave();
+        }
+      });
+    }
+    
+    // Try to load auto-sync setting from localStorage
+    try {
+      const savedSetting = localStorage.getItem('auto_sync_enabled');
+      if (savedSetting !== null) {
+        this.autoSyncEnabled = savedSetting === 'true';
+      }
+    } catch (e) {
+      console.warn('Could not load auto-sync setting', e);
+    }
+  }
+
+  /**
+   * Toggle auto-sync setting
+   * @returns {boolean} New auto-sync state
+   */
+  toggleAutoSync() {
+    this.autoSyncEnabled = !this.autoSyncEnabled;
+    
+    // Save setting to localStorage
+    try {
+      localStorage.setItem('auto_sync_enabled', this.autoSyncEnabled.toString());
+    } catch (e) {
+      console.warn('Could not save auto-sync setting', e);
+    }
+    
+    if (!this.autoSyncEnabled) {
+      this.cancelPendingCloudSave();
+    }
+    
+    return this.autoSyncEnabled;
+  }
+
+  /**
+   * Check if auto-sync is enabled
+   * @returns {boolean} Auto-sync enabled state
+   */
+  isAutoSyncEnabled() {
+    return this.autoSyncEnabled;
   }
 
   /**
@@ -168,6 +217,32 @@ class CloudSync {
 
     modalContent.appendChild(gistDiv);
 
+    // Auto-sync checkbox
+    const autoSyncDiv = document.createElement("div");
+    autoSyncDiv.style.margin = "15px 0";
+    
+    const autoSyncCheck = document.createElement("input");
+    autoSyncCheck.type = "checkbox";
+    autoSyncCheck.id = "auto-sync-check";
+    autoSyncCheck.checked = this.autoSyncEnabled;
+    
+    const autoSyncLabel = document.createElement("label");
+    autoSyncLabel.setAttribute("for", "auto-sync-check");
+    autoSyncLabel.textContent = "Enable automatic cloud sync";
+    autoSyncLabel.style.marginLeft = "8px";
+    
+    autoSyncDiv.appendChild(autoSyncCheck);
+    autoSyncDiv.appendChild(autoSyncLabel);
+    
+    const autoSyncHelp = document.createElement("div");
+    autoSyncHelp.style.fontSize = "12px";
+    autoSyncHelp.style.color = "#666";
+    autoSyncHelp.style.marginLeft = "24px";
+    autoSyncHelp.textContent = "Automatically save changes to the cloud after 10 seconds of inactivity";
+    autoSyncDiv.appendChild(autoSyncHelp);
+    
+    modalContent.appendChild(autoSyncDiv);
+
     // Save button
     const saveBtn = document.createElement("button");
     saveBtn.id = "save-credentials";
@@ -201,6 +276,14 @@ class CloudSync {
       saveBtn.onclick = () => {
         const token = tokenInput.value.trim();
         const gistId = gistInput.value.trim();
+        this.autoSyncEnabled = autoSyncCheck.checked;
+        
+        // Save auto-sync setting
+        try {
+          localStorage.setItem('auto_sync_enabled', this.autoSyncEnabled.toString());
+        } catch (e) {
+          console.warn('Could not save auto-sync setting', e);
+        }
 
         if (!token) {
           alert("Please enter a GitHub token");
@@ -222,6 +305,18 @@ class CloudSync {
    * Schedule a cloud save with debounce
    */
   scheduleCloudSave() {
+    // Check if auto-sync is enabled
+    if (!this.autoSyncEnabled) {
+      return;
+    }
+    
+    // Check if we have cloud credentials
+    const { token, gistId } = this.getCloudCredentials();
+    if (!token || !gistId) {
+      // No credentials, don't schedule a save
+      return;
+    }
+    
     clearTimeout(this.saveTimeout);
     this.showPendingMessage();
 
@@ -257,6 +352,7 @@ class CloudSync {
     }
 
     pendingSpan.textContent = "⌛";
+    pendingSpan.title = "Cloud sync pending";
   }
 
   /**
@@ -360,6 +456,7 @@ class CloudSync {
       const data = {
         ...this.store.exportData(),
         lastUpdated: new Date().toISOString(),
+        autoSyncEnabled: this.autoSyncEnabled,
       };
 
       // Try to update the existing Gist
@@ -506,6 +603,12 @@ class CloudSync {
 
         if (!success) {
           throw new Error("Invalid data format in cloud storage");
+        }
+        
+        // Load auto-sync setting if available
+        if (data.autoSyncEnabled !== undefined) {
+          this.autoSyncEnabled = data.autoSyncEnabled;
+          localStorage.setItem('auto_sync_enabled', this.autoSyncEnabled.toString());
         }
 
         if (syncIndicator)
