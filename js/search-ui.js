@@ -205,6 +205,8 @@ class SearchUI {
     let typeFilter = "";
     let minAmount = 0;
     let maxAmount = Infinity;
+    let hasMinAmount = false;
+    let hasMaxAmount = false;
     
     const dateFromEl = document.getElementById("dateRangeFrom");
     if (dateFromEl) dateFrom = dateFromEl.value;
@@ -216,15 +218,32 @@ class SearchUI {
     if (typeFilterEl) typeFilter = typeFilterEl.value;
     
     const minAmountEl = document.getElementById("minAmountFilter");
-    if (minAmountEl) minAmount = parseFloat(minAmountEl.value) || 0;
-    
+    if (minAmountEl) {
+      const rawMin = minAmountEl.value.trim();
+      if (rawMin !== "") {
+        minAmount = parseFloat(rawMin);
+        hasMinAmount = !isNaN(minAmount);
+      }
+    }
+
     const maxAmountEl = document.getElementById("maxAmountFilter");
-    if (maxAmountEl) maxAmount = parseFloat(maxAmountEl.value) || Infinity;
+    if (maxAmountEl) {
+      const rawMax = maxAmountEl.value.trim();
+      if (rawMax !== "") {
+        maxAmount = parseFloat(rawMax);
+        hasMaxAmount = !isNaN(maxAmount);
+      }
+    }
 
     // If no search term and no filters are applied, show message
-    if (searchTerm === "" && 
-        !dateFrom && !dateTo && !typeFilter && 
-        isNaN(minAmount) && isNaN(maxAmount)) {
+    if (
+      searchTerm === "" &&
+      !dateFrom &&
+      !dateTo &&
+      !typeFilter &&
+      !hasMinAmount &&
+      !hasMaxAmount
+    ) {
       searchResults.innerHTML = "Please enter a search term or apply filters.";
       clearButton.disabled = true;
       exportButton.disabled = true;
@@ -267,8 +286,11 @@ class SearchUI {
           continue;
         }
 
-        // Apply amount filter
-        if (transaction.amount < minAmount || transaction.amount > maxAmount) {
+        // Apply amount filter only when specified
+        if (
+          (hasMinAmount && transaction.amount < minAmount) ||
+          (hasMaxAmount && transaction.amount > maxAmount)
+        ) {
           continue;
         }
 
