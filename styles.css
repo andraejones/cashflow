@@ -361,11 +361,6 @@ body {
 }
 
 #searchButton {
-  padding: 8px 16px;
-  background-color: #f1f1f1;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
   margin-top: 10px;
 }
 

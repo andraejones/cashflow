@@ -459,8 +459,19 @@ class TransactionUI {
 
   
   closeModals() {
-    document.getElementById("transactionModal").style.display = "none";
-    document.getElementById("searchModal").style.display = "none";
+    const transactionModal = document.getElementById("transactionModal");
+    const searchModal = document.getElementById("searchModal");
+
+    const activeEl = document.activeElement;
+    if (
+      activeEl &&
+      (transactionModal.contains(activeEl) || searchModal.contains(activeEl))
+    ) {
+      activeEl.blur();
+    }
+
+    transactionModal.style.display = "none";
+    searchModal.style.display = "none";
     document.getElementById("transactionAmount").value = "";
     document.getElementById("transactionDescription").value = "";
     document.getElementById("transactionRecurrence").value = "once";
