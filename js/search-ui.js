@@ -30,8 +30,25 @@ class SearchUI {
         }
       });
     document
+      .getElementById("searchInput")
+      .addEventListener("input", () => this.updateActionButtons());
+    document
       .getElementById("advancedSearchToggle")
       .addEventListener("click", () => this.toggleAdvancedSearch());
+
+    [
+      "dateRangeFrom",
+      "dateRangeTo",
+      "transactionTypeFilter",
+      "minAmountFilter",
+      "maxAmountFilter",
+    ].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.addEventListener("input", () => this.updateActionButtons());
+        el.addEventListener("change", () => this.updateActionButtons());
+      }
+    });
 
     document
       .getElementById("searchSortBy")
@@ -76,11 +93,13 @@ class SearchUI {
   showSearchModal() {
     const modal = document.getElementById("searchModal");
     modal.style.display = "block";
+    modal.setAttribute("aria-hidden", "false");
     document.getElementById("searchInput").value = "";
     this.clearSearch();
     setTimeout(() => {
       document.getElementById("searchInput").focus();
     }, 100);
+    this.updateActionButtons();
   }
 
   
@@ -405,5 +424,22 @@ class SearchUI {
     this.searchResults = [];
     this.totalResults = 0;
     this.currentPage = 1;
+    this.updateActionButtons();
+  }
+
+  updateActionButtons() {
+    const hasInput =
+      document.getElementById("searchInput").value.trim() !== "" ||
+      document.getElementById("dateRangeFrom").value !== "" ||
+      document.getElementById("dateRangeTo").value !== "" ||
+      document.getElementById("transactionTypeFilter").value !== "" ||
+      document.getElementById("minAmountFilter").value.trim() !== "" ||
+      document.getElementById("maxAmountFilter").value.trim() !== "";
+
+    const searchBtn = document.getElementById("searchButton");
+    const clearBtn = document.getElementById("clearSearchButton");
+
+    searchBtn.disabled = !hasInput;
+    clearBtn.disabled = !hasInput;
   }
 }
