@@ -1,3 +1,4 @@
+/* Cashflow Calendar styles */
 body {
   font-family: Arial, sans-serif;
   background: linear-gradient(to bottom right, #3498db, #2ecc71);
@@ -474,7 +475,7 @@ body {
   }
 }
 
-/* Enhanced search styles */
+
 .search-form {
   margin-bottom: 15px;
 }
@@ -587,7 +588,7 @@ body {
   justify-content: flex-end;
 }
 
-/* Advanced Recurrence Options */
+
 .advanced-recurrence-options {
   background-color: #f8f9fa;
   border-radius: 5px;
@@ -643,9 +644,9 @@ body {
   margin-right: 8px;
 }
 
-/* Mobile Responsiveness Improvements */
 
-/* Base mobile improvements */
+
+
 @media (max-width: 767px) {
   .calendar {
     max-width: 100%;
@@ -690,7 +691,7 @@ body {
   }
 }
 
-/* Small devices adjustments */
+
 @media (max-width: 480px) {
   .modal-content {
     width: 95%;
@@ -710,7 +711,7 @@ body {
     width: 100%;
     margin: 5px 0;
     padding: 10px;
-    font-size: 16px; /* Prevent zoom on mobile */
+    font-size: 16px; 
   }
 
   .balance,
@@ -719,7 +720,7 @@ body {
     font-size: 90%;
   }
 
-  /* Touch-friendly controls */
+  
   .nav-btn,
   .calendar-option,
   .edit-btn,
@@ -727,14 +728,14 @@ body {
   .skip-btn {
     padding: 8px;
     margin: 5px;
-    min-width: 44px; /* Minimum touch target size */
+    min-width: 44px; 
     min-height: 44px;
     display: inline-flex;
     justify-content: center;
     align-items: center;
   }
 
-  /* Transaction detail improvements */
+  
   #modalTransactions div {
     padding: 10px 5px;
     border-bottom: 1px solid #eee;
@@ -748,7 +749,7 @@ body {
     text-align: center;
   }
 
-  /* Improved toast visibility */
+  
   .error-toast,
   .success-toast {
     width: 90%;
@@ -758,7 +759,7 @@ body {
     text-align: center;
   }
 
-  /* Improve search modal for mobile */
+  
   .search-input-container {
     flex-direction: column;
   }
@@ -777,7 +778,7 @@ body {
     margin-bottom: 5px;
   }
   
-  /* Improved recurring options on mobile */
+  
   .option-group select,
   .option-group input[type="number"],
   .option-group input[type="date"] {
@@ -785,31 +786,31 @@ body {
   }
 }
 
-/* Add swipe support for month navigation */
+
 @media (max-width: 767px) {
   .calendar {
     touch-action: pan-y;
   }
 }
 
-/* Improve form controls for mobile */
+
 @media (max-width: 767px) {
   input[type="number"],
   input[type="text"],
   input[type="date"],
   select,
   button {
-    font-size: 16px; /* Prevent zoom on iOS */
+    font-size: 16px; 
     padding: 10px 8px;
   }
 
-  /* Better spacing for modal controls */
+  
   .close {
     font-size: 32px;
     padding: 5px;
   }
 
-  /* Improved modal positioning */
+  
   .modal-content {
     margin-top: 10%;
   }
