@@ -1,9 +1,10 @@
 // Transaction storage
 
 class TransactionStore {
-  
-  constructor(storage = localStorage) {
+
+  constructor(storage = localStorage, pinProtection = null) {
     this.storage = storage;
+    this.pinProtection = pinProtection;
     this.transactions = {};
     this.monthlyBalances = {};
     this.recurringTransactions = [];
@@ -34,13 +35,24 @@ class TransactionStore {
   
   loadData() {
     try {
-      const storedTransactions = this.storage.getItem("transactions");
-      const storedMonthlyBalances = this.storage.getItem("monthlyBalances");
-      const storedRecurringTransactions = this.storage.getItem(
-        "recurringTransactions"
+      const decrypt = (val) => {
+        if (
+          this.pinProtection &&
+          this.pinProtection.getCurrentPin() &&
+          val
+        ) {
+          return this.pinProtection.decrypt(val);
+        }
+        return val;
+      };
+
+      const storedTransactions = decrypt(this.storage.getItem("transactions"));
+      const storedMonthlyBalances = decrypt(this.storage.getItem("monthlyBalances"));
+      const storedRecurringTransactions = decrypt(
+        this.storage.getItem("recurringTransactions")
       );
-      const storedSkippedTransactions = this.storage.getItem(
-        "skippedTransactions"
+      const storedSkippedTransactions = decrypt(
+        this.storage.getItem("skippedTransactions")
       );
 
       if (storedTransactions) {
@@ -82,18 +94,31 @@ class TransactionStore {
   
   saveData(isDataModified = true) {
     try {
-      this.storage.setItem("transactions", JSON.stringify(this.transactions));
+      const encrypt = (val) => {
+        if (
+          this.pinProtection &&
+          this.pinProtection.getCurrentPin()
+        ) {
+          return this.pinProtection.encrypt(val);
+        }
+        return val;
+      };
+
+      this.storage.setItem(
+        "transactions",
+        encrypt(JSON.stringify(this.transactions))
+      );
       this.storage.setItem(
         "monthlyBalances",
-        JSON.stringify(this.monthlyBalances)
+        encrypt(JSON.stringify(this.monthlyBalances))
       );
       this.storage.setItem(
         "recurringTransactions",
-        JSON.stringify(this.recurringTransactions)
+        encrypt(JSON.stringify(this.recurringTransactions))
       );
       this.storage.setItem(
         "skippedTransactions",
-        JSON.stringify(this.skippedTransactions)
+        encrypt(JSON.stringify(this.skippedTransactions))
       );
       this.triggerSaveCallbacks(isDataModified);
     } catch (error) {
