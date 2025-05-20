@@ -1,13 +1,7 @@
-/**
- * SearchUI - Manages search functionality
- */
+// Search UI
+
 class SearchUI {
-  /**
-   * Create a new SearchUI
-   * @param {TransactionStore} store - The transaction store
-   * @param {RecurringTransactionManager} recurringManager - Recurring transaction manager
-   * @param {TransactionUI} transactionUI - Transaction UI manager
-   */
+  
   constructor(store, recurringManager, transactionUI) {
     this.store = store;
     this.recurringManager = recurringManager;
@@ -20,9 +14,7 @@ class SearchUI {
     this.initEventListeners();
   }
 
-  /**
-   * Initialize event listeners
-   */
+  
   initEventListeners() {
     document
       .getElementById("searchButton")
@@ -30,8 +22,6 @@ class SearchUI {
     document
       .getElementById("clearSearchButton")
       .addEventListener("click", () => this.clearSearch());
-
-    // Add event listener for enter key in search input
     document
       .getElementById("searchInput")
       .addEventListener("keyup", (event) => {
@@ -39,8 +29,6 @@ class SearchUI {
           this.performSearch();
         }
       });
-
-    // Add event listeners for advanced search controls
     document
       .getElementById("advancedSearchToggle")
       .addEventListener("click", () => this.toggleAdvancedSearch());
@@ -60,8 +48,6 @@ class SearchUI {
     document
       .getElementById("nextPageButton")
       .addEventListener("click", () => this.changePage(1));
-
-    // Make sure the modal is accessible with keyboard
     document
       .getElementById("searchModal")
       .addEventListener("keydown", (event) => {
@@ -71,9 +57,7 @@ class SearchUI {
       });
   }
 
-  /**
-   * Toggle advanced search options visibility
-   */
+  
   toggleAdvancedSearch() {
     const advancedControls = document.getElementById("advancedSearchControls");
     const isHidden =
@@ -88,25 +72,18 @@ class SearchUI {
     toggleButton.setAttribute("aria-expanded", isHidden ? "true" : "false");
   }
 
-  /**
-   * Show the search modal
-   */
+  
   showSearchModal() {
     const modal = document.getElementById("searchModal");
     modal.style.display = "block";
     document.getElementById("searchInput").value = "";
     this.clearSearch();
-
-    // Focus the search input
     setTimeout(() => {
       document.getElementById("searchInput").focus();
     }, 100);
   }
 
-  /**
-   * Change the current page of search results
-   * @param {number} delta - Page change amount (+1 or -1)
-   */
+  
   changePage(delta) {
     const newPage = this.currentPage + delta;
     if (
@@ -120,9 +97,7 @@ class SearchUI {
     this.updateSearchResults();
   }
 
-  /**
-   * Export search results to CSV
-   */
+  
   exportSearchResults() {
     if (this.searchResults.length === 0) {
       if (typeof Utils !== 'undefined' && typeof Utils.showNotification === 'function') {
@@ -132,14 +107,11 @@ class SearchUI {
       }
       return;
     }
-
-    // Create CSV content
     let csvContent = "Date,Type,Amount,Description,Recurring\n";
 
     this.searchResults.forEach(({ date, transaction }) => {
       const formattedDate = date.split("-").join("/");
       const amount = transaction.amount.toFixed(2);
-      // Properly escape description for CSV: replace commas and escape quotes
       const description = transaction.description.replace(/,/g, " ").replace(/"/g, '""');
       const type = transaction.type;
       const recurring = transaction.recurringId ? "Yes" : "No";
@@ -148,7 +120,6 @@ class SearchUI {
     });
 
     try {
-      // Create and download the file
       const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8" });
       
       if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
@@ -181,9 +152,7 @@ class SearchUI {
     }
   }
 
-  /**
-   * Perform search based on input
-   */
+  
   performSearch() {
     const searchTerm = document
       .getElementById("searchInput")
@@ -198,8 +167,6 @@ class SearchUI {
     this.searchResults = [];
     this.totalResults = 0;
     this.currentPage = 1;
-
-    // Safely get advanced search filters
     let dateFrom = "";
     let dateTo = "";
     let typeFilter = "";
@@ -234,8 +201,6 @@ class SearchUI {
         hasMaxAmount = !isNaN(maxAmount);
       }
     }
-
-    // If no search term and no filters are applied, show message
     if (
       searchTerm === "" &&
       !dateFrom &&
@@ -253,8 +218,6 @@ class SearchUI {
 
     let foundTransactions = [];
     const transactions = this.store.getTransactions();
-
-    // Helper function to check if a number matches the search term
     const matchesAmount = (amount, searchTerm) => {
       const searchNumber = parseFloat(searchTerm);
       if (!isNaN(searchNumber)) {
@@ -264,13 +227,11 @@ class SearchUI {
     };
 
     for (const date in transactions) {
-      // Apply date filter
       if ((dateFrom && date < dateFrom) || (dateTo && date > dateTo)) {
         continue;
       }
 
       for (const transaction of transactions[date]) {
-        // Skip hidden (already skipped) recurring transactions
         if (
           transaction.recurringId &&
           this.recurringManager.isTransactionSkipped(
@@ -280,21 +241,15 @@ class SearchUI {
         ) {
           continue;
         }
-
-        // Apply type filter
         if (typeFilter && transaction.type !== typeFilter) {
           continue;
         }
-
-        // Apply amount filter only when specified
         if (
           (hasMinAmount && transaction.amount < minAmount) ||
           (hasMaxAmount && transaction.amount > maxAmount)
         ) {
           continue;
         }
-
-        // If search term is empty, include all transactions that pass filters
         if (searchTerm === "") {
           foundTransactions.push({
             date: date,
@@ -302,16 +257,10 @@ class SearchUI {
           });
           continue;
         }
-
-        // Search by description
         const descriptionMatch = transaction.description
           .toLowerCase()
           .includes(searchTerm);
-
-        // Search by amount (exact match)
         const amountMatch = matchesAmount(transaction.amount, searchTerm);
-
-        // Search by formatted amount with currency symbol
         const formattedAmount = transaction.amount.toFixed(2);
         const formattedAmountMatch =
           formattedAmount === searchTerm ||
@@ -329,18 +278,12 @@ class SearchUI {
         }
       }
     }
-
-    // Store the total results count
     this.totalResults = foundTransactions.length;
     this.searchResults = foundTransactions;
-
-    // Apply sorting
     this.updateSearchResults();
   }
 
-  /**
-   * Update the display of search results (for pagination and sorting)
-   */
+  
   updateSearchResults() {
     const searchResults = document.getElementById("searchResults");
     const clearButton = document.getElementById("clearSearchButton");
@@ -360,8 +303,6 @@ class SearchUI {
       paginationControls.style.display = "none";
       return;
     }
-
-    // Apply sorting
     const sortByEl = document.getElementById("searchSortBy");
     const sortBy = sortByEl ? sortByEl.value : "dateDesc";
     let sortedResults = [...this.searchResults];
@@ -379,21 +320,15 @@ class SearchUI {
         a.transaction.description.localeCompare(b.transaction.description)
       );
     }
-
-    // Create header for search results
     const headerDiv = document.createElement("div");
     headerDiv.className = "search-results-header";
     headerDiv.innerHTML = `Found ${this.totalResults} matching transaction${
       this.totalResults > 1 ? "s" : ""
     }`;
     searchResults.appendChild(headerDiv);
-
-    // Calculate pagination
     const totalPages = Math.ceil(this.totalResults / this.resultsPerPage);
     const startIdx = (this.currentPage - 1) * this.resultsPerPage;
     const endIdx = Math.min(startIdx + this.resultsPerPage, this.totalResults);
-
-    // Update pagination display
     if (pageInfo) pageInfo.textContent = `Page ${this.currentPage} of ${totalPages}`;
     if (prevButton) prevButton.disabled = this.currentPage <= 1;
     if (nextButton) nextButton.disabled = this.currentPage >= totalPages;
@@ -401,8 +336,6 @@ class SearchUI {
       paginationControls.style.display =
         this.totalResults > this.resultsPerPage ? "flex" : "none";
     }
-
-    // Show current page of results
     const pageResults = sortedResults.slice(startIdx, endIdx);
 
     pageResults.forEach(({ date, transaction }) => {
@@ -430,14 +363,10 @@ class SearchUI {
             : ""
         }
       `;
-
-      // Add click handler to show transaction details
       resultDiv.addEventListener("click", () => {
         document.getElementById("searchModal").style.display = "none";
         this.transactionUI.showTransactionDetails(date);
       });
-
-      // Add keyboard support
       resultDiv.addEventListener("keydown", (event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
@@ -453,9 +382,7 @@ class SearchUI {
     exportButton.disabled = false;
   }
 
-  /**
-   * Clear search results
-   */
+  
   clearSearch() {
     const searchResults = document.getElementById("searchResults");
     const clearButton = document.getElementById("clearSearchButton");

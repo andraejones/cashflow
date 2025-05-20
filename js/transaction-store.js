@@ -1,11 +1,7 @@
-/**
- * TransactionStore class - Manages all transactions and balances
- */
+// Transaction storage
+
 class TransactionStore {
-  /**
-   * Create a new TransactionStore
-   * @param {Object} storage - Storage object with getItem, setItem, etc. (defaults to localStorage)
-   */
+  
   constructor(storage = localStorage) {
     this.storage = storage;
     this.transactions = {};
@@ -17,19 +13,14 @@ class TransactionStore {
     this.loadData();
   }
 
-  /**
-   * Register a callback to be called after data is saved
-   * @param {Function} callback - Callback function
-   */
+  
   registerSaveCallback(callback) {
     if (typeof callback === 'function') {
       this.onSaveCallbacks.push(callback);
     }
   }
 
-  /**
-   * Trigger all registered save callbacks
-   */
+  
   triggerSaveCallbacks(isDataModified = false) {
     this.onSaveCallbacks.forEach(callback => {
       try {
@@ -40,9 +31,7 @@ class TransactionStore {
     });
   }
 
-  /**
-   * Load data from storage
-   */
+  
   loadData() {
     try {
       const storedTransactions = this.storage.getItem("transactions");
@@ -64,14 +53,10 @@ class TransactionStore {
 
       if (storedRecurringTransactions) {
         this.recurringTransactions = JSON.parse(storedRecurringTransactions);
-
-        // Ensure all recurring transactions have an ID (for backward compatibility)
         this.recurringTransactions.forEach((rt) => {
           if (!rt.id) {
             rt.id = Utils.generateUniqueId();
           }
-          
-          // Migrate legacy recurrence types for backward compatibility
           if (rt.recurrence === "biweekly") {
             rt.recurrence = "bi-weekly";
           } else if (rt.recurrence === "semimonthly") {
@@ -87,7 +72,6 @@ class TransactionStore {
       }
     } catch (error) {
       console.error("Error loading data from storage:", error);
-      // Initialize with empty values on error
       this.transactions = {};
       this.monthlyBalances = {};
       this.recurringTransactions = [];
@@ -95,10 +79,7 @@ class TransactionStore {
     }
   }
 
-  /**
-   * Save data to storage
-   * @param {boolean} isDataModified - Whether the data was modified by a user action (default: true)
-   */
+  
   saveData(isDataModified = true) {
     try {
       this.storage.setItem("transactions", JSON.stringify(this.transactions));
@@ -114,68 +95,43 @@ class TransactionStore {
         "skippedTransactions",
         JSON.stringify(this.skippedTransactions)
       );
-      
-      // Trigger callbacks with the isDataModified flag
-      // This helps callbacks distinguish between UI refreshes and actual data changes
       this.triggerSaveCallbacks(isDataModified);
     } catch (error) {
       console.error("Error saving data to storage:", error);
     }
   }
 
-  /**
-   * Reset all data. This method always clears stored data.
-   * @returns {boolean} Always returns true
-   */
+  
   resetData() {
-    // Clear in-memory data
     this.transactions = {};
     this.monthlyBalances = {};
     this.recurringTransactions = [];
     this.skippedTransactions = {};
-
-    // Save the empty objects
     this.saveData();
     return true;
   }
 
-  /**
-   * Get all transactions
-   * @returns {Object} Transactions object
-   */
+  
   getTransactions() {
     return this.transactions;
   }
 
-  /**
-   * Get monthly balances
-   * @returns {Object} Monthly balances object
-   */
+  
   getMonthlyBalances() {
     return this.monthlyBalances;
   }
 
-  /**
-   * Get recurring transactions
-   * @returns {Array} Array of recurring transactions
-   */
+  
   getRecurringTransactions() {
     return this.recurringTransactions;
   }
 
-  /**
-   * Get skipped transactions
-   * @returns {Object} Skipped transactions by date
-   */
+  
   getSkippedTransactions() {
     return this.skippedTransactions;
   }
 
-  /**
-   * Add a transaction
-   * @param {string} date - Date string in YYYY-MM-DD format
-   * @param {Object} transaction - Transaction object
-   */
+  
   addTransaction(date, transaction) {
     if (!date || !transaction) {
       console.error("Invalid date or transaction data");
@@ -190,12 +146,7 @@ class TransactionStore {
     this.saveData();
   }
 
-  /**
-   * Update a transaction
-   * @param {string} date - Date string in YYYY-MM-DD format
-   * @param {number} index - Index of transaction to update
-   * @param {Object} updatedTransaction - New transaction data
-   */
+  
   updateTransaction(date, index, updatedTransaction) {
     if (!date || index === undefined || !updatedTransaction) {
       console.error("Invalid parameters for updateTransaction");
@@ -211,11 +162,7 @@ class TransactionStore {
     }
   }
 
-  /**
-   * Delete a transaction
-   * @param {string} date - Date string in YYYY-MM-DD format
-   * @param {number} index - Index of transaction to delete
-   */
+  
   deleteTransaction(date, index) {
     if (!date || index === undefined) {
       console.error("Invalid parameters for deleteTransaction");
@@ -233,18 +180,12 @@ class TransactionStore {
     }
   }
 
-  /**
-   * Add a recurring transaction
-   * @param {Object} recurringTransaction - The recurring transaction object
-   * @returns {string} ID of the added recurring transaction
-   */
+  
   addRecurringTransaction(recurringTransaction) {
     if (!recurringTransaction) {
       console.error("Invalid recurring transaction data");
       return null;
     }
-
-    // Ensure it has an ID
     if (!recurringTransaction.id) {
       recurringTransaction.id = Utils.generateUniqueId();
     }
@@ -255,12 +196,7 @@ class TransactionStore {
     return recurringTransaction.id;
   }
 
-  /**
-   * Update a recurring transaction
-   * @param {string} id - ID of recurring transaction to update
-   * @param {Object} updates - Properties to update
-   * @returns {boolean} True if update was successful
-   */
+  
   updateRecurringTransaction(id, updates) {
     if (!id || !updates) {
       console.error("Invalid parameters for updateRecurringTransaction");
@@ -281,11 +217,7 @@ class TransactionStore {
     return false;
   }
 
-  /**
-   * Delete a recurring transaction
-   * @param {string} id - ID of the recurring transaction to delete
-   * @returns {boolean} True if deletion was successful
-   */
+  
   deleteRecurringTransaction(id) {
     if (!id) {
       console.error("Invalid ID for deleteRecurringTransaction");
@@ -297,11 +229,7 @@ class TransactionStore {
     if (index === -1) {
       return false;
     }
-    
-    // Remove the recurring transaction
     this.recurringTransactions.splice(index, 1);
-    
-    // Remove all instances of this recurring transaction
     for (const dateKey in this.transactions) {
       this.transactions[dateKey] = this.transactions[dateKey].filter(
         t => !t.recurringId || t.recurringId !== id
@@ -311,8 +239,6 @@ class TransactionStore {
         delete this.transactions[dateKey];
       }
     }
-    
-    // Clean up any skipped instances
     for (const dateKey in this.skippedTransactions) {
       const skipIndex = this.skippedTransactions[dateKey].indexOf(id);
       if (skipIndex > -1) {
@@ -328,13 +254,7 @@ class TransactionStore {
     return true;
   }
 
-  /**
-   * Set a transaction as skipped
-   * @param {string} date - Date string in YYYY-MM-DD format
-   * @param {string} recurringId - ID of recurring transaction
-   * @param {boolean} isSkipped - Whether to skip the transaction
-   * @returns {boolean} True if operation was successful
-   */
+  
   setTransactionSkipped(date, recurringId, isSkipped) {
     if (!date || !recurringId) {
       console.error("Invalid parameters for setTransactionSkipped");
@@ -372,12 +292,7 @@ class TransactionStore {
     }
   }
 
-  /**
-   * Check if a transaction is skipped
-   * @param {string} date - Date string in YYYY-MM-DD format
-   * @param {string} recurringId - ID of recurring transaction
-   * @returns {boolean} True if transaction is skipped
-   */
+  
   isTransactionSkipped(date, recurringId) {
     if (!date || !recurringId) {
       return false;
@@ -389,10 +304,7 @@ class TransactionStore {
     );
   }
 
-  /**
-   * Export all data as a JSON object
-   * @returns {Object} All application data
-   */
+  
   exportData() {
     return {
       transactions: this.transactions,
@@ -400,15 +312,11 @@ class TransactionStore {
       recurringTransactions: this.recurringTransactions,
       skippedTransactions: this.skippedTransactions,
       lastExported: new Date().toISOString(),
-      appVersion: "2.0.0"  // Add version for compatibility checking
+      appVersion: "2.0.0"
     };
   }
 
-  /**
-   * Import data from a JSON object
-   * @param {Object} data - Data to import
-   * @returns {boolean} True if import was successful
-   */
+  
   importData(data) {
     if (!data || typeof data !== 'object') {
       console.error("Invalid data format for import");
@@ -429,14 +337,10 @@ class TransactionStore {
       this.monthlyBalances = data.monthlyBalances;
       this.recurringTransactions = data.recurringTransactions;
       this.skippedTransactions = data.skippedTransactions || {};
-
-      // Ensure all recurring transactions have IDs
       this.recurringTransactions.forEach((rt) => {
         if (!rt.id) {
           rt.id = Utils.generateUniqueId();
         }
-        
-        // Migrate legacy recurrence types
         if (rt.recurrence === "biweekly") {
           rt.recurrence = "bi-weekly";
         } else if (rt.recurrence === "semimonthly") {
@@ -445,12 +349,9 @@ class TransactionStore {
           rt.recurrence = "semi-annual";
         }
       });
-
-      // Convert legacy transactions
       Object.keys(this.transactions).forEach((date) => {
         this.transactions[date].forEach((t, index) => {
           if (t.isRecurring) {
-            // Find matching recurring transaction
             const matchingRt = this.recurringTransactions.find(
               (rt) =>
                 rt.amount === (t.originalAmount || t.amount) &&
@@ -467,8 +368,6 @@ class TransactionStore {
                 recurringId: matchingRt.id,
                 modifiedInstance: t.modifiedRecurring || false,
               };
-
-              // Handle skipped flag from old system
               if (t.skipped) {
                 this.setTransactionSkipped(date, matchingRt.id, true);
               }

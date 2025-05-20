@@ -1,30 +1,19 @@
-/**
- * CloudSync - Manages cloud synchronization
- */
+// Cloud sync
+
 class CloudSync {
-  /**
-   * Create a new CloudSync
-   * @param {TransactionStore} store - The transaction store
-   * @param {Function} onUpdate - Callback function when data is synchronized
-   */
+  
   constructor(store, onUpdate) {
     this.store = store;
     this.onUpdate = onUpdate;
     this.saveTimeout = null;
     this.autoSyncEnabled = true;
-    
-    // Register callback with store to be notified when data changes
     if (typeof this.store.registerSaveCallback === 'function') {
       this.store.registerSaveCallback((isDataModified) => {
-        // Only schedule cloud save when data is actually modified
-        // and not just during UI refresh or month navigation
         if (this.autoSyncEnabled && isDataModified) {
           this.scheduleCloudSave();
         }
       });
     }
-    
-    // Try to load auto-sync setting from localStorage
     try {
       const savedSetting = localStorage.getItem('auto_sync_enabled');
       if (savedSetting !== null) {
@@ -35,14 +24,9 @@ class CloudSync {
     }
   }
 
-  /**
-   * Toggle auto-sync setting
-   * @returns {boolean} New auto-sync state
-   */
+  
   toggleAutoSync() {
     this.autoSyncEnabled = !this.autoSyncEnabled;
-    
-    // Save setting to localStorage
     try {
       localStorage.setItem('auto_sync_enabled', this.autoSyncEnabled.toString());
     } catch (e) {
@@ -56,33 +40,19 @@ class CloudSync {
     return this.autoSyncEnabled;
   }
 
-  /**
-   * Check if auto-sync is enabled
-   * @returns {boolean} Auto-sync enabled state
-   */
+  
   isAutoSyncEnabled() {
     return this.autoSyncEnabled;
   }
 
-  /**
-   * Encrypt a value for secure storage
-   * @param {string} value - Value to encrypt
-   * @returns {string} Encrypted value
-   */
+  
   encryptValue(value) {
-    // Simple encryption for demonstration - in production, use a proper encryption library
-    // This reverses the string and encodes it with base64
     return btoa(value.split("").reverse().join(""));
   }
 
-  /**
-   * Decrypt a stored value
-   * @param {string} encryptedValue - Encrypted value to decrypt
-   * @returns {string} Decrypted value
-   */
+  
   decryptValue(encryptedValue) {
     try {
-      // Simple decryption for demonstration
       return atob(encryptedValue).split("").reverse().join("");
     } catch (error) {
       console.error("Decryption error:", error);
@@ -90,10 +60,7 @@ class CloudSync {
     }
   }
 
-  /**
-   * Get cloud credentials
-   * @returns {Object} Token and Gist ID
-   */
+  
   getCloudCredentials() {
     const encryptedToken = localStorage.getItem("github_token_encrypted");
     const token = encryptedToken ? this.decryptValue(encryptedToken) : null;
@@ -101,11 +68,7 @@ class CloudSync {
     return { token, gistId };
   }
 
-  /**
-   * Set cloud credentials
-   * @param {string} token - GitHub token
-   * @param {string} gistId - Gist ID
-   */
+  
   setCloudCredentials(token, gistId) {
     if (token) {
       const encryptedToken = this.encryptValue(token);
@@ -114,35 +77,25 @@ class CloudSync {
     localStorage.setItem("gist_id", gistId);
   }
 
-  /**
-   * Clear cloud credentials
-   */
+  
   clearCloudCredentials() {
     localStorage.removeItem("github_token_encrypted");
-    localStorage.removeItem("github_token"); // Remove legacy unencrypted token
+    localStorage.removeItem("github_token");
     localStorage.removeItem("gist_id");
   }
 
-  /**
-   * Prompt for cloud credentials
-   * @returns {Promise<Object>} Promise resolving to token and gistId
-   */
+  
   async promptForCredentials() {
-    // Check if credentials already exist
     const credentials = this.getCloudCredentials();
     if (credentials.token && credentials.gistId) {
       return credentials;
     }
-
-    // Create modal element properly
     const modal = document.createElement("div");
     modal.className = "modal";
     modal.style.display = "block";
     modal.setAttribute("role", "dialog");
     modal.setAttribute("aria-labelledby", "cloud-sync-title");
     modal.setAttribute("aria-modal", "true");
-
-    // Create modal content as DOM elements rather than HTML string
     const modalContent = document.createElement("div");
     modalContent.className = "modal-content";
     modalContent.style.maxWidth = "400px";
@@ -162,8 +115,6 @@ class CloudSync {
     const introText = document.createElement("p");
     introText.textContent = "Please enter your GitHub credentials:";
     modalContent.appendChild(introText);
-
-    // Token Input
     const tokenDiv = document.createElement("div");
     tokenDiv.style.margin = "15px 0";
 
@@ -190,8 +141,6 @@ class CloudSync {
     tokenDiv.appendChild(tokenHelp);
 
     modalContent.appendChild(tokenDiv);
-
-    // Gist ID Input
     const gistDiv = document.createElement("div");
     gistDiv.style.margin = "15px 0";
 
@@ -218,8 +167,6 @@ class CloudSync {
     gistDiv.appendChild(gistHelp);
 
     modalContent.appendChild(gistDiv);
-
-    // Auto-sync checkbox
     const autoSyncDiv = document.createElement("div");
     autoSyncDiv.style.margin = "15px 0";
     
@@ -244,8 +191,6 @@ class CloudSync {
     autoSyncDiv.appendChild(autoSyncHelp);
     
     modalContent.appendChild(autoSyncDiv);
-
-    // Save button
     const saveBtn = document.createElement("button");
     saveBtn.id = "save-credentials";
     saveBtn.style.padding = "8px 16px";
@@ -256,8 +201,6 @@ class CloudSync {
     saveBtn.style.cursor = "pointer";
     saveBtn.textContent = "Save Credentials";
     modalContent.appendChild(saveBtn);
-
-    // Note text
     const noteText = document.createElement("p");
     noteText.style.fontSize = "12px";
     noteText.style.color = "#666";
@@ -265,8 +208,6 @@ class CloudSync {
     noteText.textContent =
       "Note: Credentials are stored locally in your browser and can be cleared using the Reset option.";
     modalContent.appendChild(noteText);
-
-    // Append the modal to the body
     document.body.appendChild(modal);
 
     return new Promise((resolve, reject) => {
@@ -279,8 +220,6 @@ class CloudSync {
         const token = tokenInput.value.trim();
         const gistId = gistInput.value.trim();
         this.autoSyncEnabled = autoSyncCheck.checked;
-        
-        // Save auto-sync setting
         try {
           localStorage.setItem('auto_sync_enabled', this.autoSyncEnabled.toString());
         } catch (e) {
@@ -295,27 +234,19 @@ class CloudSync {
         document.body.removeChild(modal);
         resolve({ token, gistId });
       };
-
-      // Focus on the first input field
       setTimeout(() => {
         tokenInput.focus();
       }, 100);
     });
   }
 
-  /**
-   * Schedule a cloud save with debounce
-   */
+  
   scheduleCloudSave() {
-    // Check if auto-sync is enabled
     if (!this.autoSyncEnabled) {
       return;
     }
-    
-    // Check if we have cloud credentials
     const { token, gistId } = this.getCloudCredentials();
     if (!token || !gistId) {
-      // No credentials, don't schedule a save
       return;
     }
     
@@ -326,20 +257,16 @@ class CloudSync {
       this.saveToCloud().finally(() => {
         this.clearPendingMessage();
       });
-    }, 10000); // 10 second debounce
+    }, 10000);
   }
 
-  /**
-   * Cancel pending cloud save
-   */
+  
   cancelPendingCloudSave() {
     clearTimeout(this.saveTimeout);
     this.clearPendingMessage();
   }
 
-  /**
-   * Show pending save message
-   */
+  
   showPendingMessage() {
     const currentMonth = document.getElementById("currentMonth");
     let pendingSpan = document.getElementById("pendingMessage");
@@ -357,9 +284,7 @@ class CloudSync {
     pendingSpan.title = "Cloud sync pending";
   }
 
-  /**
-   * Clear pending save message
-   */
+  
   clearPendingMessage() {
     const pendingSpan = document.getElementById("pendingMessage");
     if (pendingSpan) {
@@ -367,12 +292,7 @@ class CloudSync {
     }
   }
 
-  /**
-   * Create a new Gist
-   * @param {string} token - GitHub token
-   * @param {Object} data - Data to save
-   * @returns {Promise<string>} The new Gist ID
-   */
+  
   async createNewGist(token, data) {
     try {
       const response = await fetch("https://api.github.com/gists", {
@@ -407,10 +327,7 @@ class CloudSync {
     }
   }
 
-  /**
-   * Save data to the cloud (GitHub Gist)
-   * @returns {Promise<void>}
-   */
+  
   async saveToCloud() {
     const syncIndicator = document.querySelector(".cloud-sync-indicator");
     if (syncIndicator) syncIndicator.className = "cloud-sync-indicator syncing";
@@ -423,8 +340,6 @@ class CloudSync {
           const credentials = await this.promptForCredentials();
           token = credentials.token;
           gistId = credentials.gistId;
-          
-          // If no gistId provided, create a new Gist
           if (!gistId) {
             const data = {
               ...this.store.exportData(),
@@ -434,8 +349,6 @@ class CloudSync {
             Utils.showNotification("Creating new Gist...");
             gistId = await this.createNewGist(token, data);
             Utils.showNotification(`New Gist created with ID: ${gistId}`);
-            
-            // Save the credentials with the new Gist ID
             this.setCloudCredentials(token, gistId);
             
             if (syncIndicator)
@@ -460,8 +373,6 @@ class CloudSync {
         lastUpdated: new Date().toISOString(),
         autoSyncEnabled: this.autoSyncEnabled,
       };
-
-      // Try to update the existing Gist
       const response = await fetch(`https://api.github.com/gists/${gistId}`, {
         method: "PATCH",
         headers: {
@@ -484,7 +395,6 @@ class CloudSync {
           throw new Error("Invalid GitHub token or missing gist permissions");
         }
         if (response.status === 404) {
-          // Gist not found, prompt to create a new one
           const createNew = confirm("Gist not found. Would you like to create a new one?");
           if (createNew) {
             Utils.showNotification("Creating new Gist...");
@@ -527,10 +437,7 @@ class CloudSync {
     }
   }
 
-  /**
-   * Load data from the cloud (GitHub Gist)
-   * @returns {Promise<void>}
-   */
+  
   async loadFromCloud() {
     const syncIndicator = document.querySelector(".cloud-sync-indicator");
     if (syncIndicator) syncIndicator.className = "cloud-sync-indicator syncing";
@@ -606,8 +513,6 @@ class CloudSync {
         if (!success) {
           throw new Error("Invalid data format in cloud storage");
         }
-        
-        // Load auto-sync setting if available
         if (data.autoSyncEnabled !== undefined) {
           this.autoSyncEnabled = data.autoSyncEnabled;
           localStorage.setItem('auto_sync_enabled', this.autoSyncEnabled.toString());
