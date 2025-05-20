@@ -50,13 +50,12 @@ class CashflowApp {
   
   cleanUpHtmlArtifacts() {
     const bodyChildren = document.body.childNodes;
-    for (let i = 0; i < bodyChildren.length; i++) {
+    for (let i = bodyChildren.length - 1; i >= 0; i--) {
       const node = bodyChildren[i];
       if (node.nodeType === Node.TEXT_NODE && 
           (node.textContent.includes("<div") || 
            node.textContent.includes("modal-content"))) {
         document.body.removeChild(node);
-        i--;
       }
     }
   }
