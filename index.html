@@ -228,35 +228,28 @@
       </div>
     </div>
 
-    <!-- Utility modules -->
     <script src="js/utils.js"></script>
 
-    <!-- Core data modules -->
     <script src="js/transaction-store.js"></script>
     <script src="js/recurring-manager.js"></script>
     <script src="js/calculation-service.js"></script>
 
-    <!-- UI modules -->
     <script src="js/transaction-ui.js"></script>
     <script src="js/calendar-ui.js"></script>
     <script src="js/search-ui.js"></script>
     <script src="js/cloud-sync.js"></script>
 
-    <!-- Main application -->
     <script src="js/app.js"></script>
-    
-    <!-- Initial HTML cleanup -->
     <script>
-      // Run this immediately to clean up any HTML artifacts showing as text
       document.addEventListener("DOMContentLoaded", function() {
         const bodyChildren = document.body.childNodes;
         for (let i = 0; i < bodyChildren.length; i++) {
           const node = bodyChildren[i];
-          if (node.nodeType === Node.TEXT_NODE && 
-              (node.textContent.includes("<div") || 
+          if (node.nodeType === Node.TEXT_NODE &&
+              (node.textContent.includes("<div") ||
                node.textContent.includes("modal-content"))) {
             document.body.removeChild(node);
-            i--; // Adjust for the removed node
+            i--;
           }
         }
       });

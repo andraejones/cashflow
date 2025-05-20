@@ -1,14 +1,7 @@
-/**
- * TransactionUI - Manages transaction UI interactions
- */
+// Transaction UI
+
 class TransactionUI {
-  /**
-   * Create a new TransactionUI
-   * @param {TransactionStore} store - The transaction store
-   * @param {RecurringTransactionManager} recurringManager - Recurring transaction manager
-   * @param {Function} onUpdate - Callback function when transactions are updated
-   * @param {CloudSync} cloudSync - Cloud sync manager (optional)
-   */
+  
   constructor(store, recurringManager, onUpdate, cloudSync = null) {
     this.store = store;
     this.recurringManager = recurringManager;
@@ -55,18 +48,13 @@ class TransactionUI {
     this.initEventListeners();
   }
 
-  /**
-   * Initialize event listeners
-   */
+  
   initEventListeners() {
-    // Close buttons for modals
     document.querySelectorAll(".close").forEach((closeBtn) => {
       closeBtn.onclick = () => {
         this.closeModals();
       };
     });
-
-    // Close modal when clicking outside
     window.onclick = (event) => {
       const transactionModal = document.getElementById("transactionModal");
       const searchModal = document.getElementById("searchModal");
@@ -74,15 +62,11 @@ class TransactionUI {
         this.closeModals();
       }
     };
-
-    // Add keyboard support for closing modals with Escape key
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {
         this.closeModals();
       }
     });
-
-    // Transaction type change handler
     const transactionType = document.getElementById("transactionType");
     const recurrenceSelect = document.getElementById("transactionRecurrence");
     const transactionDescription = document.getElementById("transactionDescription");
@@ -100,20 +84,13 @@ class TransactionUI {
         transactionDescription.placeholder = "Description";
       }
     });
-
-    // Recurrence change handler
     document.getElementById("transactionRecurrence").addEventListener("change", () => {
       this.updateRecurrenceOptions();
     });
-
-    // Add keyboard trap for transaction modal
     this.setupFocusTrap("transactionModal");
   }
 
-  /**
-   * Set up focus trap for modals
-   * @param {string} modalId - ID of the modal element
-   */
+  
   setupFocusTrap(modalId) {
     const modal = document.getElementById(modalId);
 
@@ -125,13 +102,10 @@ class TransactionUI {
 
         const firstElement = focusableElements[0];
         const lastElement = focusableElements[focusableElements.length - 1];
-
-        // If shift+tab on first element, move to last
         if (event.shiftKey && document.activeElement === firstElement) {
           event.preventDefault();
           lastElement.focus();
         }
-        // If tab on last element, move to first
         else if (!event.shiftKey && document.activeElement === lastElement) {
           event.preventDefault();
           firstElement.focus();
@@ -140,24 +114,16 @@ class TransactionUI {
     });
   }
 
-  /**
-   * Format a date as MM-DD-YY
-   * @param {string} dateString - Date string in YYYY-MM-DD format
-   * @returns {string} Date in MM-DD-YY format
-   */
+  
   formatShortDisplayDate(dateString) {
     if (!dateString) return "";
     const [year, month, day] = dateString.split("-");
     return `${month}-${day}-${year.slice(2)}`;
   }
 
-  /**
-   * Update recurrence options based on selected recurrence type
-   */
+  
   updateRecurrenceOptions() {
     const recurrenceType = document.getElementById("transactionRecurrence").value;
-    
-    // Remove any existing advanced options
     const existingOptions = document.getElementById("advancedRecurrenceOptions");
     if (existingOptions) {
       existingOptions.remove();
@@ -166,42 +132,24 @@ class TransactionUI {
     if (recurrenceType === "once") {
       return;
     }
-    
-    // Create advanced options container
     const advancedOptions = document.createElement("div");
     advancedOptions.id = "advancedRecurrenceOptions";
     advancedOptions.className = "advanced-recurrence-options";
-    
-    // Add options based on recurrence type
     if (recurrenceType === "monthly") {
-      // Day-specific options (e.g., first Monday)
       this.addDaySpecificOptions(advancedOptions);
     } else if (recurrenceType === "semi-monthly") {
-      // Semi-monthly date options
       this.addSemiMonthlyOptions(advancedOptions);
     } else if (recurrenceType === "custom") {
-      // Custom interval options
       this.addCustomIntervalOptions(advancedOptions);
     }
-    
-    // Business day adjustment option for all recurring types
     this.addBusinessDayOptions(advancedOptions);
-    
-    // Variable amount options
     this.addVariableAmountOptions(advancedOptions);
-    
-    // End condition options
     this.addEndConditionOptions(advancedOptions);
-    
-    // Add advanced options container to the form
     const transactionForm = document.getElementById("transactionForm");
     transactionForm.appendChild(advancedOptions);
   }
   
-  /**
-   * Add day-specific options to container (e.g., First Monday)
-   * @param {HTMLElement} container - Container to add options to
-   */
+  
   addDaySpecificOptions(container) {
     const group = document.createElement("div");
     group.className = "option-group";
@@ -213,14 +161,10 @@ class TransactionUI {
     const daySpecificSelect = document.createElement("select");
     daySpecificSelect.id = "daySpecificOption";
     daySpecificSelect.name = "daySpecificOption";
-    
-    // Add "Normal monthly" option
     const defaultOption = document.createElement("option");
     defaultOption.value = "";
     defaultOption.textContent = "Same day each month";
     daySpecificSelect.appendChild(defaultOption);
-    
-    // Add day-specific options
     this.daySpecificOptions.forEach(option => {
       const optionElement = document.createElement("option");
       optionElement.value = option.value;
@@ -233,10 +177,7 @@ class TransactionUI {
     container.appendChild(group);
   }
   
-  /**
-   * Add semi-monthly options to container
-   * @param {HTMLElement} container - Container to add options to
-   */
+  
   addSemiMonthlyOptions(container) {
     const group = document.createElement("div");
     group.className = "option-group";
@@ -248,18 +189,12 @@ class TransactionUI {
     const helpText = document.createElement("span");
     helpText.className = "help-text";
     helpText.textContent = "Select two days of the month";
-    
-    // First day selection
     const firstDaySelect = document.createElement("select");
     firstDaySelect.id = "semiMonthlyFirstDay";
     firstDaySelect.name = "semiMonthlyFirstDay";
-    
-    // Second day selection
     const secondDaySelect = document.createElement("select");
     secondDaySelect.id = "semiMonthlySecondDay";
     secondDaySelect.name = "semiMonthlySecondDay";
-    
-    // Add options for days 1-28
     for (let i = 1; i <= 28; i++) {
       const firstOption = document.createElement("option");
       firstOption.value = i;
@@ -271,14 +206,10 @@ class TransactionUI {
       secondOption.textContent = i;
       secondDaySelect.appendChild(secondOption);
     }
-    
-    // Add last day of month option
     const lastDayOption = document.createElement("option");
     lastDayOption.value = "last";
     lastDayOption.textContent = "Last day";
     secondDaySelect.appendChild(lastDayOption);
-    
-    // Set defaults to 1st and 15th
     firstDaySelect.value = 1;
     secondDaySelect.value = 15;
     
@@ -293,10 +224,7 @@ class TransactionUI {
     container.appendChild(group);
   }
   
-  /**
-   * Add custom interval options to container
-   * @param {HTMLElement} container - Container to add options to
-   */
+  
   addCustomIntervalOptions(container) {
     const group = document.createElement("div");
     group.className = "option-group";
@@ -339,10 +267,7 @@ class TransactionUI {
     container.appendChild(group);
   }
   
-  /**
-   * Add business day adjustment options to container
-   * @param {HTMLElement} container - Container to add options to
-   */
+  
   addBusinessDayOptions(container) {
     const group = document.createElement("div");
     group.className = "option-group";
@@ -376,15 +301,10 @@ class TransactionUI {
     container.appendChild(group);
   }
   
-  /**
-   * Add variable amount options to container
-   * @param {HTMLElement} container - Container to add options to
-   */
+  
   addVariableAmountOptions(container) {
     const group = document.createElement("div");
     group.className = "option-group";
-    
-    // Variable amount checkbox
     const checkboxDiv = document.createElement("div");
     
     const checkbox = document.createElement("input");
@@ -398,8 +318,6 @@ class TransactionUI {
     
     checkboxDiv.appendChild(checkbox);
     checkboxDiv.appendChild(checkboxLabel);
-    
-    // Variable amount options (initially hidden)
     const variableOptions = document.createElement("div");
     variableOptions.id = "variableAmountOptions";
     variableOptions.style.display = "none";
@@ -424,8 +342,6 @@ class TransactionUI {
     variableOptions.appendChild(document.createElement("br"));
     variableOptions.appendChild(percentInput);
     variableOptions.appendChild(percentSign);
-    
-    // Toggle variable options display
     checkbox.addEventListener("change", function() {
       variableOptions.style.display = this.checked ? "block" : "none";
     });
@@ -436,22 +352,15 @@ class TransactionUI {
     container.appendChild(group);
   }
   
-  /**
-   * Add end condition options to container
-   * @param {HTMLElement} container - Container to add options to
-   */
+  
   addEndConditionOptions(container) {
     const group = document.createElement("div");
     group.className = "option-group";
     
     const label = document.createElement("label");
     label.textContent = "End condition:";
-    
-    // Radio buttons for end condition types
     const radioGroup = document.createElement("div");
     radioGroup.className = "radio-group";
-    
-    // No end date option
     const noEndRadioDiv = document.createElement("div");
     
     const noEndRadio = document.createElement("input");
@@ -467,8 +376,6 @@ class TransactionUI {
     
     noEndRadioDiv.appendChild(noEndRadio);
     noEndRadioDiv.appendChild(noEndLabel);
-    
-    // End by date option
     const endDateRadioDiv = document.createElement("div");
     
     const endDateRadio = document.createElement("input");
@@ -491,8 +398,6 @@ class TransactionUI {
     endDateRadioDiv.appendChild(endDateLabel);
     endDateRadioDiv.appendChild(document.createElement("br"));
     endDateRadioDiv.appendChild(endDateInput);
-    
-    // End after occurrences option
     const endOccurrenceRadioDiv = document.createElement("div");
     
     const endOccurrenceRadio = document.createElement("input");
@@ -521,8 +426,6 @@ class TransactionUI {
     endOccurrenceRadioDiv.appendChild(endOccurrenceLabel);
     endOccurrenceRadioDiv.appendChild(endOccurrenceInput);
     endOccurrenceRadioDiv.appendChild(occurrencesText);
-    
-    // Toggle input disabled states based on radio selection
     noEndRadio.addEventListener("change", function() {
       if (this.checked) {
         endDateInput.disabled = true;
@@ -554,33 +457,24 @@ class TransactionUI {
     container.appendChild(group);
   }
 
-  /**
-   * Close all open modals
-   */
+  
   closeModals() {
     document.getElementById("transactionModal").style.display = "none";
     document.getElementById("searchModal").style.display = "none";
     document.getElementById("transactionAmount").value = "";
     document.getElementById("transactionDescription").value = "";
     document.getElementById("transactionRecurrence").value = "once";
-
-    // Remove any advanced options
     const advancedOptions = document.getElementById("advancedRecurrenceOptions");
     if (advancedOptions) {
       advancedOptions.remove();
     }
-
-    // Set aria-hidden to true when closed
     document
       .getElementById("transactionModal")
       .setAttribute("aria-hidden", "true");
     document.getElementById("searchModal").setAttribute("aria-hidden", "true");
   }
 
-  /**
-   * Show transaction details for a specific date
-   * @param {string} date - Date string in YYYY-MM-DD format
-   */
+  
   showTransactionDetails(date) {
     try {
       console.log('Opening transaction modal for date:', date);
@@ -600,30 +494,20 @@ class TransactionUI {
       }
 
       transactionDescriptionInput.style.display = "";
-
-      // Set the date in the hidden input
       transactionDate.value = date;
-
-      // Format the date for display
       const formattedDate = Utils.formatDisplayDate(date);
 
       modalDate.textContent = formattedDate;
       modalTransactions.innerHTML = "";
-
-      // Reset and update transaction type dropdown
       transactionType.innerHTML = `
         <option value="expense">Expense</option>
         <option value="income">Income</option>
         <option value="balance">Balance</option>
       `;
-
-      // Check if there's already a balance transaction for this date
       const transactions = this.store.getTransactions();
       const hasBalanceTransaction = transactions[date]?.some(
         (t) => t.type === "balance"
       );
-
-      // Display existing transactions
       if (transactions[date]) {
         transactions[date].forEach((t, index) => {
           const transactionDiv = document.createElement("div");
@@ -641,21 +525,15 @@ class TransactionUI {
               recurrenceType = this.capitalizeFirstLetter(
                 recurringTransaction.recurrence
               );
-              
-              // Add business day adjustment info if applicable
               if (recurringTransaction.businessDayAdjustment && 
                   recurringTransaction.businessDayAdjustment !== "none") {
                 additionalInfo += ` (${this.formatBusinessDayAdjustment(recurringTransaction.businessDayAdjustment)}`;
-                
-                // Add original date if present (meaning this is an adjusted date)
                 if (t.originalDate) {
                   additionalInfo += ` orig ${this.formatShortDisplayDate(t.originalDate)}`;
                 }
                 
                 additionalInfo += `)`;
               }
-              
-              // Add day-specific info if applicable
               if (recurringTransaction.daySpecific && recurringTransaction.daySpecificData) {
                 const dayOption = this.daySpecificOptions.find(
                   option => option.value === recurringTransaction.daySpecificData
@@ -664,15 +542,11 @@ class TransactionUI {
                   additionalInfo += ` (${dayOption.label})`;
                 }
               }
-              
-              // Add variable amount info if applicable
               if (recurringTransaction.variableAmount) {
                 additionalInfo += ` (Variable: ${recurringTransaction.variablePercentage}% change)`;
               }
             }
           }
-
-          // Create the transaction display HTML
           transactionDiv.innerHTML = `
             <span class="${t.type} ${
             isSkipped ? "skipped" : ""
@@ -744,13 +618,9 @@ class TransactionUI {
               </button>
             </div>
           `;
-
-          // Add click and keyboard handlers to buttons
           const editBtn = transactionDiv.querySelector(".edit-btn");
           const deleteBtn = transactionDiv.querySelector(".delete-btn");
           const skipBtn = transactionDiv.querySelector(".skip-btn");
-
-          // Edit button
           if (editBtn) {
             editBtn.addEventListener("click", () =>
               this.showEditForm(date, index)
@@ -762,8 +632,6 @@ class TransactionUI {
               }
             });
           }
-
-          // Delete button
           if (deleteBtn) {
             deleteBtn.addEventListener("click", () =>
               this.deleteTransaction(date, index)
@@ -775,8 +643,6 @@ class TransactionUI {
               }
             });
           }
-
-          // Skip button
           if (skipBtn) {
             skipBtn.addEventListener("click", () =>
               this.toggleSkipTransaction(date, t.recurringId)
@@ -794,8 +660,6 @@ class TransactionUI {
       } else {
         modalTransactions.innerHTML = "<p>No transactions for this date.</p>";
       }
-
-      // Set initial recurrence dropdown visibility
       const recurrenceSelect = document.getElementById("transactionRecurrence");
       if (transactionType.value === "balance") {
         recurrenceSelect.value = "once";
@@ -803,8 +667,6 @@ class TransactionUI {
       } else {
         recurrenceSelect.style.display = "";
       }
-
-      // Update form state based on existing balance transaction
       if (hasBalanceTransaction) {
         const balanceOption = transactionType.querySelector(
           'option[value="balance"]'
@@ -822,13 +684,8 @@ class TransactionUI {
           balanceOption.title = "";
         }
       }
-
-      // Show the modal
       modal.style.display = "block";
-      // Set aria-hidden to false when opened
       modal.setAttribute("aria-hidden", "false");
-
-      // Set focus to first focusable element
       setTimeout(() => {
         const firstInput = modal.querySelector(
           'input:not([type="date"]), select, button'
@@ -839,16 +696,11 @@ class TransactionUI {
       }, 100);
     } catch (error) {
       console.error("Error showing transaction details:", error);
-      // Attempt a fallback way to open the modal
       this.showModalFallback(date);
     }
   }
 
-  /**
-   * Format business day adjustment for display
-   * @param {string} adjustment - Adjustment type
-   * @returns {string} Formatted display text
-   */
+  
   formatBusinessDayAdjustment(adjustment) {
     switch (adjustment) {
       case "previous":
@@ -862,10 +714,7 @@ class TransactionUI {
     }
   }
 
-  /**
-   * Fallback method to ensure the modal opens
-   * @param {string} date - Date string
-   */
+  
   showModalFallback(date) {
     try {
       const modal = document.getElementById("transactionModal");
@@ -873,24 +722,16 @@ class TransactionUI {
         alert("Transaction modal not found!");
         return;
       }
-      
-      // Set date in modal title
       const modalDate = document.getElementById("modalDate");
       if (modalDate) {
         modalDate.textContent = Utils.formatDisplayDate(date);
       }
-      
-      // Set date in hidden input
       const transactionDate = document.getElementById("transactionDate");
       if (transactionDate) {
         transactionDate.value = date;
       }
-      
-      // Force the modal to be visible
       modal.style.display = "block";
       modal.setAttribute("aria-hidden", "false");
-      
-      // Try to show transactions if possible
       const modalTransactions = document.getElementById("modalTransactions");
       if (modalTransactions) {
         const transactions = this.store.getTransactions();
@@ -914,11 +755,7 @@ class TransactionUI {
     }
   }
 
-  /**
-   * Show the edit form for a transaction
-   * @param {string} date - Date string in YYYY-MM-DD format
-   * @param {number} index - Index of transaction to edit
-   */
+  
   showEditForm(date, index) {
     const editForm = document.getElementById(`edit-form-${date}-${index}`);
     if (!editForm) {
@@ -927,19 +764,13 @@ class TransactionUI {
     }
     
     editForm.style.display = "block";
-
-    // Focus the first input in the edit form
     const firstInput = editForm.querySelector("input, select");
     if (firstInput) {
       firstInput.focus();
     }
   }
 
-  /**
-   * Save edits to a transaction
-   * @param {string} date - Date string in YYYY-MM-DD format
-   * @param {number} index - Index of transaction to edit
-   */
+  
   saveEdit(date, index) {
     const amountElement = document.getElementById(`edit-amount-${date}-${index}`);
     const typeElement = document.getElementById(`edit-type-${date}-${index}`);
@@ -992,8 +823,6 @@ class TransactionUI {
 
       this.showTransactionDetails(date);
       this.onUpdate();
-      
-      // Trigger cloud sync on edit
       if (this.cloudSync) {
         this.cloudSync.scheduleCloudSave();
       }
@@ -1005,11 +834,7 @@ class TransactionUI {
     }
   }
 
-  /**
-   * Delete a transaction
-   * @param {string} date - Date string in YYYY-MM-DD format
-   * @param {number} index - Index of transaction to delete
-   */
+  
   deleteTransaction(date, index) {
     const transactions = this.store.getTransactions();
     if (!transactions[date] || !transactions[date][index]) {
@@ -1021,7 +846,6 @@ class TransactionUI {
     const transaction = transactions[date][index];
 
     if (transaction.recurringId) {
-      // It's a recurring transaction
       const confirmDelete = confirm(
         "Do you want to delete just this occurrence or all future occurrences?\n\n" +
           "OK = Delete all future occurrences\n" +
@@ -1030,7 +854,6 @@ class TransactionUI {
 
       this.recurringManager.deleteTransaction(date, index, confirmDelete);
     } else {
-      // Simple non-recurring transaction
       if (confirm("Are you sure you want to delete this transaction?")) {
         this.store.deleteTransaction(date, index);
       } else {
@@ -1040,8 +863,6 @@ class TransactionUI {
 
     this.showTransactionDetails(date);
     this.onUpdate();
-    
-    // Trigger cloud sync on delete
     if (this.cloudSync) {
       this.cloudSync.scheduleCloudSave();
     }
@@ -1049,11 +870,7 @@ class TransactionUI {
     Utils.showNotification("Transaction deleted successfully");
   }
 
-  /**
-   * Toggle skip status for a recurring transaction
-   * @param {string} date - Date string in YYYY-MM-DD format
-   * @param {string} recurringId - ID of recurring transaction
-   */
+  
   toggleSkipTransaction(date, recurringId) {
     const isSkipped = this.recurringManager.isTransactionSkipped(
       date,
@@ -1066,8 +883,6 @@ class TransactionUI {
 
     this.showTransactionDetails(date);
     this.onUpdate();
-    
-    // Trigger cloud sync on skip toggle
     if (this.cloudSync) {
       this.cloudSync.scheduleCloudSave();
     }
@@ -1077,9 +892,7 @@ class TransactionUI {
     );
   }
 
-  /**
-   * Add a new transaction
-   */
+  
   addTransaction() {
     try {
       const dateElement = document.getElementById("transactionDate");
@@ -1099,8 +912,6 @@ class TransactionUI {
       const type = typeElement.value;
       const description = descriptionElement.value;
       const recurrence = recurrenceElement.value;
-
-      // Basic validation
       if (!date || isNaN(amount) || amount < 0) {
         Utils.showNotification(
           "Please enter a valid date and amount (must be 0 or greater)",
@@ -1108,11 +919,8 @@ class TransactionUI {
         );
         return false;
       }
-
-      // Additional validation for balance transactions
       if (type === "balance") {
         const transactions = this.store.getTransactions();
-        // Check if a balance transaction already exists for this date
         if (transactions[date]?.some((t) => t.type === "balance")) {
           Utils.showNotification(
             "Only one balance transaction is allowed per day. Please edit the existing balance transaction instead.",
@@ -1120,8 +928,6 @@ class TransactionUI {
           );
           return false;
         }
-
-        // Prevent recurring balance transactions
         if (recurrence !== "once") {
           document.getElementById("transactionRecurrence").value = "once";
           Utils.showNotification(
@@ -1131,16 +937,12 @@ class TransactionUI {
           return false;
         }
       }
-
-      // Handle one-time transactions
       if (recurrence === "once") {
         const newTransaction = {
           amount: amount,
           type: type,
           description: description,
         };
-
-        // For balance transactions, remove any existing balance transaction first
         if (type === "balance") {
           const transactions = this.store.getTransactions();
           if (transactions[date]) {
@@ -1156,7 +958,6 @@ class TransactionUI {
 
         this.store.addTransaction(date, newTransaction);
       }
-      // Handle recurring transactions (not allowed for balance type)
       else if (type !== "balance") {
         const newRecurringTransaction = {
           id: Utils.generateUniqueId(),
@@ -1166,15 +967,11 @@ class TransactionUI {
           description: description,
           recurrence: recurrence,
         };
-
-        // Add advanced recurring options if available
         this.addAdvancedRecurringOptions(newRecurringTransaction);
 
         const recurringId = this.store.addRecurringTransaction(
           newRecurringTransaction
         );
-
-        // Also add the first instance
         const firstInstance = {
           amount: amount,
           type: type,
@@ -1184,33 +981,21 @@ class TransactionUI {
 
         this.store.addTransaction(date, firstInstance);
       }
-
-      // Reset form fields
       document.getElementById("transactionAmount").value = "";
       document.getElementById("transactionDescription").value = "";
       document.getElementById("transactionRecurrence").value = "once";
-
-      // Remove advanced options
       const advancedOptions = document.getElementById("advancedRecurrenceOptions");
       if (advancedOptions) {
         advancedOptions.remove();
       }
-
-      // Close the modal
       document.getElementById("transactionModal").style.display = "none";
       document
         .getElementById("transactionModal")
         .setAttribute("aria-hidden", "true");
-
-      // Update the calendar
       this.onUpdate();
-      
-      // Trigger cloud sync on add
       if (this.cloudSync) {
         this.cloudSync.scheduleCloudSave();
       }
-
-      // Show success notification
       const typeText =
         type === "balance"
           ? "balance set"
@@ -1229,18 +1014,12 @@ class TransactionUI {
     }
   }
 
-  /**
-   * Add advanced recurring options to a recurring transaction
-   * @param {Object} recurringTransaction - Recurring transaction to update
-   */
+  
   addAdvancedRecurringOptions(recurringTransaction) {
-    // Get the advanced options container
     const advancedOptions = document.getElementById("advancedRecurrenceOptions");
     if (!advancedOptions) {
       return;
     }
-
-    // Day-specific (e.g., first Monday) for monthly recurrence
     if (recurringTransaction.recurrence === "monthly") {
       const daySpecificOption = document.getElementById("daySpecificOption");
       if (daySpecificOption && daySpecificOption.value) {
@@ -1248,8 +1027,6 @@ class TransactionUI {
         recurringTransaction.daySpecificData = daySpecificOption.value;
       }
     }
-
-    // Semi-monthly days selection
     if (recurringTransaction.recurrence === "semi-monthly") {
       const firstDay = document.getElementById("semiMonthlyFirstDay");
       const secondDay = document.getElementById("semiMonthlySecondDay");
@@ -1259,9 +1036,7 @@ class TransactionUI {
         days.push(parseInt(firstDay.value, 10));
         
         if (secondDay.value === "last") {
-          // Use a special marker for last day of month
           recurringTransaction.semiMonthlyLastDay = true;
-          // We'll use a high number (31) to represent last day
           days.push(31);
         } else {
           days.push(parseInt(secondDay.value, 10));
@@ -1270,8 +1045,6 @@ class TransactionUI {
         recurringTransaction.semiMonthlyDays = days;
       }
     }
-
-    // Custom interval
     if (recurringTransaction.recurrence === "custom") {
       const intervalValue = document.getElementById("customIntervalValue");
       const intervalUnit = document.getElementById("customIntervalUnit");
@@ -1283,14 +1056,10 @@ class TransactionUI {
         };
       }
     }
-
-    // Business day adjustment
     const businessDayAdjustment = document.getElementById("businessDayAdjustment");
     if (businessDayAdjustment) {
       recurringTransaction.businessDayAdjustment = businessDayAdjustment.value;
     }
-
-    // Variable amount
     const variableAmountCheck = document.getElementById("variableAmountCheck");
     if (variableAmountCheck && variableAmountCheck.checked) {
       const variablePercentage = document.getElementById("variablePercentage");
@@ -1300,8 +1069,6 @@ class TransactionUI {
         recurringTransaction.variablePercentage = parseFloat(variablePercentage.value);
       }
     }
-
-    // End conditions
     const endConditionRadios = document.querySelectorAll('input[name="endCondition"]');
     for (const radio of endConditionRadios) {
       if (radio.checked) {
@@ -1321,11 +1088,7 @@ class TransactionUI {
     }
   }
 
-  /**
-   * Capitalize the first letter of a string
-   * @param {string} str - String to capitalize
-   * @returns {string} Capitalized string
-   */
+  
   capitalizeFirstLetter(str) {
     return str.charAt(0).toUpperCase() + str.slice(1);
   }
