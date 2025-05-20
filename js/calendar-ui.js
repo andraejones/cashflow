@@ -160,12 +160,14 @@ class CalendarUI {
       Expenses: $${summary.expense.toFixed(2)} | 
       Ending Balance: $${summary.endingBalance.toFixed(2)}
     `;
+    const pinLabel = window.pinProtection && pinProtection.isPinSet() ? "Change PIN" : "Set PIN";
     document.getElementById("calendarOptions").innerHTML = `
-      <span class="calendar-option" onclick="app.searchUI.showSearchModal()">Search</span> | 
-      <span class="calendar-option" onclick="app.exportData()">Save to Device</span> | 
-      <span class="calendar-option" onclick="app.importData()">Load from Device</span> | 
-      <span class="calendar-option" onclick="app.cloudSync.saveToCloud()">Save to Cloud</span> | 
-      <span class="calendar-option" onclick="app.cloudSync.loadFromCloud()">Load from Cloud</span> | 
+      <span class="calendar-option" onclick="app.searchUI.showSearchModal()">Search</span> |
+      <span class="calendar-option" onclick="app.exportData()">Save to Device</span> |
+      <span class="calendar-option" onclick="app.importData()">Load from Device</span> |
+      <span class="calendar-option" onclick="app.cloudSync.saveToCloud()">Save to Cloud</span> |
+      <span class="calendar-option" onclick="app.cloudSync.loadFromCloud()">Load from Cloud</span> |
+      <span class="calendar-option" onclick="pinProtection.promptChangePin(app.store)">${pinLabel}</span> |
       <span class="calendar-option" onclick="app.resetData()">Reset</span>
     `;
   }
