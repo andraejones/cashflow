@@ -1,9 +1,10 @@
 // Application entry point
 
 class CashflowApp {
-  
-  constructor() {
-    this.store = new TransactionStore();
+
+  constructor(pinProtection) {
+    this.pinProtection = pinProtection;
+    this.store = new TransactionStore(undefined, this.pinProtection);
     this.recurringManager = new RecurringTransactionManager(this.store);
     this.calculationService = new CalculationService(
       this.store,
@@ -184,5 +185,8 @@ class CashflowApp {
   }
 }
 document.addEventListener("DOMContentLoaded", () => {
-  window.app = new CashflowApp();
+  window.pinProtection = new PinProtection();
+  pinProtection.promptUnlock(() => {
+    window.app = new CashflowApp(pinProtection);
+  });
 });
