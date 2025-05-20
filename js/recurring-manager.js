@@ -622,7 +622,7 @@ class RecurringTransactionManager {
         );
       }
 
-      // Move to the next bi-week
+      // Move to the next bi-weekly period
       currentDate.setDate(currentDate.getDate() + 14);
       occurrenceCount++;
     }
