@@ -124,8 +124,8 @@ class TransactionStore {
   }
 
   /**
-   * Reset all data
-   * @returns {boolean} True if reset was confirmed and executed
+   * Reset all data. This method always clears stored data.
+   * @returns {boolean} Always returns true
    */
   resetData() {
     // Clear in-memory data
