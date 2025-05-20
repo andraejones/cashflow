@@ -76,6 +76,7 @@ class SearchUI {
   showSearchModal() {
     const modal = document.getElementById("searchModal");
     modal.style.display = "block";
+    modal.setAttribute("aria-hidden", "false");
     document.getElementById("searchInput").value = "";
     this.clearSearch();
     setTimeout(() => {
