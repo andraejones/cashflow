@@ -237,8 +237,13 @@ class SearchUI {
 
     let foundTransactions = [];
     const transactions = this.store.getTransactions();
+    const parseAmountSearch = (value) => {
+      const normalized = value.replace(/[^0-9.-]/g, "");
+      return normalized === "" ? NaN : parseFloat(normalized);
+    };
+
     const matchesAmount = (amount, searchTerm) => {
-      const searchNumber = parseFloat(searchTerm);
+      const searchNumber = parseAmountSearch(searchTerm);
       if (!isNaN(searchNumber)) {
         return amount === searchNumber;
       }
