@@ -812,7 +812,7 @@ class TransactionUI {
     try {
       const modal = document.getElementById("transactionModal");
       if (!modal) {
-        alert("Transaction modal not found!");
+        Utils.showModalAlert("Transaction modal not found!", "Missing Modal");
         return;
       }
       const modalDate = document.getElementById("modalDate");
@@ -850,7 +850,10 @@ class TransactionUI {
       }
     } catch (error) {
       console.error("Fallback modal opening failed:", error);
-      alert("Could not open transaction details. Please check the console for errors.");
+      Utils.showModalAlert(
+        "Could not open transaction details. Please check the console for errors.",
+        "Transaction Details"
+      );
     }
   }
 
@@ -934,7 +937,7 @@ class TransactionUI {
   }
 
   
-  deleteTransaction(date, index) {
+  async deleteTransaction(date, index) {
     const transactions = this.store.getTransactions();
     if (!transactions[date] || !transactions[date][index]) {
       console.error(`Transaction not found: date=${date}, index=${index}`);
@@ -945,19 +948,33 @@ class TransactionUI {
     const transaction = transactions[date][index];
 
     if (transaction.recurringId) {
-      const confirmDelete = confirm(
-        "Do you want to delete just this occurrence or all future occurrences?\n\n" +
-          "OK = Delete all future occurrences\n" +
-          "Cancel = Delete only this occurrence"
-      );
+      const deleteChoice = await Utils.showModalDialog({
+        title: "Delete Recurring Transaction",
+        message:
+          "Do you want to delete just this occurrence or all future occurrences?",
+        confirmText: "Delete All Future",
+        alternateText: "Delete Only This",
+        cancelText: "Cancel",
+        showCancel: true,
+        showAlternate: true,
+      });
 
-      this.recurringManager.deleteTransaction(date, index, confirmDelete);
-    } else {
-      if (confirm("Are you sure you want to delete this transaction?")) {
-        this.store.deleteTransaction(date, index);
-      } else {
+      if (deleteChoice === false) {
         return;
       }
+
+      const deleteFuture = deleteChoice === true;
+      this.recurringManager.deleteTransaction(date, index, deleteFuture);
+    } else {
+      const shouldDelete = await Utils.showModalConfirm(
+        "Are you sure you want to delete this transaction?",
+        "Delete Transaction",
+        { confirmText: "Delete", cancelText: "Cancel" }
+      );
+      if (!shouldDelete) {
+        return;
+      }
+      this.store.deleteTransaction(date, index);
     }
 
     this.showTransactionDetails(date);
