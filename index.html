@@ -312,6 +312,46 @@
       </div>
     </div>
 
+    <div
+      id="appModal"
+      class="modal"
+      role="dialog"
+      aria-labelledby="appModalTitle"
+      aria-modal="true"
+      aria-hidden="true"
+    >
+      <div class="modal-content app-modal-content">
+        <button
+          id="appModalClose"
+          class="close"
+          aria-label="Close"
+          type="button"
+        >
+          &times;
+        </button>
+        <h3 id="appModalTitle"></h3>
+        <div class="app-modal-body">
+          <p id="appModalMessage" class="app-modal-message"></p>
+          <label class="app-modal-input-wrapper" for="appModalInput">
+            <span id="appModalInputLabel" class="app-modal-input-label"></span>
+            <input id="appModalInput" class="app-modal-input" type="text" />
+          </label>
+        </div>
+        <div class="app-modal-actions">
+          <button
+            id="appModalCancel"
+            class="secondary-button"
+            type="button"
+          >
+            Cancel
+          </button>
+          <button id="appModalConfirm" class="primary-button" type="button">
+            OK
+          </button>
+        </div>
+      </div>
+    </div>
+
     <script src="js/utils.js"></script>
 
     <script src="js/transaction-store.js"></script>

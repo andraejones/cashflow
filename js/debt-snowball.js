@@ -256,13 +256,18 @@ class DebtSnowballUI {
     this.showDebtForm(debt);
   }
 
-  deleteDebt(debtId) {
+  async deleteDebt(debtId) {
     const debt = this.store.getDebts().find((d) => d.id === debtId);
     if (!debt) {
       Utils.showNotification("Debt not found", "error");
       return;
     }
-    if (!confirm(`Delete debt "${debt.name}"?`)) {
+    const shouldDelete = await Utils.showModalConfirm(
+      `Delete debt "${debt.name}"?`,
+      "Delete Debt",
+      { confirmText: "Delete", cancelText: "Cancel" }
+    );
+    if (!shouldDelete) {
       return;
     }
     if (debt.minRecurringId) {

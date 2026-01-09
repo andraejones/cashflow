@@ -55,51 +55,82 @@ class PinProtection {
     }
   }
 
-  promptUnlock(callback) {
+  async promptUnlock() {
     if (!this.isPinSet()) {
-      callback();
-      return;
+      return true;
     }
-    let pin = prompt("Enter PIN to unlock:");
-    if (pin === null) return;
+    const pin = await Utils.showModalPrompt("Enter PIN to unlock:", "Unlock", {
+      inputLabel: "PIN",
+      inputType: "password",
+      confirmText: "Unlock",
+      cancelText: "Cancel",
+    });
+    if (pin === null) return false;
     if (this.verifyPin(pin)) {
       this.currentPin = pin;
-      callback();
-    } else {
-      alert("Incorrect PIN");
-      this.promptUnlock(callback);
+      return true;
     }
+    await Utils.showModalAlert("Incorrect PIN", "Unlock Failed");
+    return this.promptUnlock();
   }
 
-  promptChangePin(store) {
+  async promptChangePin(store) {
     let newPin;
     if (this.isPinSet()) {
-      const oldPin = prompt("Enter current PIN:");
+      const oldPin = await Utils.showModalPrompt(
+        "Enter current PIN:",
+        "Change PIN",
+        {
+          inputLabel: "Current PIN",
+          inputType: "password",
+          confirmText: "Continue",
+        }
+      );
       if (oldPin === null) return;
       if (!this.verifyPin(oldPin)) {
-        alert("Incorrect PIN");
+        await Utils.showModalAlert("Incorrect PIN", "Change PIN");
         return;
       }
-      newPin = prompt("Enter new PIN (leave blank to disable):");
+      newPin = await Utils.showModalPrompt(
+        "Enter new PIN (leave blank to disable):",
+        "Change PIN",
+        {
+          inputLabel: "New PIN",
+          inputType: "password",
+          confirmText: "Continue",
+        }
+      );
       if (newPin === null) return;
       if (newPin === "") {
         this.clearPin();
         store.saveData(false);
-        alert("PIN disabled");
+        await Utils.showModalAlert("PIN disabled", "Change PIN");
         return;
       }
     } else {
-      newPin = prompt("Set a new PIN:");
+      newPin = await Utils.showModalPrompt("Set a new PIN:", "Set PIN", {
+        inputLabel: "New PIN",
+        inputType: "password",
+        confirmText: "Set PIN",
+      });
       if (newPin === null || newPin === "") return;
     }
-    const confirmPin = prompt("Confirm PIN:");
+    const confirmPin = await Utils.showModalPrompt(
+      "Confirm PIN:",
+      "Confirm PIN",
+      {
+        inputLabel: "Confirm PIN",
+        inputType: "password",
+        confirmText: "Save PIN",
+      }
+    );
     if (confirmPin === null || confirmPin !== newPin) {
-      alert("PINs do not match");
+      await Utils.showModalAlert("PINs do not match", "Confirm PIN");
       return;
     }
     this.setPin(newPin);
     store.saveData(false);
-    alert("PIN updated");
+    await Utils.showModalAlert("PIN updated", "Change PIN");
   }
 }
 

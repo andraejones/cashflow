@@ -168,22 +168,26 @@ class CashflowApp {
   }
 
   
-  resetData() {
+  async resetData() {
     try {
       this.cloudSync.cancelPendingCloudSave();
 
-      if (
-        confirm(
-          "Are you sure you want to reset all data? This will also clear your cloud sync credentials."
-        )
-      ) {
-        this.store.resetData();
-        this.cloudSync.clearCloudCredentials();
-        this.calculationService.invalidateCache();
-        this.updateUI();
-        
-        Utils.showNotification("All data has been reset.");
+      const shouldReset = await Utils.showModalConfirm(
+        "Are you sure you want to reset all data? This will also clear your cloud sync credentials.",
+        "Reset Data",
+        { confirmText: "Reset", cancelText: "Cancel" }
+      );
+
+      if (!shouldReset) {
+        return;
       }
+
+      this.store.resetData();
+      this.cloudSync.clearCloudCredentials();
+      this.calculationService.invalidateCache();
+      this.updateUI();
+      
+      Utils.showNotification("All data has been reset.");
     } catch (error) {
       console.error("Error resetting data:", error);
       Utils.showNotification("Failed to reset data: " + error.message, "error");
@@ -192,7 +196,9 @@ class CashflowApp {
 }
 document.addEventListener("DOMContentLoaded", () => {
   window.pinProtection = new PinProtection();
-  pinProtection.promptUnlock(() => {
-    window.app = new CashflowApp(pinProtection);
+  pinProtection.promptUnlock().then((unlocked) => {
+    if (unlocked) {
+      window.app = new CashflowApp(pinProtection);
+    }
   });
 });
