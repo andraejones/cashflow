@@ -9,6 +9,11 @@ class TransactionStore {
     this.monthlyBalances = {};
     this.recurringTransactions = [];
     this.skippedTransactions = {};
+    this.debts = [];
+    this.debtSnowballSettings = {
+      extraPayment: 0,
+      autoGenerate: false,
+    };
     this.onSaveCallbacks = [];
 
     this.loadData();
@@ -54,6 +59,10 @@ class TransactionStore {
       const storedSkippedTransactions = decrypt(
         this.storage.getItem("skippedTransactions")
       );
+      const storedDebts = decrypt(this.storage.getItem("debts"));
+      const storedSnowballSettings = decrypt(
+        this.storage.getItem("debtSnowballSettings")
+      );
 
       if (storedTransactions) {
         this.transactions = JSON.parse(storedTransactions);
@@ -82,12 +91,47 @@ class TransactionStore {
       if (storedSkippedTransactions) {
         this.skippedTransactions = JSON.parse(storedSkippedTransactions);
       }
+
+      if (storedDebts) {
+        const parsedDebts = JSON.parse(storedDebts);
+        this.debts = parsedDebts.map((debt) => ({
+          ...debt,
+          id: debt.id || Utils.generateUniqueId(),
+          balance: Number(debt.balance) || 0,
+          minPayment: Number(debt.minPayment) || 0,
+          dueDay: Number(debt.dueDay) || 1,
+          interestRate: Number(debt.interestRate) || 0,
+        }));
+      }
+
+      if (storedSnowballSettings) {
+        const parsedSettings = JSON.parse(storedSnowballSettings);
+        this.debtSnowballSettings = {
+          extraPayment: Number(parsedSettings.extraPayment) || 0,
+          autoGenerate: parsedSettings.autoGenerate === true,
+        };
+      }
+      if (this.debts.length > 0 && this.recurringTransactions.length > 0) {
+        const recurringIds = new Set(
+          this.recurringTransactions.map((rt) => rt.id)
+        );
+        this.debts.forEach((debt) => {
+          if (debt.minRecurringId && !recurringIds.has(debt.minRecurringId)) {
+            debt.minRecurringId = null;
+          }
+        });
+      }
     } catch (error) {
       console.error("Error loading data from storage:", error);
       this.transactions = {};
       this.monthlyBalances = {};
       this.recurringTransactions = [];
       this.skippedTransactions = {};
+      this.debts = [];
+      this.debtSnowballSettings = {
+        extraPayment: 0,
+        autoGenerate: false,
+      };
     }
   }
 
@@ -120,6 +164,11 @@ class TransactionStore {
         "skippedTransactions",
         encrypt(JSON.stringify(this.skippedTransactions))
       );
+      this.storage.setItem("debts", encrypt(JSON.stringify(this.debts)));
+      this.storage.setItem(
+        "debtSnowballSettings",
+        encrypt(JSON.stringify(this.debtSnowballSettings))
+      );
       this.triggerSaveCallbacks(isDataModified);
     } catch (error) {
       console.error("Error saving data to storage:", error);
@@ -132,6 +181,11 @@ class TransactionStore {
     this.monthlyBalances = {};
     this.recurringTransactions = [];
     this.skippedTransactions = {};
+    this.debts = [];
+    this.debtSnowballSettings = {
+      extraPayment: 0,
+      autoGenerate: false,
+    };
     this.saveData();
     return true;
   }
@@ -154,6 +208,78 @@ class TransactionStore {
   
   getSkippedTransactions() {
     return this.skippedTransactions;
+  }
+
+  
+  getDebts() {
+    return this.debts;
+  }
+
+  
+  getDebtSnowballSettings() {
+    return this.debtSnowballSettings;
+  }
+
+  
+  addDebt(debt) {
+    if (!debt) {
+      console.error("Invalid debt data");
+      return null;
+    }
+    if (!debt.id) {
+      debt.id = Utils.generateUniqueId();
+    }
+    this.debts.push(debt);
+    this.saveData();
+    return debt.id;
+  }
+
+  
+  updateDebt(id, updates) {
+    if (!id || !updates) {
+      console.error("Invalid parameters for updateDebt");
+      return false;
+    }
+    const index = this.debts.findIndex((debt) => debt.id === id);
+    if (index === -1) {
+      return false;
+    }
+    this.debts[index] = {
+      ...this.debts[index],
+      ...updates,
+    };
+    this.saveData();
+    return true;
+  }
+
+  
+  deleteDebt(id) {
+    if (!id) {
+      console.error("Invalid ID for deleteDebt");
+      return false;
+    }
+    const index = this.debts.findIndex((debt) => debt.id === id);
+    if (index === -1) {
+      return false;
+    }
+    this.debts.splice(index, 1);
+    this.saveData();
+    return true;
+  }
+
+  
+  setDebtSnowballSettings(settings) {
+    if (!settings || typeof settings !== "object") {
+      console.error("Invalid settings for debt snowball");
+      return false;
+    }
+    this.debtSnowballSettings = {
+      ...this.debtSnowballSettings,
+      extraPayment: Number(settings.extraPayment) || 0,
+      autoGenerate: settings.autoGenerate === true,
+    };
+    this.saveData();
+    return true;
   }
 
   
@@ -336,6 +462,8 @@ class TransactionStore {
       monthlyBalances: this.monthlyBalances,
       recurringTransactions: this.recurringTransactions,
       skippedTransactions: this.skippedTransactions,
+      debts: this.debts,
+      debtSnowballSettings: this.debtSnowballSettings,
       lastExported: new Date().toISOString(),
       appVersion: "2.0.0"
     };
@@ -362,6 +490,18 @@ class TransactionStore {
       this.monthlyBalances = data.monthlyBalances;
       this.recurringTransactions = data.recurringTransactions;
       this.skippedTransactions = data.skippedTransactions || {};
+      this.debts = (data.debts || []).map((debt) => ({
+        ...debt,
+        id: debt.id || Utils.generateUniqueId(),
+        balance: Number(debt.balance) || 0,
+        minPayment: Number(debt.minPayment) || 0,
+        dueDay: Number(debt.dueDay) || 1,
+        interestRate: Number(debt.interestRate) || 0,
+      }));
+      this.debtSnowballSettings = {
+        extraPayment: Number(data.debtSnowballSettings?.extraPayment) || 0,
+        autoGenerate: data.debtSnowballSettings?.autoGenerate === true,
+      };
       this.recurringTransactions.forEach((rt) => {
         if (!rt.id) {
           rt.id = Utils.generateUniqueId();
@@ -372,6 +512,14 @@ class TransactionStore {
           rt.recurrence = "semi-monthly";
         } else if (rt.recurrence === "semiannual") {
           rt.recurrence = "semi-annual";
+        }
+      });
+      const recurringIds = new Set(
+        this.recurringTransactions.map((rt) => rt.id)
+      );
+      this.debts.forEach((debt) => {
+        if (debt.minRecurringId && !recurringIds.has(debt.minRecurringId)) {
+          debt.minRecurringId = null;
         }
       });
       Object.keys(this.transactions).forEach((date) => {

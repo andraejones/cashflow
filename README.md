@@ -1,24 +1,52 @@
 # Cashflow Calendar
 
-Cashflow Calendar is a single page web app for planning and tracking your personal income and expenses. Each day on the calendar lists transactions and running balance so you can see how cashflow changes through the month.
+Cashflow Calendar is a single-page, offline-first cashflow planner that shows income and expenses on a monthly calendar with running balances.
 
-## Usage
+## Purpose
 
-Open `index.html` in any modern browser. No build step is required – you can simply double click the file or serve the folder with a static file server if preferred.
+Plan and monitor monthly cash movement and debts.
 
-## Cloud Sync (Optional)
+## Documentation status
 
-Data is stored locally in your browser using `localStorage`. You can optionally sync to a private GitHub Gist. When enabling sync you will be asked for a GitHub personal access token (with the `gist` scope) and a Gist ID. The token is encrypted and saved in local storage under the key `github_token_encrypted`; the Gist ID is stored under `gist_id`.
+Updated for appVersion 2.0.0 on 2026-01-09 (source of truth: `js/transaction-store.js`).
 
-## JavaScript Modules
+## Features
 
-- **`utils.js`** – helpers for IDs, date formatting and toast notifications.
-- **`transaction-store.js`** – loads/saves transactions, monthly balances and recurring transactions in `localStorage`.
-- **`recurring-manager.js`** – expands recurring transaction rules into individual calendar entries.
-- **`calculation-service.js`** – calculates daily totals and monthly summaries.
-- **`calendar-ui.js`** – renders the month view and handles month navigation.
-- **`transaction-ui.js`** – modal interface for adding/editing transactions and recurrence.
-- **`search-ui.js`** – search modal for filtering and exporting transactions.
-- **`cloud-sync.js`** – manages syncing data to/from a GitHub Gist and storing credentials.
-- **`app.js`** – wires everything together when the page loads.
+- Monthly calendar with daily totals and running balance.
+- One-off and recurring transactions (daily to yearly, custom intervals, business-day adjustments).
+- Debt snowball planner with minimum plus extra payment scheduling.
+- Search with advanced filters and CSV export.
+- Full data import and export (JSON).
+- Optional PIN lock and GitHub Gist cloud sync.
 
+## Quick start
+
+1. Open `index.html` in a modern browser.
+2. Optional: serve the folder with any static server for easier access.
+
+## Data storage and privacy
+
+- Local-first: data is stored in browser `localStorage`.
+- If a PIN is set, stored data is encrypted with the current PIN.
+- Optional cloud sync stores the same payload in a private GitHub Gist.
+  - Requires a GitHub personal access token with `gist` scope and a Gist ID.
+  - Token is encrypted and stored under `github_token_encrypted`; Gist ID under `gist_id`.
+
+## Data format
+
+The exported JSON schema is documented in `saveformat.md`.
+
+## Project structure
+
+- `index.html` / `styles.css`: UI shell and styling.
+- `js/app.js`: application wiring plus import and export handlers.
+- `js/transaction-store.js`: persistence, migrations, and `appVersion`.
+- `js/recurring-manager.js`: recurrence expansion rules.
+- `js/calculation-service.js`: daily totals and monthly summaries.
+- `js/calendar-ui.js`: calendar rendering and toolbar.
+- `js/transaction-ui.js`: add and edit transaction modal plus recurrence UI.
+- `js/search-ui.js`: search, filters, and CSV export.
+- `js/cloud-sync.js`: Gist sync and credential handling.
+- `js/debt-snowball.js`: debt snowball modeling.
+- `js/pin-protection.js`: PIN locking and encryption.
+- `js/utils.js`: date and ID helpers plus notifications.

@@ -42,6 +42,21 @@ class RecurringTransactionManager {
   }
 
   
+  daysBetween(startDate, endDate) {
+    const startUtc = Date.UTC(
+      startDate.getFullYear(),
+      startDate.getMonth(),
+      startDate.getDate()
+    );
+    const endUtc = Date.UTC(
+      endDate.getFullYear(),
+      endDate.getMonth(),
+      endDate.getDate()
+    );
+    return Math.floor((endUtc - startUtc) / (1000 * 60 * 60 * 24));
+  }
+
+  
   isBusinessDay(date) {
     const day = date.getDay();
     return day !== 0 && day !== 6;
@@ -123,29 +138,48 @@ class RecurringTransactionManager {
   }
 
   
+  parseDaySpecificData(daySpecificData) {
+    if (!daySpecificData || typeof daySpecificData !== "string") {
+      return null;
+    }
+    const parts = daySpecificData.split("-");
+    let occurrence;
+    let dayOfWeek;
+    
+    if (parts.length === 2) {
+      occurrence = parseInt(parts[0], 10);
+      dayOfWeek = parseInt(parts[1], 10);
+    } else if (parts.length === 3 && parts[0] === "") {
+      occurrence = -parseInt(parts[1], 10);
+      dayOfWeek = parseInt(parts[2], 10);
+    } else {
+      return null;
+    }
+    
+    if (isNaN(occurrence) || isNaN(dayOfWeek)) {
+      return null;
+    }
+    
+    return { occurrence, dayOfWeek };
+  }
+
+  
   matchesDaySpecificRecurrence(rt, targetDate) {
     if (!rt.daySpecific) return false;
 
     try {
       const year = targetDate.getFullYear();
       const month = targetDate.getMonth();
-      const parts = rt.daySpecificData.split('-');
-      let occurrence, dayOfWeek;
-      
-      if (parts.length === 2) {
-        occurrence = parseInt(parts[0], 10);
-        dayOfWeek = parseInt(parts[1], 10);
-      } else if (parts.length === 3 && parts[0] === "") {
-        occurrence = -parseInt(parts[1], 10);
-        dayOfWeek = parseInt(parts[2], 10);
-      } else {
+      const parsed = this.parseDaySpecificData(rt.daySpecificData);
+      if (!parsed) {
         return false;
       }
-      
-      if (isNaN(occurrence) || isNaN(dayOfWeek)) {
-        return false;
-      }
-      const matchDate = this.getNthDayOfMonth(year, month, dayOfWeek, occurrence);
+      const matchDate = this.getNthDayOfMonth(
+        year,
+        month,
+        parsed.dayOfWeek,
+        parsed.occurrence
+      );
       if (!matchDate) return false;
       return (
         matchDate.getFullYear() === targetDate.getFullYear() &&
@@ -160,39 +194,8 @@ class RecurringTransactionManager {
   
   
   applyRecurringTransactions(year, month) {
-    const startOfMonth = new Date(year, month, 1);
     const endOfMonth = new Date(year, month + 1, 0);
     const transactions = this.store.getTransactions();
-    const processedRecurringIds = new Set();
-    let adjustedFromPrevMonth = {};
-    
-    Object.keys(transactions).forEach(dateString => {
-      const date = this.parseDateString(dateString);
-      if (date.getFullYear() === year && date.getMonth() === month) {
-        const transactionsForDate = transactions[dateString];
-        transactionsForDate.forEach(t => {
-          if (t.recurringId && !t.modifiedInstance) {
-            const rt = this.getRecurringTransactionById(t.recurringId);
-            if (rt) {
-              if (rt.recurrence === 'monthly' && rt.businessDayAdjustment) {
-                const originalDate = new Date(date);
-                const prevMonth = month === 0 ? 11 : month - 1;
-                const prevMonthYear = month === 0 ? year - 1 : year;
-                const lastDayOfPrevMonth = new Date(prevMonthYear, prevMonth + 1, 0).getDate();
-                const lastDateOfPrevMonth = new Date(prevMonthYear, prevMonth, lastDayOfPrevMonth);
-                const { adjustedDate } = this.adjustForBusinessDay(lastDateOfPrevMonth, rt.businessDayAdjustment);
-                if (adjustedDate.getFullYear() === year && adjustedDate.getMonth() === month) {
-                  if (!adjustedFromPrevMonth[dateString]) {
-                    adjustedFromPrevMonth[dateString] = [];
-                  }
-                  adjustedFromPrevMonth[dateString].push(t.recurringId);
-                }
-              }
-            }
-          }
-        });
-      }
-    });
     for (let day = 1; day <= endOfMonth.getDate(); day++) {
       const dateObj = new Date(year, month, day);
       const dateString = Utils.formatDateString(dateObj);
@@ -200,10 +203,6 @@ class RecurringTransactionManager {
       if (transactions[dateString]) {
         transactions[dateString] = transactions[dateString].filter(t => {
           if (!t.recurringId || t.modifiedInstance) {
-            return true;
-          }
-          if (adjustedFromPrevMonth[dateString] && 
-              adjustedFromPrevMonth[dateString].includes(t.recurringId)) {
             return true;
           }
           return false;
@@ -218,119 +217,160 @@ class RecurringTransactionManager {
       const startDate = this.parseDateString(rt.startDate);
       const endDate = rt.endDate ? this.parseDateString(rt.endDate) : null;
       const maxOccurrences = rt.maxOccurrences || null;
+      const needsCrossMonth =
+        rt.businessDayAdjustment && rt.businessDayAdjustment !== "none";
+      const monthOffsets = needsCrossMonth ? [-1, 0, 1] : [0];
 
-      if (startDate <= endOfMonth && (!endDate || endDate >= startOfMonth)) {
-        switch (rt.recurrence) {
-          case "daily":
-            this.applyDailyRecurrence(
-              rt,
-              startDate,
-              endDate,
-              maxOccurrences,
-              year,
-              month
-            );
-            break;
+      monthOffsets.forEach((offset) => {
+        const targetDate = new Date(year, month + offset, 1);
+        const targetYear = targetDate.getFullYear();
+        const targetMonth = targetDate.getMonth();
+        const targetStartOfMonth = new Date(targetYear, targetMonth, 1);
+        const targetEndOfMonth = new Date(targetYear, targetMonth + 1, 0);
 
-          case "weekly":
-            this.applyWeeklyRecurrence(
-              rt,
-              startDate,
-              endDate,
-              maxOccurrences,
-              year,
-              month
-            );
-            break;
+        if (
+          startDate <= targetEndOfMonth &&
+          (!endDate || endDate >= targetStartOfMonth)
+        ) {
+          switch (rt.recurrence) {
+            case "daily":
+              this.applyDailyRecurrence(
+                rt,
+                startDate,
+                endDate,
+                maxOccurrences,
+                targetYear,
+                targetMonth,
+                year,
+                month
+              );
+              break;
 
-          case "bi-weekly":
-            this.applyBiWeeklyRecurrence(
-              rt,
-              startDate,
-              endDate,
-              maxOccurrences,
-              year,
-              month
-            );
-            break;
+            case "weekly":
+              this.applyWeeklyRecurrence(
+                rt,
+                startDate,
+                endDate,
+                maxOccurrences,
+                targetYear,
+                targetMonth,
+                year,
+                month
+              );
+              break;
 
-          case "monthly":
-            this.applyMonthlyRecurrence(
-              rt,
-              startDate,
-              endDate,
-              maxOccurrences,
-              year,
-              month
-            );
-            break;
+            case "bi-weekly":
+              this.applyBiWeeklyRecurrence(
+                rt,
+                startDate,
+                endDate,
+                maxOccurrences,
+                targetYear,
+                targetMonth,
+                year,
+                month
+              );
+              break;
 
-          case "semi-monthly":
-            this.applySemiMonthlyRecurrence(
-              rt,
-              startDate,
-              endDate,
-              maxOccurrences,
-              year,
-              month
-            );
-            break;
+            case "monthly":
+              this.applyMonthlyRecurrence(
+                rt,
+                startDate,
+                endDate,
+                maxOccurrences,
+                targetYear,
+                targetMonth,
+                year,
+                month
+              );
+              break;
 
-          case "quarterly":
-            this.applyQuarterlyRecurrence(
-              rt,
-              startDate,
-              endDate,
-              maxOccurrences,
-              year,
-              month
-            );
-            break;
+            case "semi-monthly":
+              this.applySemiMonthlyRecurrence(
+                rt,
+                startDate,
+                endDate,
+                maxOccurrences,
+                targetYear,
+                targetMonth,
+                year,
+                month
+              );
+              break;
 
-          case "semi-annual":
-            this.applySemiAnnualRecurrence(
-              rt,
-              startDate,
-              endDate,
-              maxOccurrences,
-              year,
-              month
-            );
-            break;
+            case "quarterly":
+              this.applyQuarterlyRecurrence(
+                rt,
+                startDate,
+                endDate,
+                maxOccurrences,
+                targetYear,
+                targetMonth,
+                year,
+                month
+              );
+              break;
 
-          case "yearly":
-            this.applyYearlyRecurrence(
-              rt,
-              startDate,
-              endDate,
-              maxOccurrences,
-              year,
-              month
-            );
-            break;
+            case "semi-annual":
+              this.applySemiAnnualRecurrence(
+                rt,
+                startDate,
+                endDate,
+                maxOccurrences,
+                targetYear,
+                targetMonth,
+                year,
+                month
+              );
+              break;
 
-          case "custom":
-            this.applyCustomRecurrence(
-              rt,
-              startDate,
-              endDate,
-              maxOccurrences,
-              year,
-              month
-            );
-            break;
+            case "yearly":
+              this.applyYearlyRecurrence(
+                rt,
+                startDate,
+                endDate,
+                maxOccurrences,
+                targetYear,
+                targetMonth,
+                year,
+                month
+              );
+              break;
 
-          default:
-            console.warn(`Unsupported recurrence type: ${rt.recurrence}`);
-            break;
+            case "custom":
+              this.applyCustomRecurrence(
+                rt,
+                startDate,
+                endDate,
+                maxOccurrences,
+                targetYear,
+                targetMonth,
+                year,
+                month
+              );
+              break;
+
+            default:
+              console.warn(`Unsupported recurrence type: ${rt.recurrence}`);
+              break;
+          }
         }
-      }
+      });
     });
     this.store.saveData(false);
   }
 
   
-  applyDailyRecurrence(rt, startDate, endDate, maxOccurrences, year, month) {
+  applyDailyRecurrence(
+    rt,
+    startDate,
+    endDate,
+    maxOccurrences,
+    year,
+    month,
+    filterYear = year,
+    filterMonth = month
+  ) {
     const startOfMonth = new Date(year, month, 1);
     const endOfMonth = new Date(year, month + 1, 0);
 
@@ -340,10 +380,7 @@ class RecurringTransactionManager {
     let occurrenceCount = 0;
 
     if (startDate < startOfMonth && maxOccurrences) {
-      const daysDifference = Math.floor(
-        (startOfMonth - startDate) / (1000 * 60 * 60 * 24)
-      );
-      occurrenceCount = daysDifference;
+      occurrenceCount = this.daysBetween(startDate, startOfMonth);
     }
 
     while (
@@ -360,14 +397,19 @@ class RecurringTransactionManager {
         originalDateString = origDate;
       }
       if (!endDate || targetDate <= endDate) {
-        const dateString = Utils.formatDateString(targetDate);
-        this.addRecurringTransactionToDate(
-          rt,
-          dateString,
-          targetDate,
-          startDate,
-          originalDateString
-        );
+        if (
+          targetDate.getFullYear() === filterYear &&
+          targetDate.getMonth() === filterMonth
+        ) {
+          const dateString = Utils.formatDateString(targetDate);
+          this.addRecurringTransactionToDate(
+            rt,
+            dateString,
+            targetDate,
+            startDate,
+            originalDateString
+          );
+        }
       }
       currentDate.setDate(currentDate.getDate() + 1);
       occurrenceCount++;
@@ -375,7 +417,16 @@ class RecurringTransactionManager {
   }
 
   
-  applyWeeklyRecurrence(rt, startDate, endDate, maxOccurrences, year, month) {
+  applyWeeklyRecurrence(
+    rt,
+    startDate,
+    endDate,
+    maxOccurrences,
+    year,
+    month,
+    filterYear = year,
+    filterMonth = month
+  ) {
     const startOfMonth = new Date(year, month, 1);
     const endOfMonth = new Date(year, month + 1, 0);
     let currentDate = new Date(startDate);
@@ -398,14 +449,19 @@ class RecurringTransactionManager {
         originalDateString = origDate;
       }
       if (!endDate || targetDate <= endDate) {
-        const dateString = Utils.formatDateString(targetDate);
-        this.addRecurringTransactionToDate(
-          rt,
-          dateString,
-          targetDate,
-          startDate,
-          originalDateString
-        );
+        if (
+          targetDate.getFullYear() === filterYear &&
+          targetDate.getMonth() === filterMonth
+        ) {
+          const dateString = Utils.formatDateString(targetDate);
+          this.addRecurringTransactionToDate(
+            rt,
+            dateString,
+            targetDate,
+            startDate,
+            originalDateString
+          );
+        }
       }
       currentDate.setDate(currentDate.getDate() + 7);
       occurrenceCount++;
@@ -413,7 +469,16 @@ class RecurringTransactionManager {
   }
 
   
-  applyBiWeeklyRecurrence(rt, startDate, endDate, maxOccurrences, year, month) {
+  applyBiWeeklyRecurrence(
+    rt,
+    startDate,
+    endDate,
+    maxOccurrences,
+    year,
+    month,
+    filterYear = year,
+    filterMonth = month
+  ) {
     const startOfMonth = new Date(year, month, 1);
     const endOfMonth = new Date(year, month + 1, 0);
     let currentDate = new Date(startDate);
@@ -436,14 +501,19 @@ class RecurringTransactionManager {
         originalDateString = origDate;
       }
       if (!endDate || targetDate <= endDate) {
-        const dateString = Utils.formatDateString(targetDate);
-        this.addRecurringTransactionToDate(
-          rt,
-          dateString,
-          targetDate,
-          startDate,
-          originalDateString
-        );
+        if (
+          targetDate.getFullYear() === filterYear &&
+          targetDate.getMonth() === filterMonth
+        ) {
+          const dateString = Utils.formatDateString(targetDate);
+          this.addRecurringTransactionToDate(
+            rt,
+            dateString,
+            targetDate,
+            startDate,
+            originalDateString
+          );
+        }
       }
       currentDate.setDate(currentDate.getDate() + 14);
       occurrenceCount++;
@@ -451,7 +521,16 @@ class RecurringTransactionManager {
   }
 
   
-  applyMonthlyRecurrence(rt, startDate, endDate, maxOccurrences, year, month) {
+  applyMonthlyRecurrence(
+    rt,
+    startDate,
+    endDate,
+    maxOccurrences,
+    year,
+    month,
+    filterYear = year,
+    filterMonth = month
+  ) {
     if (rt.daySpecific) {
       this.applyDaySpecificMonthlyRecurrence(
         rt,
@@ -459,7 +538,9 @@ class RecurringTransactionManager {
         endDate,
         maxOccurrences,
         year,
-        month
+        month,
+        filterYear,
+        filterMonth
       );
       return;
     }
@@ -498,14 +579,19 @@ class RecurringTransactionManager {
       originalDateString = origDate;
     }
     if (!endDate || targetDate <= endDate) {
-      const dateString = Utils.formatDateString(targetDate);
-      this.addRecurringTransactionToDate(
-        rt, 
-        dateString, 
-        targetDate, 
-        startDate, 
-        originalDateString
-      );
+      if (
+        targetDate.getFullYear() === filterYear &&
+        targetDate.getMonth() === filterMonth
+      ) {
+        const dateString = Utils.formatDateString(targetDate);
+        this.addRecurringTransactionToDate(
+          rt, 
+          dateString, 
+          targetDate, 
+          startDate, 
+          originalDateString
+        );
+      }
     }
   }
 
@@ -516,7 +602,9 @@ class RecurringTransactionManager {
     endDate,
     maxOccurrences,
     year,
-    month
+    month,
+    filterYear = year,
+    filterMonth = month
   ) {
     const startOfMonth = new Date(year, month, 1);
     const endOfMonth = new Date(year, month + 1, 0);
@@ -529,12 +617,15 @@ class RecurringTransactionManager {
     if (maxOccurrences && monthsSinceStart >= maxOccurrences) {
       return;
     }
-    const [occurrence, dayOfWeek] = rt.daySpecificData.split("-").map(Number);
+    const parsed = this.parseDaySpecificData(rt.daySpecificData);
+    if (!parsed) {
+      return;
+    }
     const targetDate = this.getNthDayOfMonth(
       year,
       month,
-      dayOfWeek,
-      occurrence
+      parsed.dayOfWeek,
+      parsed.occurrence
     );
 
     if (!targetDate || (endDate && targetDate > endDate)) {
@@ -549,14 +640,19 @@ class RecurringTransactionManager {
       originalDateString = result.originalDateString;
     }
     if (!endDate || adjustedDate <= endDate) {
-      const dateString = Utils.formatDateString(adjustedDate);
-      this.addRecurringTransactionToDate(
-        rt,
-        dateString,
-        adjustedDate,
-        startDate,
-        originalDateString
-      );
+      if (
+        adjustedDate.getFullYear() === filterYear &&
+        adjustedDate.getMonth() === filterMonth
+      ) {
+        const dateString = Utils.formatDateString(adjustedDate);
+        this.addRecurringTransactionToDate(
+          rt,
+          dateString,
+          adjustedDate,
+          startDate,
+          originalDateString
+        );
+      }
     }
   }
 
@@ -567,7 +663,9 @@ class RecurringTransactionManager {
     endDate,
     maxOccurrences,
     year,
-    month
+    month,
+    filterYear = year,
+    filterMonth = month
   ) {
     const startOfMonth = new Date(year, month, 1);
     const endOfMonth = new Date(year, month + 1, 0);
@@ -607,14 +705,19 @@ class RecurringTransactionManager {
         originalDateString = result.originalDateString;
       }
       if (!endDate || firstDateObj <= endDate) {
-        const dateString = Utils.formatDateString(firstDateObj);
-        this.addRecurringTransactionToDate(
-          rt,
-          dateString,
-          firstDateObj,
-          startDate,
-          originalDateString
-        );
+        if (
+          firstDateObj.getFullYear() === filterYear &&
+          firstDateObj.getMonth() === filterMonth
+        ) {
+          const dateString = Utils.formatDateString(firstDateObj);
+          this.addRecurringTransactionToDate(
+            rt,
+            dateString,
+            firstDateObj,
+            startDate,
+            originalDateString
+          );
+        }
       }
 
       occurrenceCount++;
@@ -635,14 +738,19 @@ class RecurringTransactionManager {
         originalDateString = result.originalDateString;
       }
       if (!endDate || secondDateObj <= endDate) {
-        const dateString = Utils.formatDateString(secondDateObj);
-        this.addRecurringTransactionToDate(
-          rt,
-          dateString,
-          secondDateObj,
-          startDate,
-          originalDateString
-        );
+        if (
+          secondDateObj.getFullYear() === filterYear &&
+          secondDateObj.getMonth() === filterMonth
+        ) {
+          const dateString = Utils.formatDateString(secondDateObj);
+          this.addRecurringTransactionToDate(
+            rt,
+            dateString,
+            secondDateObj,
+            startDate,
+            originalDateString
+          );
+        }
       }
     }
   }
@@ -654,7 +762,9 @@ class RecurringTransactionManager {
     endDate,
     maxOccurrences,
     year,
-    month
+    month,
+    filterYear = year,
+    filterMonth = month
   ) {
     const startMonth = startDate.getMonth();
     const monthsSinceStart =
@@ -680,14 +790,19 @@ class RecurringTransactionManager {
       originalDateString = result.originalDateString;
     }
     if (!endDate || targetDate <= endDate) {
-      const dateString = Utils.formatDateString(targetDate);
-      this.addRecurringTransactionToDate(
-        rt, 
-        dateString, 
-        targetDate, 
-        startDate, 
-        originalDateString
-      );
+      if (
+        targetDate.getFullYear() === filterYear &&
+        targetDate.getMonth() === filterMonth
+      ) {
+        const dateString = Utils.formatDateString(targetDate);
+        this.addRecurringTransactionToDate(
+          rt, 
+          dateString, 
+          targetDate, 
+          startDate, 
+          originalDateString
+        );
+      }
     }
   }
   
@@ -698,7 +813,9 @@ class RecurringTransactionManager {
     endDate,
     maxOccurrences,
     year,
-    month
+    month,
+    filterYear = year,
+    filterMonth = month
   ) {
     const startMonth = startDate.getMonth();
     const monthsSinceStart =
@@ -724,19 +841,33 @@ class RecurringTransactionManager {
       originalDateString = result.originalDateString;
     }
     if (!endDate || targetDate <= endDate) {
-      const dateString = Utils.formatDateString(targetDate);
-      this.addRecurringTransactionToDate(
-        rt, 
-        dateString, 
-        targetDate, 
-        startDate, 
-        originalDateString
-      );
+      if (
+        targetDate.getFullYear() === filterYear &&
+        targetDate.getMonth() === filterMonth
+      ) {
+        const dateString = Utils.formatDateString(targetDate);
+        this.addRecurringTransactionToDate(
+          rt, 
+          dateString, 
+          targetDate, 
+          startDate, 
+          originalDateString
+        );
+      }
     }
   }
 
   
-  applyYearlyRecurrence(rt, startDate, endDate, maxOccurrences, year, month) {
+  applyYearlyRecurrence(
+    rt,
+    startDate,
+    endDate,
+    maxOccurrences,
+    year,
+    month,
+    filterYear = year,
+    filterMonth = month
+  ) {
     if (month !== startDate.getMonth()) {
       return;
     }
@@ -762,19 +893,33 @@ class RecurringTransactionManager {
       originalDateString = result.originalDateString;
     }
     if (!endDate || targetDate <= endDate) {
-      const dateString = Utils.formatDateString(targetDate);
-      this.addRecurringTransactionToDate(
-        rt, 
-        dateString, 
-        targetDate, 
-        startDate, 
-        originalDateString
-      );
+      if (
+        targetDate.getFullYear() === filterYear &&
+        targetDate.getMonth() === filterMonth
+      ) {
+        const dateString = Utils.formatDateString(targetDate);
+        this.addRecurringTransactionToDate(
+          rt, 
+          dateString, 
+          targetDate, 
+          startDate, 
+          originalDateString
+        );
+      }
     }
   }
   
   
-  applyCustomRecurrence(rt, startDate, endDate, maxOccurrences, year, month) {
+  applyCustomRecurrence(
+    rt,
+    startDate,
+    endDate,
+    maxOccurrences,
+    year,
+    month,
+    filterYear = year,
+    filterMonth = month
+  ) {
     if (!rt.customInterval) {
       console.warn("Custom recurrence missing interval data");
       return;
@@ -809,14 +954,19 @@ class RecurringTransactionManager {
         originalDateString = result.originalDateString;
       }
       if (!endDate || targetDate <= endDate) {
-        const dateString = Utils.formatDateString(targetDate);
-        this.addRecurringTransactionToDate(
-          rt,
-          dateString,
-          targetDate,
-          startDate,
-          originalDateString
-        );
+        if (
+          targetDate.getFullYear() === filterYear &&
+          targetDate.getMonth() === filterMonth
+        ) {
+          const dateString = Utils.formatDateString(targetDate);
+          this.addRecurringTransactionToDate(
+            rt,
+            dateString,
+            targetDate,
+            startDate,
+            originalDateString
+          );
+        }
       }
       occurrenceCount++;
       currentDate = this.getCustomIntervalDate(
@@ -853,15 +1003,20 @@ class RecurringTransactionManager {
     if (!transactions[dateString]) {
       transactions[dateString] = [];
     }
-    const existingModifiedInstance = transactions[dateString].find(
-      (t) => t.recurringId === rt.id && t.modifiedInstance
-    );
-    const existingNormalInstance = transactions[dateString].find(
-      (t) => t.recurringId === rt.id && !t.modifiedInstance
-    );
-    if (!existingModifiedInstance && !existingNormalInstance) {
+    const occurrenceKey = originalDateString || dateString;
+    const existingInstance = transactions[dateString].some((t) => {
+      if (t.recurringId !== rt.id) {
+        return false;
+      }
+      const existingKey = t.originalDate || dateString;
+      return existingKey === occurrenceKey;
+    });
+    if (!existingInstance) {
+      const scheduledDate = originalDateString
+        ? this.parseDateString(originalDateString)
+        : currentDate;
       const amount = rt.variableAmount
-        ? this.calculateVariableAmount(rt, currentDate, startDate)
+        ? this.calculateVariableAmount(rt, scheduledDate, startDate)
         : rt.amount;
 
       const newTransaction = {
@@ -870,6 +1025,15 @@ class RecurringTransactionManager {
         description: rt.description,
         recurringId: rt.id,
       };
+      if (rt.debtId) {
+        newTransaction.debtId = rt.debtId;
+      }
+      if (rt.debtRole) {
+        newTransaction.debtRole = rt.debtRole;
+      }
+      if (rt.debtName) {
+        newTransaction.debtName = rt.debtName;
+      }
       if (originalDateString) {
         newTransaction.originalDate = originalDateString;
       }
@@ -891,19 +1055,13 @@ class RecurringTransactionManager {
 
       switch (rt.recurrence) {
         case "daily":
-          occurrences = Math.floor(
-            (currentDate - startDate) / (1000 * 60 * 60 * 24)
-          );
+          occurrences = this.daysBetween(startDate, currentDate);
           break;
         case "weekly":
-          occurrences = Math.floor(
-            (currentDate - startDate) / (1000 * 60 * 60 * 24 * 7)
-          );
+          occurrences = Math.floor(this.daysBetween(startDate, currentDate) / 7);
           break;
         case "bi-weekly":
-          occurrences = Math.floor(
-            (currentDate - startDate) / (1000 * 60 * 60 * 24 * 14)
-          );
+          occurrences = Math.floor(this.daysBetween(startDate, currentDate) / 14);
           break;
         case "monthly":
           occurrences =
@@ -912,18 +1070,7 @@ class RecurringTransactionManager {
             startDate.getMonth();
           break;
         case "semi-monthly":
-          occurrences =
-            (currentDate.getFullYear() - startDate.getFullYear()) * 24 +
-            (currentDate.getMonth() - startDate.getMonth()) * 2;
-          if (startDate.getDate() < 15 && currentDate.getDate() >= 15)
-            occurrences += 1;
-          if (
-            startDate.getDate() >= 15 &&
-            currentDate.getDate() < 15 &&
-            (currentDate.getMonth() > startDate.getMonth() ||
-              currentDate.getFullYear() > startDate.getFullYear())
-          )
-            occurrences += 1;
+          occurrences = this.countOccurrencesBefore(rt, currentDate);
           break;
         case "quarterly":
           occurrences = Math.floor(
@@ -949,13 +1096,11 @@ class RecurringTransactionManager {
             const custom = rt.customInterval;
             if (custom.unit === "days") {
               occurrences = Math.floor(
-                (currentDate - startDate) / (1000 * 60 * 60 * 24) / custom.value
+                this.daysBetween(startDate, currentDate) / custom.value
               );
             } else if (custom.unit === "weeks") {
               occurrences = Math.floor(
-                (currentDate - startDate) /
-                  (1000 * 60 * 60 * 24 * 7) /
-                  custom.value
+                this.daysBetween(startDate, currentDate) / (custom.value * 7)
               );
             } else if (custom.unit === "months") {
               const monthsDiff =
@@ -982,19 +1127,15 @@ class RecurringTransactionManager {
 
     switch (rt.recurrence) {
       case "daily":
-        count = Math.floor((beforeDate - startDate) / (1000 * 60 * 60 * 24));
+        count = this.daysBetween(startDate, beforeDate);
         break;
 
       case "weekly":
-        count = Math.floor(
-          (beforeDate - startDate) / (1000 * 60 * 60 * 24 * 7)
-        );
+        count = Math.floor(this.daysBetween(startDate, beforeDate) / 7);
         break;
 
       case "bi-weekly":
-        count = Math.floor(
-          (beforeDate - startDate) / (1000 * 60 * 60 * 24 * 14)
-        );
+        count = Math.floor(this.daysBetween(startDate, beforeDate) / 14);
         break;
 
       case "monthly":
@@ -1013,15 +1154,19 @@ class RecurringTransactionManager {
 
         const firstDay = rt.semiMonthlyDays ? rt.semiMonthlyDays[0] : 1;
         const secondDay = rt.semiMonthlyDays ? rt.semiMonthlyDays[1] : 15;
+        const effectiveSecondDay =
+          rt.semiMonthlyLastDay || secondDay === 31
+            ? new Date(beforeDate.getFullYear(), beforeDate.getMonth() + 1, 0).getDate()
+            : secondDay;
 
         if (startDate.getDate() <= firstDay) {
           if (beforeDate.getDate() < firstDay) {
             count -= 2;
-          } else if (beforeDate.getDate() < secondDay) {
+          } else if (beforeDate.getDate() < effectiveSecondDay) {
             count -= 1;
           }
         } else if (startDate.getDate() <= secondDay) {
-          if (beforeDate.getDate() < secondDay) {
+          if (beforeDate.getDate() < effectiveSecondDay) {
             count -= 1;
           }
         }
@@ -1058,15 +1203,12 @@ class RecurringTransactionManager {
         if (rt.customInterval) {
           if (rt.customInterval.unit === "days") {
             count = Math.floor(
-              (beforeDate - startDate) /
-                (1000 * 60 * 60 * 24) /
-                rt.customInterval.value
+              this.daysBetween(startDate, beforeDate) / rt.customInterval.value
             );
           } else if (rt.customInterval.unit === "weeks") {
             count = Math.floor(
-              (beforeDate - startDate) /
-                (1000 * 60 * 60 * 24 * 7) /
-                rt.customInterval.value
+              this.daysBetween(startDate, beforeDate) /
+                (rt.customInterval.value * 7)
             );
           } else if (rt.customInterval.unit === "months") {
             const monthsDiff =
@@ -1145,6 +1287,15 @@ class RecurringTransactionManager {
           recurringTransaction.variableType;
         newRecurringTransaction.variablePercentage =
           recurringTransaction.variablePercentage;
+      }
+
+      if (recurringTransaction.endDate) {
+        const originalEndDate = this.parseDateString(
+          recurringTransaction.endDate
+        );
+        if (originalEndDate >= startDate) {
+          newRecurringTransaction.endDate = recurringTransaction.endDate;
+        }
       }
 
       if (recurringTransaction.maxOccurrences) {

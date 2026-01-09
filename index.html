@@ -234,6 +234,84 @@
       </div>
     </div>
 
+    <div
+      id="debtSnowballModal"
+      class="modal"
+      role="dialog"
+      aria-labelledby="debtSnowballTitle"
+      aria-modal="true"
+      aria-hidden="true"
+    >
+      <div class="modal-content debt-snowball-modal">
+        <button
+          id="debtSnowballClose"
+          class="debt-close"
+          aria-label="Close"
+          type="button"
+        >
+          &times;
+        </button>
+        <h3 id="debtSnowballTitle">Debt Snowball</h3>
+
+        <div class="debt-snowball-section">
+          <h4>Debts</h4>
+          <div id="debtList" class="debt-list"></div>
+          <button id="addDebtButton" class="primary-button">Add Debt</button>
+
+          <div id="debtForm" class="debt-form" style="display: none">
+            <h4 id="debtFormTitle">Add Debt</h4>
+            <div class="debt-form-grid">
+              <label for="debtName">Name</label>
+              <input type="text" id="debtName" />
+              <label for="debtBalance">Balance</label>
+              <input type="number" id="debtBalance" step="0.01" min="0" />
+              <label for="debtMinPayment">Min Payment</label>
+              <input type="number" id="debtMinPayment" step="0.01" min="0" />
+              <label for="debtDueDay">Due Day</label>
+              <input type="number" id="debtDueDay" min="1" max="31" />
+              <label for="debtInterestRate">Interest Rate (%)</label>
+              <input type="number" id="debtInterestRate" step="0.01" min="0" />
+            </div>
+            <div class="debt-form-actions">
+              <button id="saveDebtButton" class="primary-button">
+                Save Debt
+              </button>
+              <button id="cancelDebtButton" class="secondary-button">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="debt-snowball-section">
+          <h4>Plan</h4>
+          <div class="debt-plan-controls">
+            <label for="snowballExtraAmount">Extra payment per month</label>
+            <input
+              type="number"
+              id="snowballExtraAmount"
+              step="0.01"
+              min="0"
+            />
+            <label class="debt-checkbox">
+              <input type="checkbox" id="snowballAutoGenerate" />
+              Auto-generate monthly snowball payment
+            </label>
+            <div class="debt-plan-actions">
+              <button id="saveSnowballSettings" class="primary-button">
+                Save Settings
+              </button>
+              <button id="generateSnowballPayment" class="secondary-button">
+                Generate for Current Month
+              </button>
+            </div>
+          </div>
+          <div id="snowballPlanSummary"></div>
+          <div id="snowballPlanList"></div>
+        </div>
+      </div>
+    </div>
+
     <script src="js/utils.js"></script>
 
     <script src="js/transaction-store.js"></script>
@@ -243,6 +321,7 @@
     <script src="js/transaction-ui.js"></script>
     <script src="js/calendar-ui.js"></script>
     <script src="js/search-ui.js"></script>
+    <script src="js/debt-snowball.js"></script>
     <script src="js/cloud-sync.js"></script>
 
     <script src="js/pin-protection.js"></script>

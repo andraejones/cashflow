@@ -3,8 +3,16 @@ class PinProtection {
     this.currentPin = "";
   }
 
+  encodeBase64(value) {
+    return btoa(unescape(encodeURIComponent(value)));
+  }
+
+  decodeBase64(value) {
+    return decodeURIComponent(escape(atob(value)));
+  }
+
   hashPin(pin) {
-    return btoa(pin).split("").reverse().join("");
+    return this.encodeBase64(pin).split("").reverse().join("");
   }
 
   isPinSet() {
@@ -32,13 +40,13 @@ class PinProtection {
   encrypt(value) {
     if (!this.currentPin) return value;
     const xor = Array.from(value).map((ch, i) => String.fromCharCode(ch.charCodeAt(0) ^ this.currentPin.charCodeAt(i % this.currentPin.length))).join("");
-    return btoa(xor);
+    return this.encodeBase64(xor);
   }
 
   decrypt(value) {
     if (!this.currentPin) return value;
     try {
-      const decoded = atob(value);
+      const decoded = this.decodeBase64(value);
       const xor = Array.from(decoded).map((ch, i) => String.fromCharCode(ch.charCodeAt(0) ^ this.currentPin.charCodeAt(i % this.currentPin.length))).join("");
       return xor;
     } catch (e) {

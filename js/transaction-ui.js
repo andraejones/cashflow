@@ -558,102 +558,184 @@ class TransactionUI {
               }
             }
           }
-          transactionDiv.innerHTML = `
-            <span class="${t.type} ${
-            isSkipped ? "skipped" : ""
-          }" style="opacity: ${isSkipped ? "0.5" : "1"}">
-              ${t.type === "balance" ? "=" : t.type === "income" ? "+" : "-"}
-              $${t.amount.toFixed(2)}
-              ${isSkipped ? " (Skipped)" : ""}
-            </span>
-            ${t.description ? ` - ${t.description}` : ""}
-            ${
-              isRecurring
-                ? ` (Recurring${recurrenceType ? " " + recurrenceType : ""}${additionalInfo})`
-                : ""
-            }
-            <span class="edit-btn" role="button" tabindex="0" 
-                  aria-label="Edit ${t.type} of $${t.amount.toFixed(2)} ${
-            t.description ? t.description : ""
-          }">Edit</span>
-            <span class="delete-btn" role="button" tabindex="0"
-                  aria-label="Delete ${t.type} of $${t.amount.toFixed(2)} ${
-            t.description ? t.description : ""
-          }">Delete</span>
-            ${
-              isRecurring
-                ? `
-              <span class="skip-btn" role="button" tabindex="0"
-                    aria-label="${isSkipped ? "Unskip" : "Skip"} recurring ${
-                    t.type
-                  }">
-                ${isSkipped ? "Unskip" : "Skip"}
-              </span>
-            `
-                : ""
-            }
-            <div class="edit-form" id="edit-form-${date}-${index}" style="display: none;">
-              <input type="number" id="edit-amount-${date}-${index}" 
-                     value="${t.amount}" step="0.01" min="0" aria-label="Amount">
-              <select id="edit-type-${date}-${index}" aria-label="Type">
-                <option value="expense" ${
-                  t.type === "expense" ? "selected" : ""
-                }>Expense</option>
-                <option value="income" ${
-                  t.type === "income" ? "selected" : ""
-                }>Income</option>
-                <option value="balance" ${
-                  t.type === "balance" ? "selected" : ""
-                }>Balance</option>
-              </select>
-              <input type="text" id="edit-description-${date}-${index}" 
-                     value="${
-                       t.description || ""
-                     }" placeholder="Description" aria-label="Description">
-              ${
-                isRecurring && t.type !== "balance"
-                  ? `
-                <select id="edit-recurrence-${date}-${index}" aria-label="Edit scope">
-                  <option value="this">Edit this occurrence only</option>
-                  <option value="future">Edit this and future occurrences</option>
-                  <option value="all">Edit all occurrences</option>
-                </select>
-              `
-                  : ""
-              }
-              <button aria-label="Save changes" 
-                      onclick="app.transactionUI.saveEdit('${date}', ${index})">Save</button>
-              <button aria-label="Cancel editing" 
-                      onclick="document.getElementById('edit-form-${date}-${index}').style.display='none'">
-                Cancel
-              </button>
-            </div>
-          `;
-          const editBtn = transactionDiv.querySelector(".edit-btn");
-          const deleteBtn = transactionDiv.querySelector(".delete-btn");
-          const skipBtn = transactionDiv.querySelector(".skip-btn");
-          if (editBtn) {
-            editBtn.addEventListener("click", () =>
-              this.showEditForm(date, index)
-            );
-            editBtn.addEventListener("keydown", (event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                this.showEditForm(date, index);
-              }
-            });
+          const normalizedType = this.normalizeTransactionType(t.type);
+          const descriptionText =
+            typeof t.description === "string" ? t.description : "";
+          const sign =
+            normalizedType === "balance"
+              ? "="
+              : normalizedType === "income"
+              ? "+"
+              : "-";
+          const amountSpan = document.createElement("span");
+          amountSpan.classList.add(normalizedType);
+          if (isSkipped) {
+            amountSpan.classList.add("skipped");
           }
-          if (deleteBtn) {
-            deleteBtn.addEventListener("click", () =>
-              this.deleteTransaction(date, index)
+          amountSpan.style.opacity = isSkipped ? "0.5" : "1";
+          amountSpan.textContent = `${sign}$${t.amount.toFixed(2)}${
+            isSkipped ? " (Skipped)" : ""
+          }`;
+          transactionDiv.appendChild(amountSpan);
+
+          if (descriptionText) {
+            transactionDiv.appendChild(
+              document.createTextNode(` - ${descriptionText}`)
             );
-            deleteBtn.addEventListener("keydown", (event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                this.deleteTransaction(date, index);
-              }
-            });
           }
+
+          if (isRecurring) {
+            const recurringText = ` (Recurring${
+              recurrenceType ? " " + recurrenceType : ""
+            }${additionalInfo})`;
+            transactionDiv.appendChild(document.createTextNode(recurringText));
+          }
+
+          const editBtn = document.createElement("span");
+          editBtn.className = "edit-btn";
+          editBtn.setAttribute("role", "button");
+          editBtn.setAttribute("tabindex", "0");
+          editBtn.setAttribute(
+            "aria-label",
+            `Edit ${normalizedType} of $${t.amount.toFixed(2)}${
+              descriptionText ? " " + descriptionText : ""
+            }`
+          );
+          editBtn.textContent = "Edit";
+          transactionDiv.appendChild(editBtn);
+
+          const deleteBtn = document.createElement("span");
+          deleteBtn.className = "delete-btn";
+          deleteBtn.setAttribute("role", "button");
+          deleteBtn.setAttribute("tabindex", "0");
+          deleteBtn.setAttribute(
+            "aria-label",
+            `Delete ${normalizedType} of $${t.amount.toFixed(2)}${
+              descriptionText ? " " + descriptionText : ""
+            }`
+          );
+          deleteBtn.textContent = "Delete";
+          transactionDiv.appendChild(deleteBtn);
+
+          let skipBtn = null;
+          if (isRecurring) {
+            skipBtn = document.createElement("span");
+            skipBtn.className = "skip-btn";
+            skipBtn.setAttribute("role", "button");
+            skipBtn.setAttribute("tabindex", "0");
+            skipBtn.setAttribute(
+              "aria-label",
+              `${isSkipped ? "Unskip" : "Skip"} recurring ${normalizedType}`
+            );
+            skipBtn.textContent = isSkipped ? "Unskip" : "Skip";
+            transactionDiv.appendChild(skipBtn);
+          }
+
+          const editForm = document.createElement("div");
+          editForm.className = "edit-form";
+          editForm.id = `edit-form-${date}-${index}`;
+          editForm.style.display = "none";
+
+          const amountInput = document.createElement("input");
+          amountInput.type = "number";
+          amountInput.id = `edit-amount-${date}-${index}`;
+          amountInput.value = t.amount;
+          amountInput.step = "0.01";
+          amountInput.min = "0";
+          amountInput.setAttribute("aria-label", "Amount");
+          editForm.appendChild(amountInput);
+
+          const typeSelect = document.createElement("select");
+          typeSelect.id = `edit-type-${date}-${index}`;
+          typeSelect.setAttribute("aria-label", "Type");
+          const expenseOption = document.createElement("option");
+          expenseOption.value = "expense";
+          expenseOption.textContent = "Expense";
+          if (normalizedType === "expense") {
+            expenseOption.selected = true;
+          }
+          const incomeOption = document.createElement("option");
+          incomeOption.value = "income";
+          incomeOption.textContent = "Income";
+          if (normalizedType === "income") {
+            incomeOption.selected = true;
+          }
+          const balanceOption = document.createElement("option");
+          balanceOption.value = "balance";
+          balanceOption.textContent = "Balance";
+          if (normalizedType === "balance") {
+            balanceOption.selected = true;
+          }
+          typeSelect.appendChild(expenseOption);
+          typeSelect.appendChild(incomeOption);
+          typeSelect.appendChild(balanceOption);
+          editForm.appendChild(typeSelect);
+
+          const descriptionInput = document.createElement("input");
+          descriptionInput.type = "text";
+          descriptionInput.id = `edit-description-${date}-${index}`;
+          descriptionInput.value = descriptionText;
+          descriptionInput.placeholder = "Description";
+          descriptionInput.setAttribute("aria-label", "Description");
+          editForm.appendChild(descriptionInput);
+
+          if (isRecurring && normalizedType !== "balance") {
+            const editScopeSelect = document.createElement("select");
+            editScopeSelect.id = `edit-recurrence-${date}-${index}`;
+            editScopeSelect.setAttribute("aria-label", "Edit scope");
+
+            const thisOption = document.createElement("option");
+            thisOption.value = "this";
+            thisOption.textContent = "Edit this occurrence only";
+            const futureOption = document.createElement("option");
+            futureOption.value = "future";
+            futureOption.textContent = "Edit this and future occurrences";
+            const allOption = document.createElement("option");
+            allOption.value = "all";
+            allOption.textContent = "Edit all occurrences";
+
+            editScopeSelect.appendChild(thisOption);
+            editScopeSelect.appendChild(futureOption);
+            editScopeSelect.appendChild(allOption);
+            editForm.appendChild(editScopeSelect);
+          }
+
+          const saveButton = document.createElement("button");
+          saveButton.setAttribute("aria-label", "Save changes");
+          saveButton.textContent = "Save";
+          saveButton.addEventListener("click", () => {
+            this.saveEdit(date, index);
+          });
+          editForm.appendChild(saveButton);
+
+          const cancelButton = document.createElement("button");
+          cancelButton.setAttribute("aria-label", "Cancel editing");
+          cancelButton.textContent = "Cancel";
+          cancelButton.addEventListener("click", () => {
+            editForm.style.display = "none";
+          });
+          editForm.appendChild(cancelButton);
+
+          transactionDiv.appendChild(editForm);
+
+          editBtn.addEventListener("click", () =>
+            this.showEditForm(date, index)
+          );
+          editBtn.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              this.showEditForm(date, index);
+            }
+          });
+          deleteBtn.addEventListener("click", () =>
+            this.deleteTransaction(date, index)
+          );
+          deleteBtn.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              this.deleteTransaction(date, index);
+            }
+          });
           if (skipBtn) {
             skipBtn.addEventListener("click", () =>
               this.toggleSkipTransaction(date, t.recurringId)
@@ -747,17 +829,23 @@ class TransactionUI {
       if (modalTransactions) {
         const transactions = this.store.getTransactions();
         if (transactions[date] && transactions[date].length > 0) {
-          let html = "";
-          transactions[date].forEach(t => {
-            html += `<div>
-              ${t.type === "balance" ? "=" : t.type === "income" ? "+" : "-"}
-              $${t.amount.toFixed(2)}
-              ${t.description ? ` - ${t.description}` : ""}
-            </div>`;
+          modalTransactions.innerHTML = "";
+          transactions[date].forEach((t) => {
+            const row = document.createElement("div");
+            const sign = t.type === "balance" ? "=" : t.type === "income" ? "+" : "-";
+            row.appendChild(
+              document.createTextNode(`${sign}$${t.amount.toFixed(2)}`)
+            );
+            if (typeof t.description === "string" && t.description) {
+              row.appendChild(document.createTextNode(` - ${t.description}`));
+            }
+            modalTransactions.appendChild(row);
           });
-          modalTransactions.innerHTML = html;
         } else {
-          modalTransactions.innerHTML = "<p>No transactions for this date.</p>";
+          const emptyMessage = document.createElement("p");
+          emptyMessage.textContent = "No transactions for this date.";
+          modalTransactions.innerHTML = "";
+          modalTransactions.appendChild(emptyMessage);
         }
       }
     } catch (error) {
@@ -1097,6 +1185,14 @@ class TransactionUI {
         break;
       }
     }
+  }
+
+  
+  normalizeTransactionType(type) {
+    if (type === "income" || type === "expense" || type === "balance") {
+      return type;
+    }
+    return "expense";
   }
 
   
