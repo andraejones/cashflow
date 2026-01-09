@@ -216,7 +216,7 @@ class CloudSync {
         reject(new Error("Credentials entry cancelled"));
       };
 
-      saveBtn.onclick = () => {
+      saveBtn.onclick = async () => {
         const token = tokenInput.value.trim();
         const gistId = gistInput.value.trim();
         this.autoSyncEnabled = autoSyncCheck.checked;
@@ -227,7 +227,10 @@ class CloudSync {
         }
 
         if (!token) {
-          alert("Please enter a GitHub token");
+          await Utils.showModalAlert(
+            "Please enter a GitHub token",
+            "Missing Token"
+          );
           return;
         }
 
@@ -395,7 +398,11 @@ class CloudSync {
           throw new Error("Invalid GitHub token or missing gist permissions");
         }
         if (response.status === 404) {
-          const createNew = confirm("Gist not found. Would you like to create a new one?");
+          const createNew = await Utils.showModalConfirm(
+            "Gist not found. Would you like to create a new one?",
+            "Gist Not Found",
+            { confirmText: "Create New", cancelText: "Cancel" }
+          );
           if (createNew) {
             Utils.showNotification("Creating new Gist...");
             const newGistId = await this.createNewGist(token, data);

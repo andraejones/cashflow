@@ -195,6 +195,49 @@ body {
   overflow-y: auto;
 }
 
+.app-modal-content {
+  max-width: 420px;
+}
+
+.app-modal-body {
+  margin-top: 12px;
+}
+
+.app-modal-message {
+  margin: 0;
+}
+
+.app-modal-input-wrapper {
+  display: none;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+  font-weight: 600;
+}
+
+.app-modal-input-wrapper.is-visible {
+  display: flex;
+}
+
+.app-modal-input {
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  font-size: 1rem;
+  padding: 10px;
+}
+
+.app-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.app-modal-actions button {
+  min-width: 110px;
+}
+
 .close {
   color: #aaa;
   float: right;
