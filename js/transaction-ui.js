@@ -954,8 +954,13 @@ class TransactionUI {
         {
           confirmText: "Delete All Future",
           cancelText: "Delete Only This",
+          closeReturnsNull: true,
         }
       );
+
+      if (confirmDelete === null) {
+        return;
+      }
 
       this.recurringManager.deleteTransaction(date, index, confirmDelete);
     } else {

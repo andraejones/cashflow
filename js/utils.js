@@ -77,6 +77,7 @@ const Utils = {
     inputLabel = "",
     inputValue = "",
     inputType = "text",
+    closeReturnsNull = false,
   } = {}) {
     const elements = this.getAppModalElements();
     if (!elements) {
@@ -154,16 +155,24 @@ const Utils = {
         }
       };
 
+      const handleClose = () => {
+        if (closeReturnsNull) {
+          closeModal(null);
+        } else {
+          handleCancel();
+        }
+      };
+
       const handleBackdrop = (event) => {
         if (event.target === modal) {
-          handleCancel();
+          handleClose();
         }
       };
 
       const handleKeydown = (event) => {
         if (event.key === "Escape") {
           event.preventDefault();
-          handleCancel();
+          handleClose();
         }
         if (event.key === "Enter" && showInput) {
           event.preventDefault();
@@ -173,7 +182,7 @@ const Utils = {
 
       confirmButton.addEventListener("click", handleConfirm);
       cancelButton.addEventListener("click", handleCancel);
-      closeButton.addEventListener("click", handleCancel);
+      closeButton.addEventListener("click", handleClose);
       modal.addEventListener("click", handleBackdrop);
       modal.addEventListener("keydown", handleKeydown);
 
@@ -198,6 +207,7 @@ const Utils = {
       showCancel: true,
       confirmText: options.confirmText || "OK",
       cancelText: options.cancelText || "Cancel",
+      closeReturnsNull: options.closeReturnsNull === true,
     });
   },
 
