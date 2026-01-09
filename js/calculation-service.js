@@ -25,7 +25,8 @@ class CalculationService {
     let earliestDate = null;
     let latestDate = null;
     for (const dateString in transactions) {
-      const transactionDate = new Date(dateString);
+      const [year, month, day] = dateString.split("-").map(Number);
+      const transactionDate = new Date(year, month - 1, day);
       if (earliestDate === null || transactionDate < earliestDate) {
         earliestDate = transactionDate;
       }
@@ -103,8 +104,7 @@ class CalculationService {
       let monthIncome = 0;
       let monthExpense = 0;
       let runningBalance = previousBalance;
-      let lastBalanceSet = null;
-      let lastBalanceDate = null;
+      let firstDayBalance = null;
       const isFirstMonth = index === 0;
       const daysInMonth = new Date(year, month, 0).getDate();
       for (let day = 1; day <= daysInMonth; day++) {
@@ -117,10 +117,11 @@ class CalculationService {
             if (t.type === "balance") {
               balanceSet = true;
               dailyBalance = t.amount;
-              lastBalanceSet = t.amount;
-              lastBalanceDate = dateString;
             }
           });
+          if (day === 1 && balanceSet) {
+            firstDayBalance = dailyBalance;
+          }
           transactions[dateString].forEach((t) => {
             const isSkipped =
               t.recurringId &&
@@ -147,9 +148,9 @@ class CalculationService {
           runningBalance = dailyBalance;
         }
       }
-      if (lastBalanceSet !== null && lastBalanceDate === `${year}-${month.toString().padStart(2, "0")}-01`) {
+      if (firstDayBalance !== null) {
         monthlyBalances[monthKey] = {
-          startingBalance: lastBalanceSet,
+          startingBalance: firstDayBalance,
           endingBalance: runningBalance,
         };
       } else {

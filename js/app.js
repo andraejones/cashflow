@@ -20,17 +20,24 @@ class CashflowApp {
       this.cloudSync
     );
 
-    this.calendarUI = new CalendarUI(
-      this.store,
-      this.recurringManager,
-      this.calculationService,
-      this.transactionUI
-    );
-
     this.searchUI = new SearchUI(
       this.store,
       this.recurringManager,
       this.transactionUI
+    );
+
+    this.debtSnowball = new DebtSnowballUI(
+      this.store,
+      this.recurringManager,
+      () => this.updateUI()
+    );
+
+    this.calendarUI = new CalendarUI(
+      this.store,
+      this.recurringManager,
+      this.calculationService,
+      this.transactionUI,
+      this.debtSnowball
     );
     this.init();
   }

@@ -2,11 +2,18 @@
 
 class CalendarUI {
   
-  constructor(store, recurringManager, calculationService, transactionUI) {
+  constructor(
+    store,
+    recurringManager,
+    calculationService,
+    transactionUI,
+    debtSnowball = null
+  ) {
     this.store = store;
     this.recurringManager = recurringManager;
     this.calculationService = calculationService;
     this.transactionUI = transactionUI;
+    this.debtSnowball = debtSnowball;
     this.currentDate = new Date();
     this.initEventListeners();
   }
@@ -68,6 +75,9 @@ class CalendarUI {
       currentMonthElement.style.cursor = "pointer";
     }
     this.recurringManager.applyRecurringTransactions(year, month);
+    if (this.debtSnowball) {
+      this.debtSnowball.ensureSnowballPaymentForMonth(year, month);
+    }
     this.calculationService.updateMonthlyBalances(this.currentDate);
     const summary = this.calculationService.calculateMonthlySummary(
       year,
@@ -162,13 +172,54 @@ class CalendarUI {
     `;
     const pinLabel = window.pinProtection && pinProtection.isPinSet() ? "Change PIN" : "Set PIN";
     document.getElementById("calendarOptions").innerHTML = `
-      <span class="calendar-option" onclick="app.searchUI.showSearchModal()">Search</span> |
-      <span class="calendar-option" onclick="app.exportData()">Save to Device</span> |
-      <span class="calendar-option" onclick="app.importData()">Load from Device</span> |
-      <span class="calendar-option" onclick="app.cloudSync.saveToCloud()">Save to Cloud</span> |
-      <span class="calendar-option" onclick="app.cloudSync.loadFromCloud()">Load from Cloud</span> |
-      <span class="calendar-option" onclick="pinProtection.promptChangePin(app.store)">${pinLabel}</span> |
-      <span class="calendar-option" onclick="app.resetData()">Reset</span>
+      <button
+        type="button"
+        class="calendar-option"
+        onclick="app.searchUI.showSearchModal()"
+        aria-haspopup="dialog"
+        aria-controls="searchModal"
+      >
+        Search
+      </button>
+      <button
+        type="button"
+        class="calendar-option"
+        onclick="app.debtSnowball.showModal()"
+        aria-haspopup="dialog"
+        aria-controls="debtSnowballModal"
+      >
+        Debt Snowball
+      </button>
+      <button type="button" class="calendar-option" onclick="app.exportData()">
+        Save to Device
+      </button>
+      <button type="button" class="calendar-option" onclick="app.importData()">
+        Load from Device
+      </button>
+      <button
+        type="button"
+        class="calendar-option"
+        onclick="app.cloudSync.saveToCloud()"
+      >
+        Save to Cloud
+      </button>
+      <button
+        type="button"
+        class="calendar-option"
+        onclick="app.cloudSync.loadFromCloud()"
+      >
+        Load from Cloud
+      </button>
+      <button
+        type="button"
+        class="calendar-option"
+        onclick="pinProtection.promptChangePin(app.store)"
+      >
+        ${pinLabel}
+      </button>
+      <button type="button" class="calendar-option" onclick="app.resetData()">
+        Reset
+      </button>
     `;
   }
 
@@ -192,19 +243,24 @@ class CalendarUI {
     if (modalTransactions) {
       const transactions = this.store.getTransactions();
       if (transactions[date] && transactions[date].length > 0) {
-        let transactionsHtml = '';
+        modalTransactions.innerHTML = "";
         transactions[date].forEach((t) => {
-          transactionsHtml += `
-            <div>
-              <span class="${t.type}">${t.type === "balance" ? "=" : t.type === "income" ? "+" : "-"}
-              $${t.amount.toFixed(2)}</span>
-              ${t.description ? ` - ${t.description}` : ""}
-            </div>
-          `;
+          const row = document.createElement("div");
+          const amountSpan = document.createElement("span");
+          amountSpan.className = t.type;
+          const sign = t.type === "balance" ? "=" : t.type === "income" ? "+" : "-";
+          amountSpan.textContent = `${sign}$${t.amount.toFixed(2)}`;
+          row.appendChild(amountSpan);
+          if (typeof t.description === "string" && t.description) {
+            row.appendChild(document.createTextNode(` - ${t.description}`));
+          }
+          modalTransactions.appendChild(row);
         });
-        modalTransactions.innerHTML = transactionsHtml;
       } else {
-        modalTransactions.innerHTML = "<p>No transactions for this date.</p>";
+        const emptyMessage = document.createElement("p");
+        emptyMessage.textContent = "No transactions for this date.";
+        modalTransactions.innerHTML = "";
+        modalTransactions.appendChild(emptyMessage);
       }
     }
     modal.style.display = "block";

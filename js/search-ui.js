@@ -131,7 +131,11 @@ class SearchUI {
     this.searchResults.forEach(({ date, transaction }) => {
       const formattedDate = date.split("-").join("/");
       const amount = transaction.amount.toFixed(2);
-      const description = transaction.description.replace(/,/g, " ").replace(/"/g, '""');
+      const descriptionText =
+        typeof transaction.description === "string" ? transaction.description : "";
+      const description = descriptionText
+        .replace(/,/g, " ")
+        .replace(/"/g, '""');
       const type = transaction.type;
       const recurring = transaction.recurringId ? "Yes" : "No";
 
@@ -276,7 +280,9 @@ class SearchUI {
           });
           continue;
         }
-        const descriptionMatch = transaction.description
+        const descriptionText =
+          typeof transaction.description === "string" ? transaction.description : "";
+        const descriptionMatch = descriptionText
           .toLowerCase()
           .includes(searchTerm);
         const amountMatch = matchesAmount(transaction.amount, searchTerm);
@@ -336,7 +342,14 @@ class SearchUI {
       sortedResults.sort((a, b) => b.transaction.amount - a.transaction.amount);
     } else if (sortBy === "description") {
       sortedResults.sort((a, b) =>
-        a.transaction.description.localeCompare(b.transaction.description)
+        (typeof a.transaction.description === "string"
+          ? a.transaction.description
+          : ""
+        ).localeCompare(
+          typeof b.transaction.description === "string"
+            ? b.transaction.description
+            : ""
+        )
       );
     }
     const headerDiv = document.createElement("div");
@@ -368,20 +381,28 @@ class SearchUI {
       resultDiv.className = "search-result-item";
       resultDiv.setAttribute("role", "button");
       resultDiv.setAttribute("tabindex", "0");
-      resultDiv.innerHTML = `
-        <span class="search-result-date">${formattedDate}</span>
-        <span class="search-result-amount ${
-          transaction.type
-        }">${amountText}</span>
-        <span class="search-result-description">${
-          transaction.description
-        }</span>
-        ${
-          transaction.recurringId
-            ? '<span class="search-result-recurring">(Recurring)</span>'
-            : ""
-        }
-      `;
+      const dateSpan = document.createElement("span");
+      dateSpan.className = "search-result-date";
+      dateSpan.textContent = formattedDate;
+      resultDiv.appendChild(dateSpan);
+
+      const amountSpan = document.createElement("span");
+      amountSpan.className = `search-result-amount ${transaction.type}`;
+      amountSpan.textContent = amountText;
+      resultDiv.appendChild(amountSpan);
+
+      const descriptionSpan = document.createElement("span");
+      descriptionSpan.className = "search-result-description";
+      descriptionSpan.textContent =
+        typeof transaction.description === "string" ? transaction.description : "";
+      resultDiv.appendChild(descriptionSpan);
+
+      if (transaction.recurringId) {
+        const recurringSpan = document.createElement("span");
+        recurringSpan.className = "search-result-recurring";
+        recurringSpan.textContent = "(Recurring)";
+        resultDiv.appendChild(recurringSpan);
+      }
       resultDiv.addEventListener("click", () => {
         document.getElementById("searchModal").style.display = "none";
         this.transactionUI.showTransactionDetails(date);
