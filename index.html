@@ -267,11 +267,33 @@
               <input type="number" id="debtBalance" step="0.01" min="0" />
               <label for="debtMinPayment">Min Payment</label>
               <input type="number" id="debtMinPayment" step="0.01" min="0" />
+              <label for="debtRecurrence">Recurrence</label>
+              <select id="debtRecurrence">
+                <option value="once">One-time</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="bi-weekly">Bi-weekly</option>
+                <option value="monthly">Monthly</option>
+                <option value="semi-monthly">Twice a month</option>
+                <option value="quarterly">Quarterly</option>
+                <option value="semi-annual">Semi-annually</option>
+                <option value="yearly">Yearly</option>
+                <option value="custom">Custom...</option>
+              </select>
+              <label for="debtStartDate">First due date</label>
+              <input type="date" id="debtStartDate" />
               <label for="debtDueDay">Due Day</label>
               <input type="number" id="debtDueDay" min="1" max="31" />
+              <label for="debtDueDayPattern">Day pattern</label>
+              <select id="debtDueDayPattern"></select>
               <label for="debtInterestRate">Interest Rate (%)</label>
               <input type="number" id="debtInterestRate" step="0.01" min="0" />
             </div>
+            <div
+              id="debtAdvancedRecurrenceOptions"
+              class="advanced-recurrence-options"
+              style="display: none"
+            ></div>
             <div class="debt-form-actions">
               <button id="saveDebtButton" class="primary-button">
                 Save Debt

@@ -100,6 +100,37 @@ class TransactionStore {
           balance: Number(debt.balance) || 0,
           minPayment: Number(debt.minPayment) || 0,
           dueDay: Number(debt.dueDay) || 1,
+          dueDayPattern:
+            typeof debt.dueDayPattern === "string" ? debt.dueDayPattern : "",
+          recurrence:
+            typeof debt.recurrence === "string" ? debt.recurrence : "monthly",
+          dueStartDate:
+            typeof debt.dueStartDate === "string" ? debt.dueStartDate : "",
+          businessDayAdjustment:
+            typeof debt.businessDayAdjustment === "string"
+              ? debt.businessDayAdjustment
+              : "none",
+          semiMonthlyDays: Array.isArray(debt.semiMonthlyDays)
+            ? debt.semiMonthlyDays.map((day) => Number(day) || 1)
+            : null,
+          semiMonthlyLastDay: debt.semiMonthlyLastDay === true,
+          customInterval:
+            debt.customInterval && typeof debt.customInterval === "object"
+              ? {
+                  value: Number(debt.customInterval.value) || 1,
+                  unit:
+                    debt.customInterval.unit === "weeks" ||
+                    debt.customInterval.unit === "months"
+                      ? debt.customInterval.unit
+                      : "days",
+                }
+              : null,
+          variableAmount: debt.variableAmount === true,
+          variableType:
+            debt.variableType === "percentage" ? "percentage" : "percentage",
+          variablePercentage: Number(debt.variablePercentage) || 0,
+          endDate: typeof debt.endDate === "string" ? debt.endDate : "",
+          maxOccurrences: Number(debt.maxOccurrences) || null,
           interestRate: Number(debt.interestRate) || 0,
         }));
       }
@@ -496,6 +527,37 @@ class TransactionStore {
         balance: Number(debt.balance) || 0,
         minPayment: Number(debt.minPayment) || 0,
         dueDay: Number(debt.dueDay) || 1,
+        dueDayPattern:
+          typeof debt.dueDayPattern === "string" ? debt.dueDayPattern : "",
+        recurrence:
+          typeof debt.recurrence === "string" ? debt.recurrence : "monthly",
+        dueStartDate:
+          typeof debt.dueStartDate === "string" ? debt.dueStartDate : "",
+        businessDayAdjustment:
+          typeof debt.businessDayAdjustment === "string"
+            ? debt.businessDayAdjustment
+            : "none",
+        semiMonthlyDays: Array.isArray(debt.semiMonthlyDays)
+          ? debt.semiMonthlyDays.map((day) => Number(day) || 1)
+          : null,
+        semiMonthlyLastDay: debt.semiMonthlyLastDay === true,
+        customInterval:
+          debt.customInterval && typeof debt.customInterval === "object"
+            ? {
+                value: Number(debt.customInterval.value) || 1,
+                unit:
+                  debt.customInterval.unit === "weeks" ||
+                  debt.customInterval.unit === "months"
+                    ? debt.customInterval.unit
+                    : "days",
+              }
+            : null,
+        variableAmount: debt.variableAmount === true,
+        variableType:
+          debt.variableType === "percentage" ? "percentage" : "percentage",
+        variablePercentage: Number(debt.variablePercentage) || 0,
+        endDate: typeof debt.endDate === "string" ? debt.endDate : "",
+        maxOccurrences: Number(debt.maxOccurrences) || null,
         interestRate: Number(debt.interestRate) || 0,
       }));
       this.debtSnowballSettings = {
