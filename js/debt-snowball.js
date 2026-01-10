@@ -1283,7 +1283,8 @@ class DebtSnowballUI {
   calculateSnowballProjection(viewYear, viewMonth, includeExtra = true) {
     const debts = this.store.getDebts();
     const settings = this.store.getDebtSnowballSettings();
-    const extraPayment = includeExtra ? Number(settings.extraPayment) || 0 : 0;
+    const baseExtraPayment = Number(settings.extraPayment) || 0;
+    const applySnowball = includeExtra === true;
     const today = new Date();
     const currentYear = today.getFullYear();
     const currentMonth = today.getMonth();
@@ -1333,15 +1334,15 @@ class DebtSnowballUI {
       if (viewBalances === null && year === viewYear && month === viewMonth) {
         viewBalances = { ...balances };
       }
-      const activeDebtIds = Object.keys(balances).filter(
-        (debtId) => balances[debtId] > 0
-      );
-      if (!activeDebtIds.length) {
-        break;
-      }
-      activeDebtIds.forEach((debtId) => {
+      const monthKey = `${year}-${month + 1}`;
+      const monthIndex = this.getMonthIndex(year, month);
+      const monthlyTotalsByDebtId = {};
+      Object.keys(recurringTemplates).forEach((debtId) => {
         const template = recurringTemplates[debtId];
-        if (!template) return;
+        if (!template) {
+          monthlyTotalsByDebtId[debtId] = 0;
+          return;
+        }
         const occurrences = this.getRecurringOccurrencesForMonth(
           template,
           year,
@@ -1351,6 +1352,17 @@ class DebtSnowballUI {
           (sum, occurrence) => sum + occurrence.amount,
           0
         );
+        monthlyTotalsByDebtId[debtId] = totalPayment;
+      });
+
+      const activeDebtIds = Object.keys(balances).filter(
+        (debtId) => balances[debtId] > 0
+      );
+      if (!activeDebtIds.length) {
+        break;
+      }
+      activeDebtIds.forEach((debtId) => {
+        const totalPayment = monthlyTotalsByDebtId[debtId] || 0;
         if (totalPayment <= 0) return;
         balances[debtId] = Math.max(0, balances[debtId] - totalPayment);
         if (balances[debtId] === 0 && !payoffByDebtId[debtId]) {
@@ -1358,27 +1370,64 @@ class DebtSnowballUI {
         }
       });
 
+      const remainingDebtIds = Object.keys(balances).filter(
+        (debtId) => balances[debtId] > 0
+      );
       let targetDebtId = null;
-      if (extraPayment > 0) {
-        const remainingDebtIds = Object.keys(balances).filter(
-          (debtId) => balances[debtId] > 0
+      if (remainingDebtIds.length) {
+        remainingDebtIds.sort(
+          (leftId, rightId) => balances[leftId] - balances[rightId]
         );
-        if (remainingDebtIds.length) {
-          remainingDebtIds.sort(
-            (leftId, rightId) => balances[leftId] - balances[rightId]
-          );
-          targetDebtId = remainingDebtIds[0];
+        targetDebtId = remainingDebtIds[0];
+      }
+
+      let rolloverAmount = 0;
+      let snowballAmount = 0;
+      if (applySnowball && targetDebtId) {
+        rolloverAmount = Object.keys(monthlyTotalsByDebtId).reduce(
+          (sum, debtId) => {
+            const payoff = payoffByDebtId[debtId];
+            if (!payoff) {
+              return sum;
+            }
+            const payoffIndex = this.getMonthIndex(
+              payoff.year,
+              payoff.month
+            );
+            const eligible =
+              payoff.alreadyPaid === true
+                ? payoffIndex <= monthIndex
+                : payoffIndex < monthIndex;
+            if (!eligible) {
+              return sum;
+            }
+            const monthlyTotal = Number(monthlyTotalsByDebtId[debtId]) || 0;
+            if (monthlyTotal <= 0) {
+              return sum;
+            }
+            return sum + monthlyTotal;
+          },
+          0
+        );
+        snowballAmount = baseExtraPayment + rolloverAmount;
+        if (snowballAmount > 0) {
           balances[targetDebtId] = Math.max(
             0,
-            balances[targetDebtId] - extraPayment
+            balances[targetDebtId] - snowballAmount
           );
-          if (balances[targetDebtId] === 0 && !payoffByDebtId[targetDebtId]) {
+          if (
+            balances[targetDebtId] === 0 &&
+            !payoffByDebtId[targetDebtId]
+          ) {
             payoffByDebtId[targetDebtId] = { year, month };
           }
         }
       }
-      monthTargets[`${year}-${month + 1}`] = {
+      monthTargets[monthKey] = {
         targetDebtId,
+        snowballAmount,
+        rolloverAmount,
+        baseExtraPayment,
       };
 
       month += 1;
@@ -1400,7 +1449,8 @@ class DebtSnowballUI {
       viewBalances,
       payoffByDebtId,
       monthTargets,
-      extraPayment,
+      extraPayment: baseExtraPayment,
+      applySnowball,
     };
   }
 
@@ -1429,7 +1479,11 @@ class DebtSnowballUI {
           return true;
         }
         const payoffIndex = this.getMonthIndex(payoff.year, payoff.month);
-        if (payoffIndex < viewIndex) {
+        const shouldPrune =
+          payoff.alreadyPaid === true
+            ? payoffIndex <= viewIndex
+            : payoffIndex < viewIndex;
+        if (shouldPrune) {
           changed = true;
           return false;
         }
@@ -1525,7 +1579,7 @@ class DebtSnowballUI {
     const projection = this.calculateSnowballProjection(
       viewYear,
       viewMonth,
-      Number(settings.extraPayment) > 0
+      true
     );
     const viewBalances = projection.viewBalances || {};
     const summaries = this.store
@@ -1539,20 +1593,23 @@ class DebtSnowballUI {
             : Number(debt.balance) || 0
         ),
       }))
-      .filter((summary) => summary.remaining > 0)
-      .sort((a, b) => a.remaining - b.remaining);
+      .filter((summary) => summary.remaining > 0);
 
     if (summaries.length === 0) {
       this.planSummary.textContent = "No active debts to target.";
       return;
     }
     const monthKey = `${viewYear}-${viewMonth + 1}`;
-    const targetDebtId = projection.monthTargets?.[monthKey]?.targetDebtId;
+    const monthInfo = projection.monthTargets?.[monthKey] || {};
+    const targetDebtId = monthInfo.targetDebtId;
+    const fallbackTarget = [...summaries].sort(
+      (a, b) => a.remaining - b.remaining
+    )[0];
     const target =
       targetDebtId &&
       summaries.find((summary) => summary.debt.id === targetDebtId)
         ? summaries.find((summary) => summary.debt.id === targetDebtId)
-        : summaries[0];
+        : fallbackTarget;
     const summaryText = document.createElement("div");
     summaryText.className = "debt-plan-summary";
     const viewLabel = this.formatMonthYear(viewYear, viewMonth);
@@ -1563,12 +1620,37 @@ class DebtSnowballUI {
 
     const extraText = document.createElement("div");
     extraText.className = "debt-plan-extra";
-    extraText.textContent = `Snowball extra per month: $${(
-      settings.extraPayment || 0
-    ).toFixed(2)}`;
+    const baseExtraPayment = Number(settings.extraPayment) || 0;
+    const snowballAmount = Number(monthInfo.snowballAmount) || 0;
+    const rolloverAmount = Number(monthInfo.rolloverAmount) || 0;
+    const breakdownParts = [`Base $${baseExtraPayment.toFixed(2)}`];
+    if (rolloverAmount > 0) {
+      breakdownParts.push(`Rollovers $${rolloverAmount.toFixed(2)}`);
+    }
+    extraText.textContent = `Snowball payment this month: $${snowballAmount.toFixed(
+      2
+    )} (${breakdownParts.join(" + ")})`;
     this.planSummary.appendChild(extraText);
 
-    summaries.forEach((summary, index) => {
+    const summariesByPayoff = [...summaries].sort((a, b) => {
+      const payoffA = projection.payoffByDebtId?.[a.debt.id];
+      const payoffB = projection.payoffByDebtId?.[b.debt.id];
+      const indexA = payoffA
+        ? this.getMonthIndex(payoffA.year, payoffA.month)
+        : Number.POSITIVE_INFINITY;
+      const indexB = payoffB
+        ? this.getMonthIndex(payoffB.year, payoffB.month)
+        : Number.POSITIVE_INFINITY;
+      if (indexA !== indexB) {
+        return indexA - indexB;
+      }
+      if (a.remaining !== b.remaining) {
+        return a.remaining - b.remaining;
+      }
+      return a.debt.name.localeCompare(b.debt.name);
+    });
+
+    summariesByPayoff.forEach((summary, index) => {
       const item = document.createElement("div");
       item.className = "debt-plan-item";
       if (summary.debt.id === target.debt.id) {
@@ -1623,9 +1705,8 @@ class DebtSnowballUI {
 
   ensureSnowballPaymentForMonth(year, month, force = false) {
     const settings = this.store.getDebtSnowballSettings() || {};
-    const extraPayment = Number(settings.extraPayment) || 0;
     const autoGenerate = settings.autoGenerate === true;
-    const includeExtra = extraPayment > 0 && (autoGenerate || force);
+    const includeExtra = autoGenerate || force;
 
     this.setCurrentViewMonth(year, month);
     const projection = this.calculateSnowballProjection(
@@ -1650,7 +1731,9 @@ class DebtSnowballUI {
       changed = true;
     }
 
-    const targetDebtId = projection.monthTargets?.[monthKey]?.targetDebtId;
+    const monthInfo = projection.monthTargets?.[monthKey] || {};
+    const targetDebtId = monthInfo.targetDebtId;
+    const snowballAmount = Number(monthInfo.snowballAmount) || 0;
     const targetDebt = targetDebtId
       ? this.store.getDebts().find((debt) => debt.id === targetDebtId)
       : null;
@@ -1675,10 +1758,11 @@ class DebtSnowballUI {
           const shouldKeep =
             !force &&
             includeExtra &&
+            snowballAmount > 0 &&
             targetDebtId &&
             dueDateString &&
             t.debtId === targetDebtId &&
-            Math.abs(Number(t.amount) - extraPayment) < 0.01 &&
+            Math.abs(Number(t.amount) - snowballAmount) < 0.01 &&
             dateKey === dueDateString;
           if (shouldKeep) {
             hasMatchingSnowball = true;
@@ -1696,9 +1780,15 @@ class DebtSnowballUI {
         }
       });
 
-      if (includeExtra && targetDebtId && dueDateString && !hasMatchingSnowball) {
+      if (
+        includeExtra &&
+        snowballAmount > 0 &&
+        targetDebtId &&
+        dueDateString &&
+        !hasMatchingSnowball
+      ) {
         const transaction = {
-          amount: extraPayment,
+          amount: snowballAmount,
           type: "expense",
           description: `Snowball Payment: ${targetDebt.name}`,
           debtId: targetDebt.id,
