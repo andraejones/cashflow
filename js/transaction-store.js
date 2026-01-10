@@ -437,7 +437,7 @@ class TransactionStore {
   }
 
   
-  setTransactionSkipped(date, recurringId, isSkipped) {
+  setTransactionSkipped(date, recurringId, isSkipped, isDataModified = true) {
     if (!date || !recurringId) {
       console.error("Invalid parameters for setTransactionSkipped");
       return false;
@@ -466,7 +466,7 @@ class TransactionStore {
         }
       }
 
-      this.saveData();
+      this.saveData(isDataModified);
       return true;
     } catch (error) {
       console.error("Error in setTransactionSkipped:", error);
@@ -604,14 +604,14 @@ class TransactionStore {
                 modifiedInstance: t.modifiedRecurring || false,
               };
               if (t.skipped) {
-                this.setTransactionSkipped(date, matchingRt.id, true);
+                this.setTransactionSkipped(date, matchingRt.id, true, false);
               }
             }
           }
         });
       });
 
-      this.saveData();
+      this.saveData(false);
       return true;
     } catch (error) {
       console.error("Error during import:", error);

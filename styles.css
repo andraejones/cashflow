@@ -37,6 +37,10 @@ body {
   min-height: 100dvh;
   margin: 0;
   padding: 20px;
+  padding-top: calc(20px + env(safe-area-inset-top));
+  padding-bottom: calc(20px + env(safe-area-inset-bottom));
+  padding-left: calc(20px + env(safe-area-inset-left));
+  padding-right: calc(20px + env(safe-area-inset-right));
   position: relative;
   isolation: isolate;
 }
@@ -576,20 +580,82 @@ h4 {
 }
 
 @media (max-width: 768px) {
+  body {
+    align-items: flex-start;
+    padding: 12px;
+    padding-top: calc(12px + env(safe-area-inset-top));
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+    padding-left: calc(12px + env(safe-area-inset-left));
+    padding-right: calc(12px + env(safe-area-inset-right));
+  }
+
+  .calendar {
+    border-radius: 16px;
+  }
+
   .day {
-    font-size: 14px;
+    font-size: 13px;
+    padding: 6px 4px;
+    border-radius: 12px;
   }
 
   .day-content {
-    font-size: 8px;
+    font-size: 10px;
   }
 
   .header {
     font-size: 18px;
+    padding: 12px 14px;
   }
 
   .nav-btn {
     font-size: 18px;
+    padding: 4px 10px;
+  }
+
+  #currentMonth {
+    font-size: 1rem;
+  }
+
+  #monthSummary {
+    font-size: 0.95rem;
+    line-height: 1.35;
+  }
+
+  .days {
+    gap: 6px;
+    padding: 10px;
+  }
+
+  #calendarOptions {
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  .calendar-option {
+    flex: 1 1 46%;
+    min-width: 140px;
+    padding: 6px 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .day {
+    aspect-ratio: auto;
+    min-height: 64px;
+  }
+
+  .day-content {
+    font-size: 9px;
+  }
+
+  .transaction-count {
+    font-size: 10px;
+  }
+
+  .calendar-option {
+    min-width: 0;
+    font-size: 0.9rem;
   }
 }
 
