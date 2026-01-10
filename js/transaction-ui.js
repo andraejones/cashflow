@@ -517,10 +517,15 @@ class TransactionUI {
       `;
       const transactions = this.store.getTransactions();
       const hasBalanceTransaction = transactions[date]?.some(
-        (t) => t.type === "balance"
+        (t) => t.type === "balance" && t.hidden !== true
       );
       if (transactions[date]) {
+        let hasVisible = false;
         transactions[date].forEach((t, index) => {
+          if (t.hidden === true) {
+            return;
+          }
+          hasVisible = true;
           const transactionDiv = document.createElement("div");
           const isRecurring = t.recurringId !== undefined;
           const isSkipped =
@@ -750,6 +755,9 @@ class TransactionUI {
 
           modalTransactions.appendChild(transactionDiv);
         });
+        if (!hasVisible) {
+          modalTransactions.innerHTML = "<p>No transactions for this date.</p>";
+        }
       } else {
         modalTransactions.innerHTML = "<p>No transactions for this date.</p>";
       }
@@ -830,7 +838,12 @@ class TransactionUI {
         const transactions = this.store.getTransactions();
         if (transactions[date] && transactions[date].length > 0) {
           modalTransactions.innerHTML = "";
+          let hasVisible = false;
           transactions[date].forEach((t) => {
+            if (t.hidden === true) {
+              return;
+            }
+            hasVisible = true;
             const row = document.createElement("div");
             const sign = t.type === "balance" ? "=" : t.type === "income" ? "+" : "-";
             row.appendChild(
@@ -841,6 +854,12 @@ class TransactionUI {
             }
             modalTransactions.appendChild(row);
           });
+          if (!hasVisible) {
+            const emptyMessage = document.createElement("p");
+            emptyMessage.textContent = "No transactions for this date.";
+            modalTransactions.innerHTML = "";
+            modalTransactions.appendChild(emptyMessage);
+          }
         } else {
           const emptyMessage = document.createElement("p");
           emptyMessage.textContent = "No transactions for this date.";

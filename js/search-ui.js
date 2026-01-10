@@ -255,6 +255,9 @@ class SearchUI {
       }
 
       for (const transaction of transactions[date]) {
+        if (transaction.hidden === true) {
+          continue;
+        }
         if (
           transaction.recurringId &&
           this.recurringManager.isTransactionSkipped(
