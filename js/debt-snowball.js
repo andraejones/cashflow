@@ -91,6 +91,8 @@ class DebtSnowballUI {
     this.lastFocusedElement = null;
     this.daySpecificOptions = DAY_SPECIFIC_OPTIONS;
     this.isSyncingDueDate = false;
+    this.currentViewYear = null;
+    this.currentViewMonth = null;
 
     this.populateDueDayPatternOptions();
     this.initEventListeners();
@@ -1117,6 +1119,46 @@ class DebtSnowballUI {
     return `${month} ${date.getDate()}`;
   }
 
+  formatMonthYear(year, month) {
+    const monthLabel = MONTH_LABELS[month] || "";
+    if (!monthLabel || typeof year !== "number") {
+      return "";
+    }
+    return `${monthLabel} ${year}`;
+  }
+
+  getMonthIndex(year, month) {
+    return year * 12 + month;
+  }
+
+  getRecurringOccurrencesForMonth(recurringTransaction, year, month) {
+    if (!recurringTransaction?.startDate || !recurringTransaction?.recurrence) {
+      return [];
+    }
+    const transactions = {};
+    const dummyStore = {
+      getTransactions: () => transactions,
+      getRecurringTransactions: () => [recurringTransaction],
+      isTransactionSkipped: () => false,
+      saveData: () => {},
+    };
+    const manager = new RecurringTransactionManager(dummyStore);
+    manager.applyRecurringTransactions(year, month);
+    const occurrences = [];
+    Object.keys(transactions).forEach((dateString) => {
+      transactions[dateString].forEach((t) => {
+        if (t.recurringId === recurringTransaction.id) {
+          occurrences.push({
+            dateString,
+            amount: Number(t.amount) || 0,
+          });
+        }
+      });
+    });
+    occurrences.sort((a, b) => a.dateString.localeCompare(b.dateString));
+    return occurrences;
+  }
+
   getDebtScheduleLabel(debt) {
     const recurrence = debt?.recurrence || "monthly";
     const startDateString = this.getDebtStartDateValue(debt);
@@ -1184,33 +1226,23 @@ class DebtSnowballUI {
   }
 
   getRecurringDatesForMonth(recurringTransaction, year, month) {
-    if (!recurringTransaction?.startDate || !recurringTransaction?.recurrence) {
-      return [];
-    }
-    const transactions = {};
-    const dummyStore = {
-      getTransactions: () => transactions,
-      getRecurringTransactions: () => [recurringTransaction],
-      saveData: () => {},
-    };
-    const manager = new RecurringTransactionManager(dummyStore);
-    manager.applyRecurringTransactions(year, month);
-    return Object.keys(transactions).sort();
+    return this.getRecurringOccurrencesForMonth(recurringTransaction, year, month)
+      .map((occurrence) => occurrence.dateString);
   }
 
   getDebtDueDateForMonth(debt, year, month) {
     const recurringTemplate = this.buildDebtRecurringTransaction(debt);
     recurringTemplate.id =
       recurringTemplate.id || debt.minRecurringId || "debt-preview";
-    const dates = this.getRecurringDatesForMonth(
+    const occurrences = this.getRecurringOccurrencesForMonth(
       recurringTemplate,
       year,
       month
     );
-    if (!dates.length) {
+    if (!occurrences.length) {
       return null;
     }
-    return this.getDateFromString(dates[0]);
+    return this.getDateFromString(occurrences[0].dateString);
   }
 
   getDebtSummaries(cutoffDate = null) {
@@ -1246,6 +1278,173 @@ class DebtSnowballUI {
         remaining,
       };
     });
+  }
+
+  calculateSnowballProjection(viewYear, viewMonth, includeExtra = true) {
+    const debts = this.store.getDebts();
+    const settings = this.store.getDebtSnowballSettings();
+    const extraPayment = includeExtra ? Number(settings.extraPayment) || 0 : 0;
+    const today = new Date();
+    const currentYear = today.getFullYear();
+    const currentMonth = today.getMonth();
+    const viewIndex = this.getMonthIndex(viewYear, viewMonth);
+    const currentIndex = this.getMonthIndex(currentYear, currentMonth);
+    const baseYear = viewIndex <= currentIndex ? viewYear : currentYear;
+    const baseMonth = viewIndex <= currentIndex ? viewMonth : currentMonth;
+    const baseDate = new Date(baseYear, baseMonth, 1);
+    const baseSummaries = this.getDebtSummaries(baseDate);
+    const balances = {};
+    const debtById = {};
+    const recurringTemplates = {};
+    baseSummaries.forEach(({ debt, remaining }) => {
+      balances[debt.id] = Number(remaining) || 0;
+      debtById[debt.id] = debt;
+    });
+    debts.forEach((debt) => {
+      if (!debtById[debt.id]) {
+        debtById[debt.id] = debt;
+        balances[debt.id] = Number(debt.balance) || 0;
+      }
+      const template = this.buildDebtRecurringTransaction(debt);
+      template.id =
+        template.id || debt.minRecurringId || debt.id || Utils.generateUniqueId();
+      recurringTemplates[debt.id] = template;
+    });
+
+    const payoffByDebtId = {};
+    Object.keys(balances).forEach((debtId) => {
+      if (balances[debtId] <= 0) {
+        payoffByDebtId[debtId] = {
+          year: baseYear,
+          month: baseMonth,
+          alreadyPaid: true,
+        };
+      }
+    });
+
+    const monthTargets = {};
+    let viewBalances = null;
+    const baseIndex = this.getMonthIndex(baseYear, baseMonth);
+    const maxMonths = Math.max(600, viewIndex - baseIndex + 1);
+    let year = baseYear;
+    let month = baseMonth;
+
+    for (let i = 0; i < maxMonths; i++) {
+      if (viewBalances === null && year === viewYear && month === viewMonth) {
+        viewBalances = { ...balances };
+      }
+      const activeDebtIds = Object.keys(balances).filter(
+        (debtId) => balances[debtId] > 0
+      );
+      if (!activeDebtIds.length) {
+        break;
+      }
+      activeDebtIds.forEach((debtId) => {
+        const template = recurringTemplates[debtId];
+        if (!template) return;
+        const occurrences = this.getRecurringOccurrencesForMonth(
+          template,
+          year,
+          month
+        );
+        const totalPayment = occurrences.reduce(
+          (sum, occurrence) => sum + occurrence.amount,
+          0
+        );
+        if (totalPayment <= 0) return;
+        balances[debtId] = Math.max(0, balances[debtId] - totalPayment);
+        if (balances[debtId] === 0 && !payoffByDebtId[debtId]) {
+          payoffByDebtId[debtId] = { year, month };
+        }
+      });
+
+      let targetDebtId = null;
+      if (extraPayment > 0) {
+        const remainingDebtIds = Object.keys(balances).filter(
+          (debtId) => balances[debtId] > 0
+        );
+        if (remainingDebtIds.length) {
+          remainingDebtIds.sort(
+            (leftId, rightId) => balances[leftId] - balances[rightId]
+          );
+          targetDebtId = remainingDebtIds[0];
+          balances[targetDebtId] = Math.max(
+            0,
+            balances[targetDebtId] - extraPayment
+          );
+          if (balances[targetDebtId] === 0 && !payoffByDebtId[targetDebtId]) {
+            payoffByDebtId[targetDebtId] = { year, month };
+          }
+        }
+      }
+      monthTargets[`${year}-${month + 1}`] = {
+        targetDebtId,
+      };
+
+      month += 1;
+      if (month > 11) {
+        month = 0;
+        year += 1;
+      }
+    }
+
+    if (viewBalances === null) {
+      viewBalances = { ...balances };
+    }
+
+    return {
+      baseYear,
+      baseMonth,
+      viewYear,
+      viewMonth,
+      viewBalances,
+      payoffByDebtId,
+      monthTargets,
+      extraPayment,
+    };
+  }
+
+  setCurrentViewMonth(year, month) {
+    this.currentViewYear = year;
+    this.currentViewMonth = month;
+  }
+
+  prunePaidOffDebtMinimumPayments(year, month, payoffByDebtId) {
+    const transactions = this.store.getTransactions();
+    const monthPrefix = `${year}-${String(month + 1).padStart(2, "0")}-`;
+    const viewIndex = this.getMonthIndex(year, month);
+    let changed = false;
+
+    Object.keys(transactions).forEach((dateKey) => {
+      if (!dateKey.startsWith(monthPrefix)) {
+        return;
+      }
+      const list = transactions[dateKey];
+      const filtered = list.filter((t) => {
+        if (t.debtRole !== "minimum" || !t.debtId || !t.recurringId) {
+          return true;
+        }
+        const payoff = payoffByDebtId?.[t.debtId];
+        if (!payoff) {
+          return true;
+        }
+        const payoffIndex = this.getMonthIndex(payoff.year, payoff.month);
+        if (payoffIndex < viewIndex) {
+          changed = true;
+          return false;
+        }
+        return true;
+      });
+      if (filtered.length !== list.length) {
+        if (filtered.length === 0) {
+          delete transactions[dateKey];
+        } else {
+          transactions[dateKey] = filtered;
+        }
+      }
+    });
+
+    return changed;
   }
 
   renderDebts() {
@@ -1314,20 +1513,52 @@ class DebtSnowballUI {
     this.planList.innerHTML = "";
     this.planSummary.innerHTML = "";
     const settings = this.store.getDebtSnowballSettings();
-    const summaries = this.getDebtSummaries().filter(
-      (summary) => summary.remaining > 0
+    const today = new Date();
+    const viewYear =
+      typeof this.currentViewYear === "number"
+        ? this.currentViewYear
+        : today.getFullYear();
+    const viewMonth =
+      typeof this.currentViewMonth === "number"
+        ? this.currentViewMonth
+        : today.getMonth();
+    const projection = this.calculateSnowballProjection(
+      viewYear,
+      viewMonth,
+      Number(settings.extraPayment) > 0
     );
-    summaries.sort((a, b) => a.remaining - b.remaining);
+    const viewBalances = projection.viewBalances || {};
+    const summaries = this.store
+      .getDebts()
+      .map((debt) => ({
+        debt,
+        remaining: Math.max(
+          0,
+          typeof viewBalances[debt.id] === "number"
+            ? viewBalances[debt.id]
+            : Number(debt.balance) || 0
+        ),
+      }))
+      .filter((summary) => summary.remaining > 0)
+      .sort((a, b) => a.remaining - b.remaining);
+
     if (summaries.length === 0) {
       this.planSummary.textContent = "No active debts to target.";
       return;
     }
-    const target = summaries[0];
+    const monthKey = `${viewYear}-${viewMonth + 1}`;
+    const targetDebtId = projection.monthTargets?.[monthKey]?.targetDebtId;
+    const target =
+      targetDebtId &&
+      summaries.find((summary) => summary.debt.id === targetDebtId)
+        ? summaries.find((summary) => summary.debt.id === targetDebtId)
+        : summaries[0];
     const summaryText = document.createElement("div");
     summaryText.className = "debt-plan-summary";
-    summaryText.textContent = `Current target: ${target.debt.name} (Remaining $${target.remaining.toFixed(
-      2
-    )})`;
+    const viewLabel = this.formatMonthYear(viewYear, viewMonth);
+    summaryText.textContent = `Current target${viewLabel ? ` (${viewLabel})` : ""}: ${
+      target.debt.name
+    } (Remaining $${target.remaining.toFixed(2)})`;
     this.planSummary.appendChild(summaryText);
 
     const extraText = document.createElement("div");
@@ -1340,12 +1571,16 @@ class DebtSnowballUI {
     summaries.forEach((summary, index) => {
       const item = document.createElement("div");
       item.className = "debt-plan-item";
-      if (index === 0) {
+      if (summary.debt.id === target.debt.id) {
         item.classList.add("debt-plan-target");
       }
+      const payoff = projection.payoffByDebtId?.[summary.debt.id];
+      const payoffLabel = payoff
+        ? this.formatMonthYear(payoff.year, payoff.month)
+        : "No payoff scheduled";
       item.textContent = `${index + 1}. ${summary.debt.name} — Remaining $${summary.remaining.toFixed(
         2
-      )}`;
+      )} — Paid off by ${payoffLabel}`;
       this.planList.appendChild(item);
     });
   }
@@ -1371,12 +1606,12 @@ class DebtSnowballUI {
 
   generateSnowballForCurrentMonth(force) {
     const today = new Date();
-    const changed = this.ensureSnowballPaymentForMonth(
+    const snowballAdded = this.ensureSnowballPaymentForMonth(
       today.getFullYear(),
       today.getMonth(),
       force
     );
-    if (changed) {
+    if (snowballAdded) {
       Utils.showNotification("Snowball payment generated");
       this.renderDebts();
       this.renderPlan();
@@ -1387,71 +1622,101 @@ class DebtSnowballUI {
   }
 
   ensureSnowballPaymentForMonth(year, month, force = false) {
-    const settings = this.store.getDebtSnowballSettings();
-    if (!settings || !settings.extraPayment || settings.extraPayment <= 0) {
-      return false;
-    }
-    if (!settings.autoGenerate && !force) {
-      return false;
-    }
-    const monthKey = `${year}-${month + 1}`;
-    const transactions = this.store.getTransactions();
-    let hasExisting = false;
-    let removedAny = false;
+    const settings = this.store.getDebtSnowballSettings() || {};
+    const extraPayment = Number(settings.extraPayment) || 0;
+    const autoGenerate = settings.autoGenerate === true;
+    const includeExtra = extraPayment > 0 && (autoGenerate || force);
 
-    for (const dateKey in transactions) {
-      const list = transactions[dateKey];
-      const remaining = list.filter((t) => {
-        const isSnowball =
-          t.snowballGenerated === true && t.snowballMonth === monthKey;
-        if (isSnowball) {
-          hasExisting = true;
-        }
-        return !(isSnowball && force);
-      });
-      if (remaining.length !== list.length) {
-        removedAny = true;
-      }
-      if (remaining.length === 0) {
-        delete transactions[dateKey];
-      } else {
-        transactions[dateKey] = remaining;
-      }
-    }
-
-    if (hasExisting && !force) {
-      return false;
-    }
-    if (removedAny) {
-      this.store.saveData();
-    }
-
-    const cutoffDate = new Date(year, month, 1);
-    const summaries = this.getDebtSummaries(cutoffDate).filter(
-      (summary) => summary.remaining > 0
+    this.setCurrentViewMonth(year, month);
+    const projection = this.calculateSnowballProjection(
+      year,
+      month,
+      includeExtra
     );
-    if (summaries.length === 0) {
-      return removedAny;
+    const today = new Date();
+    const currentIndex = this.getMonthIndex(today.getFullYear(), today.getMonth());
+    const viewIndex = this.getMonthIndex(year, month);
+    const allowMutation = force || viewIndex >= currentIndex;
+    const monthKey = `${year}-${month + 1}`;
+    const monthPrefix = `${year}-${String(month + 1).padStart(2, "0")}-`;
+    const transactions = this.store.getTransactions();
+    let changed = false;
+    let snowballAdded = false;
+
+    if (
+      allowMutation &&
+      this.prunePaidOffDebtMinimumPayments(year, month, projection.payoffByDebtId)
+    ) {
+      changed = true;
     }
-    summaries.sort((a, b) => a.remaining - b.remaining);
-    const target = summaries[0].debt;
-    const dueDate = this.getDebtDueDateForMonth(target, year, month);
-    if (!dueDate) {
-      return removedAny;
+
+    const targetDebtId = projection.monthTargets?.[monthKey]?.targetDebtId;
+    const targetDebt = targetDebtId
+      ? this.store.getDebts().find((debt) => debt.id === targetDebtId)
+      : null;
+    const dueDate = targetDebt
+      ? this.getDebtDueDateForMonth(targetDebt, year, month)
+      : null;
+    const dueDateString = dueDate ? Utils.formatDateString(dueDate) : null;
+
+    if (allowMutation) {
+      let hasMatchingSnowball = false;
+      Object.keys(transactions).forEach((dateKey) => {
+        if (!dateKey.startsWith(monthPrefix)) {
+          return;
+        }
+        const list = transactions[dateKey];
+        const filtered = list.filter((t) => {
+          const isSnowball =
+            t.snowballGenerated === true && t.snowballMonth === monthKey;
+          if (!isSnowball) {
+            return true;
+          }
+          const shouldKeep =
+            !force &&
+            includeExtra &&
+            targetDebtId &&
+            dueDateString &&
+            t.debtId === targetDebtId &&
+            Math.abs(Number(t.amount) - extraPayment) < 0.01 &&
+            dateKey === dueDateString;
+          if (shouldKeep) {
+            hasMatchingSnowball = true;
+            return true;
+          }
+          changed = true;
+          return false;
+        });
+        if (filtered.length !== list.length) {
+          if (filtered.length === 0) {
+            delete transactions[dateKey];
+          } else {
+            transactions[dateKey] = filtered;
+          }
+        }
+      });
+
+      if (includeExtra && targetDebtId && dueDateString && !hasMatchingSnowball) {
+        const transaction = {
+          amount: extraPayment,
+          type: "expense",
+          description: `Snowball Payment: ${targetDebt.name}`,
+          debtId: targetDebt.id,
+          debtRole: "snowball",
+          debtName: targetDebt.name,
+          snowballMonth: monthKey,
+          snowballGenerated: true,
+        };
+        this.store.addTransaction(dueDateString, transaction);
+        changed = true;
+        snowballAdded = true;
+      } else if (changed) {
+        this.store.saveData();
+      }
     }
-    const dateString = Utils.formatDateString(dueDate);
-    const transaction = {
-      amount: settings.extraPayment,
-      type: "expense",
-      description: `Snowball Payment: ${target.name}`,
-      debtId: target.id,
-      debtRole: "snowball",
-      debtName: target.name,
-      snowballMonth: monthKey,
-      snowballGenerated: true,
-    };
-    this.store.addTransaction(dateString, transaction);
-    return true;
+
+    this.renderPlan();
+    return snowballAdded;
   }
 }
 
