@@ -165,6 +165,18 @@ Fields:
 - balance: number
 - minPayment: number
 - dueDay: number (1-31)
+- dueDayPattern: string (optional, format "N-D" where N is occurrence and D is day-of-week; "-1-1" means last Monday, overrides dueDay when set)
+- recurrence: string (same values as recurringTransactions.recurrence)
+- dueStartDate: string YYYY-MM-DD (first due date)
+- businessDayAdjustment: "none" | "previous" | "next" | "nearest" (optional)
+- semiMonthlyDays: array of two numbers (optional)
+- semiMonthlyLastDay: boolean (optional)
+- customInterval: object { unit: "days" | "weeks" | "months", value: number } (optional)
+- variableAmount: boolean (optional)
+- variableType: "percentage" (optional)
+- variablePercentage: number (optional)
+- endDate: string YYYY-MM-DD (optional)
+- maxOccurrences: number (optional)
 - interestRate: number
 - minRecurringId: string (optional)
 
@@ -177,7 +189,11 @@ Example:
     "name": "Card A",
     "balance": 3200.00,
     "minPayment": 75.00,
-    "dueDay": 15,
+    "dueDay": 1,
+    "dueDayPattern": "1-1",
+    "recurrence": "monthly",
+    "dueStartDate": "2024-01-01",
+    "businessDayAdjustment": "none",
     "interestRate": 19.99,
     "minRecurringId": "rec-1"
   }

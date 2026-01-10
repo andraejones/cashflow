@@ -233,6 +233,19 @@ class RecurringTransactionManager {
           (!endDate || endDate >= targetStartOfMonth)
         ) {
           switch (rt.recurrence) {
+            case "once":
+              this.applyOnceRecurrence(
+                rt,
+                startDate,
+                endDate,
+                maxOccurrences,
+                targetYear,
+                targetMonth,
+                year,
+                month
+              );
+              break;
+
             case "daily":
               this.applyDailyRecurrence(
                 rt,
@@ -358,6 +371,43 @@ class RecurringTransactionManager {
       });
     });
     this.store.saveData(false);
+  }
+
+  
+  applyOnceRecurrence(
+    rt,
+    startDate,
+    endDate,
+    maxOccurrences,
+    year,
+    month,
+    filterYear = year,
+    filterMonth = month
+  ) {
+    let targetDate = new Date(startDate);
+    let originalDateString = null;
+    if (rt.businessDayAdjustment) {
+      const { adjustedDate, originalDateString: origDate } =
+        this.adjustForBusinessDay(targetDate, rt.businessDayAdjustment);
+      targetDate = adjustedDate;
+      originalDateString = origDate;
+    }
+    if (endDate && targetDate > endDate) {
+      return;
+    }
+    if (
+      targetDate.getFullYear() === filterYear &&
+      targetDate.getMonth() === filterMonth
+    ) {
+      const dateString = Utils.formatDateString(targetDate);
+      this.addRecurringTransactionToDate(
+        rt,
+        dateString,
+        targetDate,
+        startDate,
+        originalDateString
+      );
+    }
   }
 
   
@@ -1054,6 +1104,9 @@ class RecurringTransactionManager {
       let occurrences = 0;
 
       switch (rt.recurrence) {
+        case "once":
+          occurrences = 0;
+          break;
         case "daily":
           occurrences = this.daysBetween(startDate, currentDate);
           break;
@@ -1126,6 +1179,9 @@ class RecurringTransactionManager {
     let count = 0;
 
     switch (rt.recurrence) {
+      case "once":
+        count = beforeDate > startDate ? 1 : 0;
+        break;
       case "daily":
         count = this.daysBetween(startDate, beforeDate);
         break;
