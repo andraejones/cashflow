@@ -64,6 +64,10 @@ class CalendarUI {
     ];
 
     const currentMonthElement = document.getElementById("currentMonth");
+    const pendingMessage = currentMonthElement?.querySelector("#pendingMessage");
+    if (pendingMessage) {
+      pendingMessage.remove();
+    }
     const today = new Date();
     if (year === today.getFullYear() && month === today.getMonth()) {
       currentMonthElement.textContent = `${monthNames[month]} ${year}`;
@@ -73,6 +77,9 @@ class CalendarUI {
       currentMonthElement.textContent = `${monthNames[month]} ${year} ⏎`;
       currentMonthElement.onclick = () => this.returnToCurrentMonth();
       currentMonthElement.style.cursor = "pointer";
+    }
+    if (pendingMessage) {
+      currentMonthElement.appendChild(pendingMessage);
     }
     this.recurringManager.applyRecurringTransactions(year, month);
     if (this.debtSnowball) {
@@ -111,7 +118,7 @@ class CalendarUI {
         this.calculationService.calculateDailyTotals(dateString);
       const transactions = this.store.getTransactions();
       const transactionCount = transactions[dateString]
-        ? transactions[dateString].length
+        ? transactions[dateString].filter((t) => t.hidden !== true).length
         : 0;
       if (dailyTotals.balance !== null) {
         runningBalance = dailyTotals.balance;
@@ -244,7 +251,12 @@ class CalendarUI {
       const transactions = this.store.getTransactions();
       if (transactions[date] && transactions[date].length > 0) {
         modalTransactions.innerHTML = "";
+        let hasVisible = false;
         transactions[date].forEach((t) => {
+          if (t.hidden === true) {
+            return;
+          }
+          hasVisible = true;
           const row = document.createElement("div");
           const amountSpan = document.createElement("span");
           amountSpan.className = t.type;
@@ -256,6 +268,12 @@ class CalendarUI {
           }
           modalTransactions.appendChild(row);
         });
+        if (!hasVisible) {
+          const emptyMessage = document.createElement("p");
+          emptyMessage.textContent = "No transactions for this date.";
+          modalTransactions.innerHTML = "";
+          modalTransactions.appendChild(emptyMessage);
+        }
       } else {
         const emptyMessage = document.createElement("p");
         emptyMessage.textContent = "No transactions for this date.";
