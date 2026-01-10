@@ -1280,11 +1280,79 @@ class DebtSnowballUI {
     });
   }
 
+  calculateMonthlySnowballAllocation(
+    balances,
+    monthlyTotalsByDebtId,
+    applySnowball,
+    baseExtraPayment,
+    rolloverAmount
+  ) {
+    const minPaidByDebtId = {};
+    const balancesAfterMin = {};
+    let inMonthRollover = 0;
+
+    Object.keys(balances).forEach((debtId) => {
+      const balance = Number(balances[debtId]) || 0;
+      const scheduledMin = Number(monthlyTotalsByDebtId?.[debtId]) || 0;
+      if (balance <= 0 || scheduledMin <= 0) {
+        minPaidByDebtId[debtId] = 0;
+        balancesAfterMin[debtId] = Math.max(0, balance);
+        return;
+      }
+      const actualMin = Math.min(balance, scheduledMin);
+      minPaidByDebtId[debtId] = actualMin;
+      balancesAfterMin[debtId] = Math.max(0, balance - actualMin);
+      if (scheduledMin > actualMin) {
+        inMonthRollover += scheduledMin - actualMin;
+      }
+    });
+
+    const debtOrder = Object.keys(balancesAfterMin)
+      .filter((debtId) => balancesAfterMin[debtId] > 0)
+      .sort((leftId, rightId) => balancesAfterMin[leftId] - balancesAfterMin[rightId]);
+    const targetDebtId = debtOrder.length ? debtOrder[0] : null;
+
+    const snowballPaidByDebtId = {};
+    let remainingSnowball = applySnowball
+      ? (Number(baseExtraPayment) || 0) +
+        (Number(rolloverAmount) || 0) +
+        inMonthRollover
+      : 0;
+    const balancesAfterPayments = { ...balancesAfterMin };
+
+    debtOrder.forEach((debtId) => {
+      if (remainingSnowball <= 0) return;
+      const remainingBalance = Number(balancesAfterPayments[debtId]) || 0;
+      if (remainingBalance <= 0) return;
+      const applied = Math.min(remainingBalance, remainingSnowball);
+      if (applied <= 0) return;
+      snowballPaidByDebtId[debtId] = applied;
+      balancesAfterPayments[debtId] = Math.max(0, remainingBalance - applied);
+      remainingSnowball -= applied;
+    });
+
+    const snowballAmount = Object.values(snowballPaidByDebtId).reduce(
+      (sum, amount) => sum + (Number(amount) || 0),
+      0
+    );
+
+    return {
+      minPaidByDebtId,
+      snowballPaidByDebtId,
+      balancesAfterPayments,
+      targetDebtId,
+      snowballAmount,
+      inMonthRollover,
+    };
+  }
+
   calculateSnowballProjection(viewYear, viewMonth, includeExtra = true) {
     const debts = this.store.getDebts();
     const settings = this.store.getDebtSnowballSettings();
     const baseExtraPayment = Number(settings.extraPayment) || 0;
     const applySnowball = includeExtra === true;
+    const roundToCents = (value) =>
+      Math.round((Number(value) || 0) * 100) / 100;
     const today = new Date();
     const currentYear = today.getFullYear();
     const currentMonth = today.getMonth();
@@ -1294,7 +1362,7 @@ class DebtSnowballUI {
     const baseMonth = viewIndex <= currentIndex ? viewMonth : currentMonth;
     const baseDate = new Date(baseYear, baseMonth, 1);
     const baseSummaries = this.getDebtSummaries(baseDate);
-    const balances = {};
+    let balances = {};
     const debtById = {};
     const recurringTemplates = {};
     baseSummaries.forEach(({ debt, remaining }) => {
@@ -1355,45 +1423,36 @@ class DebtSnowballUI {
         monthlyTotalsByDebtId[debtId] = totalPayment;
       });
 
+      Object.keys(balances).forEach((debtId) => {
+        const debt = debtById[debtId];
+        const balance = Number(balances[debtId]) || 0;
+        const interestRate =
+          debt && typeof debt.interestRate === "number"
+            ? debt.interestRate
+            : Number(debt?.interestRate) || 0;
+        if (balance <= 0 || interestRate <= 0) {
+          return;
+        }
+        const interest = roundToCents((balance * interestRate) / 1200);
+        if (interest <= 0) {
+          return;
+        }
+        balances[debtId] = roundToCents(balance + interest);
+      });
+
       const activeDebtIds = Object.keys(balances).filter(
         (debtId) => balances[debtId] > 0
       );
       if (!activeDebtIds.length) {
         break;
       }
-      activeDebtIds.forEach((debtId) => {
-        const totalPayment = monthlyTotalsByDebtId[debtId] || 0;
-        if (totalPayment <= 0) return;
-        balances[debtId] = Math.max(0, balances[debtId] - totalPayment);
-        if (balances[debtId] === 0 && !payoffByDebtId[debtId]) {
-          payoffByDebtId[debtId] = { year, month };
-        }
-      });
-
-      const remainingDebtIds = Object.keys(balances).filter(
-        (debtId) => balances[debtId] > 0
-      );
-      let targetDebtId = null;
-      if (remainingDebtIds.length) {
-        remainingDebtIds.sort(
-          (leftId, rightId) => balances[leftId] - balances[rightId]
-        );
-        targetDebtId = remainingDebtIds[0];
-      }
-
-      let rolloverAmount = 0;
-      let snowballAmount = 0;
-      if (applySnowball && targetDebtId) {
-        rolloverAmount = Object.keys(monthlyTotalsByDebtId).reduce(
-          (sum, debtId) => {
+      const rolloverAmount = applySnowball
+        ? Object.keys(monthlyTotalsByDebtId).reduce((sum, debtId) => {
             const payoff = payoffByDebtId[debtId];
             if (!payoff) {
               return sum;
             }
-            const payoffIndex = this.getMonthIndex(
-              payoff.year,
-              payoff.month
-            );
+            const payoffIndex = this.getMonthIndex(payoff.year, payoff.month);
             const eligible =
               payoff.alreadyPaid === true
                 ? payoffIndex <= monthIndex
@@ -1406,29 +1465,37 @@ class DebtSnowballUI {
               return sum;
             }
             return sum + monthlyTotal;
-          },
-          0
-        );
-        snowballAmount = baseExtraPayment + rolloverAmount;
-        if (snowballAmount > 0) {
-          balances[targetDebtId] = Math.max(
-            0,
-            balances[targetDebtId] - snowballAmount
-          );
-          if (
-            balances[targetDebtId] === 0 &&
-            !payoffByDebtId[targetDebtId]
-          ) {
-            payoffByDebtId[targetDebtId] = { year, month };
-          }
+          }, 0)
+        : 0;
+
+      const allocation = this.calculateMonthlySnowballAllocation(
+        balances,
+        monthlyTotalsByDebtId,
+        applySnowball,
+        baseExtraPayment,
+        rolloverAmount
+      );
+      balances = { ...allocation.balancesAfterPayments };
+
+      Object.keys(balances).forEach((debtId) => {
+        if (balances[debtId] === 0 && !payoffByDebtId[debtId]) {
+          payoffByDebtId[debtId] = { year, month };
         }
-      }
-      monthTargets[monthKey] = {
-        targetDebtId,
-        snowballAmount,
+      });
+
+      const monthInfo = {
+        targetDebtId: allocation.targetDebtId,
+        snowballAmount: allocation.snowballAmount,
         rolloverAmount,
         baseExtraPayment,
+        inMonthRollover: allocation.inMonthRollover,
       };
+      if (year === viewYear && month === viewMonth) {
+        monthInfo.minPaidByDebtId = allocation.minPaidByDebtId;
+        monthInfo.snowballPaidByDebtId = allocation.snowballPaidByDebtId;
+        monthInfo.monthlyTotalsByDebtId = monthlyTotalsByDebtId;
+      }
+      monthTargets[monthKey] = monthInfo;
 
       month += 1;
       if (month > 11) {
@@ -1499,6 +1566,187 @@ class DebtSnowballUI {
     });
 
     return changed;
+  }
+
+  adjustMinimumPaymentTransactions(year, month, minPaidByDebtId) {
+    if (!minPaidByDebtId || typeof minPaidByDebtId !== "object") {
+      return false;
+    }
+    const transactions = this.store.getTransactions();
+    const monthPrefix = `${year}-${String(month + 1).padStart(2, "0")}-`;
+    const minOccurrencesByDebtId = {};
+
+    Object.keys(transactions).forEach((dateKey) => {
+      if (!dateKey.startsWith(monthPrefix)) {
+        return;
+      }
+      transactions[dateKey].forEach((t) => {
+        if (t.debtRole !== "minimum" || !t.debtId || !t.recurringId) {
+          return;
+        }
+        if (!Object.prototype.hasOwnProperty.call(minPaidByDebtId, t.debtId)) {
+          return;
+        }
+        if (!minOccurrencesByDebtId[t.debtId]) {
+          minOccurrencesByDebtId[t.debtId] = [];
+        }
+        minOccurrencesByDebtId[t.debtId].push({ dateKey, transaction: t });
+      });
+    });
+
+    const removeSet = new Set();
+    const updateMap = new Map();
+    const epsilon = 0.01;
+
+    Object.keys(minOccurrencesByDebtId).forEach((debtId) => {
+      const targetTotal = Math.max(0, Number(minPaidByDebtId[debtId]) || 0);
+      const occurrences = minOccurrencesByDebtId[debtId].sort((a, b) =>
+        a.dateKey.localeCompare(b.dateKey)
+      );
+      const currentTotal = occurrences.reduce(
+        (sum, occ) => sum + (Number(occ.transaction.amount) || 0),
+        0
+      );
+      if (currentTotal <= targetTotal + epsilon) {
+        return;
+      }
+      let remaining = targetTotal;
+      for (let i = occurrences.length - 1; i >= 0; i--) {
+        const { transaction } = occurrences[i];
+        const amount = Number(transaction.amount) || 0;
+        if (remaining <= epsilon) {
+          removeSet.add(transaction);
+          continue;
+        }
+        if (amount > remaining + epsilon) {
+          updateMap.set(transaction, remaining);
+          remaining = 0;
+        } else {
+          remaining -= amount;
+        }
+      }
+    });
+
+    let changed = false;
+    Object.keys(transactions).forEach((dateKey) => {
+      if (!dateKey.startsWith(monthPrefix)) {
+        return;
+      }
+      const list = transactions[dateKey];
+      let updated = false;
+      const filtered = list.filter((t) => !removeSet.has(t));
+      filtered.forEach((t) => {
+        if (!updateMap.has(t)) {
+          return;
+        }
+        const nextAmount = updateMap.get(t);
+        if (nextAmount <= epsilon) {
+          removeSet.add(t);
+          updated = true;
+          return;
+        }
+        if (Math.abs(Number(t.amount) - nextAmount) > epsilon) {
+          t.amount = nextAmount;
+          updated = true;
+        }
+      });
+      const finalList = filtered.filter((t) => !removeSet.has(t));
+      if (finalList.length !== list.length || updated) {
+        if (finalList.length === 0) {
+          delete transactions[dateKey];
+        } else {
+          transactions[dateKey] = finalList;
+        }
+        changed = true;
+      }
+    });
+
+    return changed;
+  }
+
+  syncSnowballTransactionsForMonth(
+    year,
+    month,
+    monthKey,
+    expectedPayments,
+    includeExtra
+  ) {
+    const transactions = this.store.getTransactions();
+    const monthPrefix = `${year}-${String(month + 1).padStart(2, "0")}-`;
+    const expectedByDebtId = new Map();
+    expectedPayments.forEach((payment) => {
+      expectedByDebtId.set(payment.debtId, { ...payment, matched: false });
+    });
+    const epsilon = 0.01;
+    let changed = false;
+    let snowballAdded = false;
+
+    Object.keys(transactions).forEach((dateKey) => {
+      if (!dateKey.startsWith(monthPrefix)) {
+        return;
+      }
+      const list = transactions[dateKey];
+      const filtered = list.filter((t) => {
+        const isSnowball =
+          t.snowballGenerated === true && t.snowballMonth === monthKey;
+        if (!isSnowball) {
+          return true;
+        }
+        if (!includeExtra) {
+          changed = true;
+          return false;
+        }
+        const expected = expectedByDebtId.get(t.debtId);
+        if (!expected || expected.dateString !== dateKey) {
+          changed = true;
+          return false;
+        }
+        const expectedDescription = `Snowball Payment: ${expected.debtName}`;
+        if (Math.abs(Number(t.amount) - expected.amount) > epsilon) {
+          t.amount = expected.amount;
+          changed = true;
+        }
+        if (t.description !== expectedDescription) {
+          t.description = expectedDescription;
+          changed = true;
+        }
+        expected.matched = true;
+        return true;
+      });
+      if (filtered.length !== list.length) {
+        if (filtered.length === 0) {
+          delete transactions[dateKey];
+        } else {
+          transactions[dateKey] = filtered;
+        }
+      }
+    });
+
+    if (includeExtra) {
+      expectedByDebtId.forEach((expected) => {
+        if (expected.matched || expected.amount <= epsilon || !expected.dateString) {
+          return;
+        }
+        const transaction = {
+          amount: expected.amount,
+          type: "expense",
+          description: `Snowball Payment: ${expected.debtName}`,
+          debtId: expected.debtId,
+          debtRole: "snowball",
+          debtName: expected.debtName,
+          snowballMonth: monthKey,
+          snowballGenerated: true,
+        };
+        this.store.addTransaction(expected.dateString, transaction);
+        snowballAdded = true;
+      });
+    }
+
+    if (changed && !snowballAdded) {
+      this.store.saveData();
+    }
+
+    return { changed, snowballAdded };
   }
 
   renderDebts() {
@@ -1623,9 +1871,13 @@ class DebtSnowballUI {
     const baseExtraPayment = Number(settings.extraPayment) || 0;
     const snowballAmount = Number(monthInfo.snowballAmount) || 0;
     const rolloverAmount = Number(monthInfo.rolloverAmount) || 0;
+    const inMonthRollover = Number(monthInfo.inMonthRollover) || 0;
     const breakdownParts = [`Base $${baseExtraPayment.toFixed(2)}`];
     if (rolloverAmount > 0) {
       breakdownParts.push(`Rollovers $${rolloverAmount.toFixed(2)}`);
+    }
+    if (inMonthRollover > 0) {
+      breakdownParts.push(`Same-month $${inMonthRollover.toFixed(2)}`);
     }
     extraText.textContent = `Snowball payment this month: $${snowballAmount.toFixed(
       2
@@ -1719,8 +1971,6 @@ class DebtSnowballUI {
     const viewIndex = this.getMonthIndex(year, month);
     const allowMutation = force || viewIndex >= currentIndex;
     const monthKey = `${year}-${month + 1}`;
-    const monthPrefix = `${year}-${String(month + 1).padStart(2, "0")}-`;
-    const transactions = this.store.getTransactions();
     let changed = false;
     let snowballAdded = false;
 
@@ -1732,75 +1982,58 @@ class DebtSnowballUI {
     }
 
     const monthInfo = projection.monthTargets?.[monthKey] || {};
-    const targetDebtId = monthInfo.targetDebtId;
-    const snowballAmount = Number(monthInfo.snowballAmount) || 0;
-    const targetDebt = targetDebtId
-      ? this.store.getDebts().find((debt) => debt.id === targetDebtId)
-      : null;
-    const dueDate = targetDebt
-      ? this.getDebtDueDateForMonth(targetDebt, year, month)
-      : null;
-    const dueDateString = dueDate ? Utils.formatDateString(dueDate) : null;
+    const minPaidByDebtId = monthInfo.minPaidByDebtId || {};
+    const snowballPaidByDebtId = monthInfo.snowballPaidByDebtId || {};
 
     if (allowMutation) {
-      let hasMatchingSnowball = false;
-      Object.keys(transactions).forEach((dateKey) => {
-        if (!dateKey.startsWith(monthPrefix)) {
-          return;
-        }
-        const list = transactions[dateKey];
-        const filtered = list.filter((t) => {
-          const isSnowball =
-            t.snowballGenerated === true && t.snowballMonth === monthKey;
-          if (!isSnowball) {
-            return true;
-          }
-          const shouldKeep =
-            !force &&
-            includeExtra &&
-            snowballAmount > 0 &&
-            targetDebtId &&
-            dueDateString &&
-            t.debtId === targetDebtId &&
-            Math.abs(Number(t.amount) - snowballAmount) < 0.01 &&
-            dateKey === dueDateString;
-          if (shouldKeep) {
-            hasMatchingSnowball = true;
-            return true;
-          }
-          changed = true;
-          return false;
-        });
-        if (filtered.length !== list.length) {
-          if (filtered.length === 0) {
-            delete transactions[dateKey];
-          } else {
-            transactions[dateKey] = filtered;
-          }
-        }
-      });
-
-      if (
-        includeExtra &&
-        snowballAmount > 0 &&
-        targetDebtId &&
-        dueDateString &&
-        !hasMatchingSnowball
-      ) {
-        const transaction = {
-          amount: snowballAmount,
-          type: "expense",
-          description: `Snowball Payment: ${targetDebt.name}`,
-          debtId: targetDebt.id,
-          debtRole: "snowball",
-          debtName: targetDebt.name,
-          snowballMonth: monthKey,
-          snowballGenerated: true,
-        };
-        this.store.addTransaction(dueDateString, transaction);
+      if (this.adjustMinimumPaymentTransactions(year, month, minPaidByDebtId)) {
         changed = true;
+      }
+
+      const expectedSnowballPayments = [];
+      if (includeExtra) {
+        const debtsById = new Map(
+          this.store.getDebts().map((debt) => [debt.id, debt])
+        );
+        Object.keys(snowballPaidByDebtId).forEach((debtId) => {
+          const amount = Number(snowballPaidByDebtId[debtId]) || 0;
+          if (amount <= 0) {
+            return;
+          }
+          const debt = debtsById.get(debtId);
+          if (!debt) {
+            return;
+          }
+          const dueDate = this.getDebtDueDateForMonth(debt, year, month);
+          const dueDateString = dueDate
+            ? Utils.formatDateString(dueDate)
+            : null;
+          if (!dueDateString) {
+            return;
+          }
+          expectedSnowballPayments.push({
+            debtId,
+            amount,
+            dateString: dueDateString,
+            debtName: debt.name,
+          });
+        });
+      }
+
+      const syncResult = this.syncSnowballTransactionsForMonth(
+        year,
+        month,
+        monthKey,
+        expectedSnowballPayments,
+        includeExtra
+      );
+      if (syncResult.changed) {
+        changed = true;
+      }
+      if (syncResult.snowballAdded) {
         snowballAdded = true;
-      } else if (changed) {
+      }
+      if (changed && !snowballAdded && !syncResult.changed) {
         this.store.saveData();
       }
     }
