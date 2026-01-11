@@ -1,6 +1,11 @@
 class PinProtection {
   constructor() {
     this.currentPin = "";
+    this.inactivityTimeout = null;
+    this.INACTIVITY_DELAY = 120000; // 120 seconds in milliseconds
+    this.isLocked = false;
+    this.activityEvents = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'click'];
+    this.boundResetTimer = this.resetInactivityTimer.bind(this);
   }
 
   encodeBase64(value) {
@@ -26,11 +31,14 @@ class PinProtection {
   setPin(pin) {
     localStorage.setItem("pin_hash", this.hashPin(pin));
     this.currentPin = pin;
+    // Start inactivity monitoring when PIN is set
+    this.startInactivityMonitoring();
   }
 
   clearPin() {
     localStorage.removeItem("pin_hash");
     this.currentPin = "";
+    this.stopInactivityMonitoring();
   }
 
   getCurrentPin() {
@@ -68,6 +76,9 @@ class PinProtection {
     if (pin === null) return false;
     if (this.verifyPin(pin)) {
       this.currentPin = pin;
+      this.isLocked = false;
+      this.hideLockOverlay();
+      this.startInactivityMonitoring();
       return true;
     }
     await Utils.showModalAlert("Incorrect PIN", "Unlock Failed");
@@ -131,6 +142,77 @@ class PinProtection {
     this.setPin(newPin);
     store.saveData(false);
     await Utils.showModalAlert("PIN updated", "Change PIN");
+  }
+
+  // Inactivity timeout methods
+  startInactivityMonitoring() {
+    if (!this.isPinSet()) return;
+
+    // Add event listeners for user activity
+    this.activityEvents.forEach(event => {
+      document.addEventListener(event, this.boundResetTimer, { passive: true });
+    });
+
+    // Start the timer
+    this.resetInactivityTimer();
+  }
+
+  stopInactivityMonitoring() {
+    // Remove all event listeners
+    this.activityEvents.forEach(event => {
+      document.removeEventListener(event, this.boundResetTimer);
+    });
+
+    // Clear the timeout
+    if (this.inactivityTimeout) {
+      clearTimeout(this.inactivityTimeout);
+      this.inactivityTimeout = null;
+    }
+  }
+
+  resetInactivityTimer() {
+    // Don't reset if already locked or no PIN set
+    if (this.isLocked || !this.isPinSet()) return;
+
+    // Clear existing timeout
+    if (this.inactivityTimeout) {
+      clearTimeout(this.inactivityTimeout);
+    }
+
+    // Set new timeout
+    this.inactivityTimeout = setTimeout(() => {
+      this.lockApp();
+    }, this.INACTIVITY_DELAY);
+  }
+
+  lockApp() {
+    if (!this.isPinSet() || this.isLocked) return;
+
+    this.isLocked = true;
+    this.stopInactivityMonitoring();
+    this.showLockOverlay();
+    this.promptUnlock();
+  }
+
+  showLockOverlay() {
+    // Create overlay if it doesn't exist
+    let overlay = document.getElementById('lockOverlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'lockOverlay';
+      overlay.className = 'lock-overlay';
+      document.body.appendChild(overlay);
+    }
+    overlay.style.display = 'block';
+    document.body.classList.add('app-locked');
+  }
+
+  hideLockOverlay() {
+    const overlay = document.getElementById('lockOverlay');
+    if (overlay) {
+      overlay.style.display = 'none';
+    }
+    document.body.classList.remove('app-locked');
   }
 }
 
