@@ -200,6 +200,39 @@ Example:
 ]
 ```
 
+## cashInfusions
+
+Type: array of objects
+
+Fields:
+
+- id: string
+- name: string (description of the infusion, e.g., "Tax Refund 2026")
+- amount: number
+- date: string YYYY-MM-DD
+- targetDebtId: string | null (null = auto snowball priority, or specific debt ID)
+
+Example:
+
+```
+"cashInfusions": [
+  {
+    "id": "infusion-1",
+    "name": "Tax Refund",
+    "amount": 2500.00,
+    "date": "2026-04-15",
+    "targetDebtId": null
+  },
+  {
+    "id": "infusion-2",
+    "name": "Work Bonus",
+    "amount": 1000.00,
+    "date": "2026-12-20",
+    "targetDebtId": "debt-1"
+  }
+]
+```
+
 ## debtSnowballSettings
 
 Type: object

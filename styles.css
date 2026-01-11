@@ -560,6 +560,76 @@ h4 {
   color: var(--primary-color);
   font-weight: 600;
 }
+
+.cash-infusion-list {
+  margin-bottom: 12px;
+}
+
+.cash-infusion-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  gap: 10px;
+  background-color: #fff;
+  box-shadow: var(--shadow-soft);
+  margin-bottom: 8px;
+}
+
+.cash-infusion-details {
+  flex: 1;
+}
+
+.cash-infusion-name {
+  font-weight: 600;
+}
+
+.cash-infusion-meta {
+  font-size: 0.9em;
+  color: var(--muted-color);
+  margin-top: 4px;
+}
+
+.cash-infusion-allocation {
+  font-size: 0.85em;
+  color: var(--primary-color);
+  margin-top: 4px;
+  font-weight: 500;
+}
+
+.cash-infusion-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.cash-infusion-empty {
+  color: var(--muted-color);
+  padding: 10px 0;
+}
+
+.cash-infusion-form {
+  margin-top: 15px;
+  padding: 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background-color: var(--surface-muted);
+}
+
+.cash-infusion-form-grid {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 8px 12px;
+  align-items: center;
+}
+
+.cash-infusion-form-actions {
+  margin-top: 12px;
+  display: flex;
+  gap: 10px;
+}
+
 .delete-btn,
 .edit-btn,
 .skip-btn {
@@ -891,6 +961,7 @@ h4 {
     opacity: 0;
     transform: translateY(10px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -902,6 +973,7 @@ h4 {
     opacity: 0;
     transform: translateY(6px) scale(0.98);
   }
+
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
@@ -913,6 +985,7 @@ h4 {
     opacity: 0;
     transform: translateY(8px) scale(0.98);
   }
+
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
@@ -924,6 +997,7 @@ h4 {
     transform: translateX(100%);
     opacity: 0;
   }
+
   to {
     transform: translateX(0);
     opacity: 1;
@@ -935,6 +1009,7 @@ h4 {
     transform: translateX(0);
     opacity: 1;
   }
+
   to {
     transform: translateX(100%);
     opacity: 0;
@@ -966,9 +1041,11 @@ h4 {
   0% {
     opacity: 1;
   }
+
   50% {
     opacity: 0.5;
   }
+
   100% {
     opacity: 1;
   }
@@ -1019,6 +1096,7 @@ h4 {
     transform: translateX(0);
     opacity: 1;
   }
+
   to {
     transform: translateX(100%);
     opacity: 0;
@@ -1196,7 +1274,7 @@ h4 {
   margin-top: 10px;
 }
 
-.radio-group > div {
+.radio-group>div {
   margin-bottom: 10px;
 }
 
@@ -1211,6 +1289,7 @@ h4 {
   body {
     padding: 0;
   }
+
   .calendar {
     max-width: 100%;
     margin: 0;
@@ -1248,7 +1327,7 @@ h4 {
   .calendar-option {
     margin: 0 2px;
   }
-  
+
   .advanced-recurrence-options {
     padding: 10px;
   }
@@ -1274,7 +1353,7 @@ h4 {
     width: 100%;
     margin: 5px 0;
     padding: 10px;
-    font-size: 16px; 
+    font-size: 16px;
   }
 
   .balance,
@@ -1283,7 +1362,7 @@ h4 {
     font-size: 90%;
   }
 
-  
+
   .nav-btn,
   .calendar-option,
   .edit-btn,
@@ -1291,14 +1370,14 @@ h4 {
   .skip-btn {
     padding: 8px;
     margin: 5px;
-    min-width: 44px; 
+    min-width: 44px;
     min-height: 44px;
     display: inline-flex;
     justify-content: center;
     align-items: center;
   }
 
-  
+
   #modalTransactions div {
     padding: 10px 5px;
     border-bottom: 1px solid #eee;
@@ -1321,7 +1400,7 @@ h4 {
     text-align: center;
   }
 
-  
+
   .error-toast,
   .success-toast {
     width: 90%;
@@ -1331,7 +1410,7 @@ h4 {
     text-align: center;
   }
 
-  
+
   .search-input-container {
     flex-direction: column;
   }
@@ -1349,8 +1428,8 @@ h4 {
   .search-result-date {
     margin-bottom: 5px;
   }
-  
-  
+
+
   .option-group select,
   .option-group input[type="number"],
   .option-group input[type="date"] {
@@ -1367,22 +1446,23 @@ h4 {
 
 
 @media (max-width: 767px) {
+
   input[type="number"],
   input[type="text"],
   input[type="date"],
   select,
   button {
-    font-size: 16px; 
+    font-size: 16px;
     padding: 10px 8px;
   }
 
-  
+
   .close {
     font-size: 32px;
     padding: 5px;
   }
 
-  
+
   .modal-content {
     margin-top: 10%;
   }
@@ -1393,6 +1473,7 @@ h4 {
 }
 
 @media (prefers-reduced-motion: reduce) {
+
   .calendar,
   .day,
   .modal-content,

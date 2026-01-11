@@ -93,6 +93,16 @@ class DebtSnowballUI {
     this.isSyncingDueDate = false;
     this.currentViewYear = null;
     this.currentViewMonth = null;
+    this.editingCashInfusionId = null;
+
+    // Cash infusion DOM references
+    this.cashInfusionList = document.getElementById("cashInfusionList");
+    this.cashInfusionForm = document.getElementById("cashInfusionForm");
+    this.cashInfusionFormTitle = document.getElementById("cashInfusionFormTitle");
+    this.cashInfusionNameInput = document.getElementById("cashInfusionName");
+    this.cashInfusionAmountInput = document.getElementById("cashInfusionAmount");
+    this.cashInfusionDateInput = document.getElementById("cashInfusionDate");
+    this.cashInfusionTargetInput = document.getElementById("cashInfusionTarget");
 
     this.populateDueDayPatternOptions();
     this.initEventListeners();
@@ -166,6 +176,33 @@ class DebtSnowballUI {
         this.hideModal();
       }
     });
+
+    // Cash infusion event listeners
+    const addCashInfusionButton = document.getElementById("addCashInfusionButton");
+    if (addCashInfusionButton) {
+      addCashInfusionButton.addEventListener("click", () => this.showCashInfusionForm());
+    }
+    const saveCashInfusionButton = document.getElementById("saveCashInfusionButton");
+    if (saveCashInfusionButton) {
+      saveCashInfusionButton.addEventListener("click", () => this.saveCashInfusion());
+    }
+    const cancelCashInfusionButton = document.getElementById("cancelCashInfusionButton");
+    if (cancelCashInfusionButton) {
+      cancelCashInfusionButton.addEventListener("click", () => this.hideCashInfusionForm());
+    }
+    if (this.cashInfusionList) {
+      this.cashInfusionList.addEventListener("click", (event) => {
+        const target = event.target;
+        if (!target || !target.dataset) return;
+        const infusionId = target.dataset.infusionId;
+        if (!infusionId) return;
+        if (target.dataset.action === "edit") {
+          this.editCashInfusion(infusionId);
+        } else if (target.dataset.action === "delete") {
+          this.deleteCashInfusion(infusionId);
+        }
+      });
+    }
   }
 
   setupFocusTrap() {
@@ -205,6 +242,7 @@ class DebtSnowballUI {
     this.modal.style.display = "none";
     this.modal.setAttribute("aria-hidden", "true");
     this.hideDebtForm();
+    this.hideCashInfusionForm();
     if (this.lastFocusedElement && document.contains(this.lastFocusedElement)) {
       this.lastFocusedElement.focus();
     }
@@ -213,6 +251,7 @@ class DebtSnowballUI {
 
   refresh() {
     this.renderDebts();
+    this.renderCashInfusions();
     this.renderPlan();
     this.loadSnowballSettings();
   }
@@ -1140,7 +1179,7 @@ class DebtSnowballUI {
       getTransactions: () => transactions,
       getRecurringTransactions: () => [recurringTransaction],
       isTransactionSkipped: () => false,
-      saveData: () => {},
+      saveData: () => { },
     };
     const manager = new RecurringTransactionManager(dummyStore);
     manager.applyRecurringTransactions(year, month);
@@ -1315,8 +1354,8 @@ class DebtSnowballUI {
     const snowballPaidByDebtId = {};
     let remainingSnowball = applySnowball
       ? (Number(baseExtraPayment) || 0) +
-        (Number(rolloverAmount) || 0) +
-        inMonthRollover
+      (Number(rolloverAmount) || 0) +
+      inMonthRollover
       : 0;
     const balancesAfterPayments = { ...balancesAfterMin };
 
@@ -1378,6 +1417,22 @@ class DebtSnowballUI {
       template.id =
         template.id || debt.minRecurringId || debt.id || Utils.generateUniqueId();
       recurringTemplates[debt.id] = template;
+    });
+
+    // Group cash infusions by month
+    const cashInfusions = this.store.getCashInfusions();
+    const infusionsByMonthKey = {};
+    cashInfusions.forEach((infusion) => {
+      if (!infusion.date) return;
+      const infusionDate = this.getDateFromString(infusion.date);
+      if (!infusionDate) return;
+      const infusionYear = infusionDate.getFullYear();
+      const infusionMonth = infusionDate.getMonth();
+      const key = `${infusionYear}-${infusionMonth + 1}`;
+      if (!infusionsByMonthKey[key]) {
+        infusionsByMonthKey[key] = [];
+      }
+      infusionsByMonthKey[key].push(infusion);
     });
 
     const payoffByDebtId = {};
@@ -1448,31 +1503,62 @@ class DebtSnowballUI {
       }
       const rolloverAmount = applySnowball
         ? Object.keys(monthlyTotalsByDebtId).reduce((sum, debtId) => {
-            const payoff = payoffByDebtId[debtId];
-            if (!payoff) {
-              return sum;
-            }
-            const payoffIndex = this.getMonthIndex(payoff.year, payoff.month);
-            const eligible =
-              payoff.alreadyPaid === true
-                ? payoffIndex <= monthIndex
-                : payoffIndex < monthIndex;
-            if (!eligible) {
-              return sum;
-            }
-            const monthlyTotal = Number(monthlyTotalsByDebtId[debtId]) || 0;
-            if (monthlyTotal <= 0) {
-              return sum;
-            }
-            return sum + monthlyTotal;
-          }, 0)
+          const payoff = payoffByDebtId[debtId];
+          if (!payoff) {
+            return sum;
+          }
+          const payoffIndex = this.getMonthIndex(payoff.year, payoff.month);
+          const eligible =
+            payoff.alreadyPaid === true
+              ? payoffIndex <= monthIndex
+              : payoffIndex < monthIndex;
+          if (!eligible) {
+            return sum;
+          }
+          const monthlyTotal = Number(monthlyTotalsByDebtId[debtId]) || 0;
+          if (monthlyTotal <= 0) {
+            return sum;
+          }
+          return sum + monthlyTotal;
+        }, 0)
         : 0;
+
+      // Calculate cash infusion amount for this month
+      const monthInfusions = infusionsByMonthKey[monthKey] || [];
+      let generalInfusionAmount = 0;
+      const targetedInfusionsByDebtId = {};
+      monthInfusions.forEach((infusion) => {
+        const amount = Number(infusion.amount) || 0;
+        if (amount <= 0) return;
+        if (infusion.targetDebtId && balances[infusion.targetDebtId] > 0) {
+          // Targeted infusion
+          if (!targetedInfusionsByDebtId[infusion.targetDebtId]) {
+            targetedInfusionsByDebtId[infusion.targetDebtId] = 0;
+          }
+          targetedInfusionsByDebtId[infusion.targetDebtId] += amount;
+        } else {
+          // Auto infusion (snowball priority)
+          generalInfusionAmount += amount;
+        }
+      });
+
+      // Apply targeted infusions directly to specific debts
+      Object.keys(targetedInfusionsByDebtId).forEach((debtId) => {
+        const infusionAmount = targetedInfusionsByDebtId[debtId];
+        const currentBalance = Number(balances[debtId]) || 0;
+        if (currentBalance <= 0) return;
+        const applied = Math.min(currentBalance, infusionAmount);
+        balances[debtId] = roundToCents(currentBalance - applied);
+        if (balances[debtId] === 0 && !payoffByDebtId[debtId]) {
+          payoffByDebtId[debtId] = { year, month };
+        }
+      });
 
       const allocation = this.calculateMonthlySnowballAllocation(
         balances,
         monthlyTotalsByDebtId,
         applySnowball,
-        baseExtraPayment,
+        baseExtraPayment + generalInfusionAmount,
         rolloverAmount
       );
       balances = { ...allocation.balancesAfterPayments };
@@ -1488,6 +1574,8 @@ class DebtSnowballUI {
         snowballAmount: allocation.snowballAmount,
         rolloverAmount,
         baseExtraPayment,
+        infusionAmount: generalInfusionAmount,
+        targetedInfusions: targetedInfusionsByDebtId,
         inMonthRollover: allocation.inMonthRollover,
       };
       if (year === viewYear && month === viewMonth) {
@@ -1887,15 +1975,14 @@ class DebtSnowballUI {
     )[0];
     const target =
       targetDebtId &&
-      summaries.find((summary) => summary.debt.id === targetDebtId)
+        summaries.find((summary) => summary.debt.id === targetDebtId)
         ? summaries.find((summary) => summary.debt.id === targetDebtId)
         : fallbackTarget;
     const summaryText = document.createElement("div");
     summaryText.className = "debt-plan-summary";
     const viewLabel = this.formatMonthYear(viewYear, viewMonth);
-    summaryText.textContent = `Current target${viewLabel ? ` (${viewLabel})` : ""}: ${
-      target.debt.name
-    } (Remaining $${target.remaining.toFixed(2)})`;
+    summaryText.textContent = `Current target${viewLabel ? ` (${viewLabel})` : ""}: ${target.debt.name
+      } (Remaining $${target.remaining.toFixed(2)})`;
     this.planSummary.appendChild(summaryText);
 
     const extraText = document.createElement("div");
@@ -1904,7 +1991,11 @@ class DebtSnowballUI {
     const snowballAmount = Number(monthInfo.snowballAmount) || 0;
     const rolloverAmount = Number(monthInfo.rolloverAmount) || 0;
     const inMonthRollover = Number(monthInfo.inMonthRollover) || 0;
+    const infusionAmount = Number(monthInfo.infusionAmount) || 0;
     const breakdownParts = [`Base $${baseExtraPayment.toFixed(2)}`];
+    if (infusionAmount > 0) {
+      breakdownParts.push(`Infusions $${infusionAmount.toFixed(2)}`);
+    }
     if (rolloverAmount > 0) {
       breakdownParts.push(`Rollovers $${rolloverAmount.toFixed(2)}`);
     }
@@ -1949,6 +2040,435 @@ class DebtSnowballUI {
       )} — Paid off by ${payoffLabel}`;
       this.planList.appendChild(item);
     });
+  }
+
+  // Cash Infusion Methods
+
+  populateCashInfusionTargetOptions() {
+    if (!this.cashInfusionTargetInput) return;
+    // Clear existing options except the first "Auto" option
+    while (this.cashInfusionTargetInput.options.length > 1) {
+      this.cashInfusionTargetInput.remove(1);
+    }
+    // Add debt options
+    const debts = this.store.getDebts();
+    debts.forEach((debt) => {
+      const option = document.createElement("option");
+      option.value = debt.id;
+      option.textContent = debt.name;
+      this.cashInfusionTargetInput.appendChild(option);
+    });
+  }
+
+  showCashInfusionForm(infusion = null) {
+    if (!this.cashInfusionForm) return;
+    this.populateCashInfusionTargetOptions();
+    if (infusion) {
+      this.editingCashInfusionId = infusion.id;
+      if (this.cashInfusionFormTitle) {
+        this.cashInfusionFormTitle.textContent = "Edit Cash Infusion";
+      }
+      if (this.cashInfusionNameInput) {
+        this.cashInfusionNameInput.value = infusion.name || "";
+      }
+      if (this.cashInfusionAmountInput) {
+        this.cashInfusionAmountInput.value = infusion.amount || "";
+      }
+      if (this.cashInfusionDateInput) {
+        this.cashInfusionDateInput.value = infusion.date || "";
+      }
+      if (this.cashInfusionTargetInput) {
+        this.cashInfusionTargetInput.value = infusion.targetDebtId || "";
+      }
+    } else {
+      this.editingCashInfusionId = null;
+      if (this.cashInfusionFormTitle) {
+        this.cashInfusionFormTitle.textContent = "Add Cash Infusion";
+      }
+      if (this.cashInfusionNameInput) {
+        this.cashInfusionNameInput.value = "";
+      }
+      if (this.cashInfusionAmountInput) {
+        this.cashInfusionAmountInput.value = "";
+      }
+      if (this.cashInfusionDateInput) {
+        // Default to today's date
+        this.cashInfusionDateInput.value = Utils.formatDateString(new Date());
+      }
+      if (this.cashInfusionTargetInput) {
+        this.cashInfusionTargetInput.value = "";
+      }
+    }
+    this.cashInfusionForm.style.display = "block";
+    if (this.cashInfusionNameInput) {
+      this.cashInfusionNameInput.focus();
+    }
+  }
+
+  hideCashInfusionForm() {
+    if (!this.cashInfusionForm) return;
+    this.cashInfusionForm.style.display = "none";
+    this.editingCashInfusionId = null;
+    if (this.cashInfusionNameInput) {
+      this.cashInfusionNameInput.value = "";
+    }
+    if (this.cashInfusionAmountInput) {
+      this.cashInfusionAmountInput.value = "";
+    }
+    if (this.cashInfusionDateInput) {
+      this.cashInfusionDateInput.value = "";
+    }
+    if (this.cashInfusionTargetInput) {
+      this.cashInfusionTargetInput.value = "";
+    }
+  }
+
+  saveCashInfusion() {
+    const name = this.cashInfusionNameInput?.value.trim() || "";
+    const amount = parseFloat(this.cashInfusionAmountInput?.value || "0");
+    const date = this.cashInfusionDateInput?.value || "";
+    const targetDebtId = this.cashInfusionTargetInput?.value || null;
+
+    if (!name) {
+      Utils.showNotification("Please enter a description", "error");
+      return;
+    }
+    if (isNaN(amount) || amount <= 0) {
+      Utils.showNotification("Please enter a valid amount greater than 0", "error");
+      return;
+    }
+    if (!date || !this.isValidDateString(date)) {
+      Utils.showNotification("Please enter a valid date", "error");
+      return;
+    }
+
+    const infusionData = {
+      name,
+      amount,
+      date,
+      targetDebtId: targetDebtId || null,
+    };
+
+    if (this.editingCashInfusionId) {
+      this.store.updateCashInfusion(this.editingCashInfusionId, infusionData);
+      Utils.showNotification("Cash infusion updated");
+    } else {
+      this.store.addCashInfusion(infusionData);
+      Utils.showNotification("Cash infusion added");
+    }
+
+    this.hideCashInfusionForm();
+    this.renderCashInfusions();
+    this.renderPlan();
+    this.onUpdate();
+  }
+
+  editCashInfusion(infusionId) {
+    const infusion = this.store.getCashInfusions().find((inf) => inf.id === infusionId);
+    if (!infusion) {
+      Utils.showNotification("Cash infusion not found", "error");
+      return;
+    }
+    this.showCashInfusionForm(infusion);
+  }
+
+  async deleteCashInfusion(infusionId) {
+    const infusion = this.store.getCashInfusions().find((inf) => inf.id === infusionId);
+    if (!infusion) {
+      Utils.showNotification("Cash infusion not found", "error");
+      return;
+    }
+    const shouldDelete = await Utils.showModalConfirm(
+      `Delete cash infusion "${infusion.name}"?`,
+      "Delete Cash Infusion",
+      { confirmText: "Delete", cancelText: "Cancel" }
+    );
+    if (!shouldDelete) {
+      return;
+    }
+    this.store.deleteCashInfusion(infusionId);
+    Utils.showNotification("Cash infusion deleted");
+    this.renderCashInfusions();
+    this.renderPlan();
+    this.onUpdate();
+  }
+
+  renderCashInfusions() {
+    if (!this.cashInfusionList) return;
+    this.cashInfusionList.innerHTML = "";
+    const infusions = this.store.getCashInfusions();
+    const debts = this.store.getDebts();
+
+    if (infusions.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "cash-infusion-empty";
+      empty.textContent = "No cash infusions scheduled.";
+      this.cashInfusionList.appendChild(empty);
+      return;
+    }
+
+    // Calculate allocation for each infusion
+    const infusionAllocations = this.calculateInfusionAllocations();
+
+    // Sort by date
+    const sortedInfusions = [...infusions].sort((a, b) =>
+      a.date.localeCompare(b.date)
+    );
+
+    sortedInfusions.forEach((infusion) => {
+      const amount = Number(infusion.amount) || 0;
+      const targetDebt = infusion.targetDebtId
+        ? debts.find((d) => d.id === infusion.targetDebtId)
+        : null;
+      const targetLabel = targetDebt
+        ? targetDebt.name
+        : "Auto (Snowball Priority)";
+
+      const row = document.createElement("div");
+      row.className = "cash-infusion-item";
+
+      const details = document.createElement("div");
+      details.className = "cash-infusion-details";
+
+      const nameSpan = document.createElement("span");
+      nameSpan.className = "cash-infusion-name";
+      nameSpan.textContent = infusion.name;
+
+      const meta = document.createElement("div");
+      meta.className = "cash-infusion-meta";
+      meta.textContent = `$${amount.toFixed(2)} on ${Utils.formatDisplayDate(
+        infusion.date
+      )} → ${targetLabel}`;
+
+      details.appendChild(nameSpan);
+      details.appendChild(meta);
+
+      // Add allocation breakdown
+      const allocation = infusionAllocations[infusion.id];
+      if (allocation && Object.keys(allocation).length > 0) {
+        const allocationDiv = document.createElement("div");
+        allocationDiv.className = "cash-infusion-allocation";
+
+        const allocationParts = [];
+        Object.keys(allocation).forEach((debtId) => {
+          const debt = debts.find((d) => d.id === debtId);
+          const debtName = debt ? debt.name : "Unknown Debt";
+          const allocatedAmount = Number(allocation[debtId]) || 0;
+          if (allocatedAmount > 0) {
+            allocationParts.push(`${debtName}: $${allocatedAmount.toFixed(2)}`);
+          }
+        });
+
+        if (allocationParts.length > 0) {
+          allocationDiv.textContent = `Applied: ${allocationParts.join(", ")}`;
+        } else {
+          allocationDiv.textContent = "No allocation (all debts may be paid off)";
+        }
+        details.appendChild(allocationDiv);
+      }
+
+      const actions = document.createElement("div");
+      actions.className = "cash-infusion-actions";
+
+      const editBtn = document.createElement("button");
+      editBtn.className = "edit-btn";
+      editBtn.textContent = "Edit";
+      editBtn.dataset.infusionId = infusion.id;
+      editBtn.dataset.action = "edit";
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.className = "delete-btn";
+      deleteBtn.textContent = "Delete";
+      deleteBtn.dataset.infusionId = infusion.id;
+      deleteBtn.dataset.action = "delete";
+
+      actions.appendChild(editBtn);
+      actions.appendChild(deleteBtn);
+
+      row.appendChild(details);
+      row.appendChild(actions);
+      this.cashInfusionList.appendChild(row);
+    });
+  }
+
+  calculateInfusionAllocations() {
+    // This method calculates how each infusion is allocated to debts
+    // by running a projection and tracking infusion-specific allocations
+    const infusions = this.store.getCashInfusions();
+    const debts = this.store.getDebts();
+    const settings = this.store.getDebtSnowballSettings();
+    const roundToCents = (value) =>
+      Math.round((Number(value) || 0) * 100) / 100;
+
+    if (infusions.length === 0 || debts.length === 0) {
+      return {};
+    }
+
+    // Group infusions by month
+    const infusionsByMonthKey = {};
+    infusions.forEach((infusion) => {
+      if (!infusion.date) return;
+      const infusionDate = this.getDateFromString(infusion.date);
+      if (!infusionDate) return;
+      const infusionYear = infusionDate.getFullYear();
+      const infusionMonth = infusionDate.getMonth();
+      const key = `${infusionYear}-${infusionMonth + 1}`;
+      if (!infusionsByMonthKey[key]) {
+        infusionsByMonthKey[key] = [];
+      }
+      infusionsByMonthKey[key].push(infusion);
+    });
+
+    // Find the earliest infusion date to start projection from
+    const sortedInfusions = [...infusions].sort((a, b) =>
+      a.date.localeCompare(b.date)
+    );
+    const earliestDate = this.getDateFromString(sortedInfusions[0].date);
+    const latestDate = this.getDateFromString(sortedInfusions[sortedInfusions.length - 1].date);
+
+    if (!earliestDate) return {};
+
+    const today = new Date();
+    const startYear = Math.min(earliestDate.getFullYear(), today.getFullYear());
+    const startMonth = startYear === earliestDate.getFullYear()
+      ? Math.min(earliestDate.getMonth(), today.getMonth())
+      : (startYear < earliestDate.getFullYear() ? today.getMonth() : earliestDate.getMonth());
+
+    const endYear = latestDate ? latestDate.getFullYear() : today.getFullYear();
+    const endMonth = latestDate ? latestDate.getMonth() : today.getMonth();
+
+    // Build initial balances
+    const baseDate = new Date(startYear, startMonth, 1);
+    const baseSummaries = this.getDebtSummaries(baseDate);
+    let balances = {};
+    const debtById = {};
+    const recurringTemplates = {};
+
+    baseSummaries.forEach(({ debt, remaining }) => {
+      balances[debt.id] = Number(remaining) || 0;
+      debtById[debt.id] = debt;
+    });
+
+    debts.forEach((debt) => {
+      if (!debtById[debt.id]) {
+        debtById[debt.id] = debt;
+        balances[debt.id] = Number(debt.balance) || 0;
+      }
+      const template = this.buildDebtRecurringTransaction(debt);
+      template.id = template.id || debt.minRecurringId || debt.id || Utils.generateUniqueId();
+      recurringTemplates[debt.id] = template;
+    });
+
+    const payoffByDebtId = {};
+    Object.keys(balances).forEach((debtId) => {
+      if (balances[debtId] <= 0) {
+        payoffByDebtId[debtId] = { year: startYear, month: startMonth, alreadyPaid: true };
+      }
+    });
+
+    // Track allocations per infusion
+    const infusionAllocations = {};
+    infusions.forEach((inf) => {
+      infusionAllocations[inf.id] = {};
+    });
+
+    // Run projection month by month
+    let year = startYear;
+    let month = startMonth;
+    const maxMonths = (endYear - startYear) * 12 + (endMonth - startMonth) + 12; // Add buffer
+
+    for (let i = 0; i < maxMonths; i++) {
+      const monthKey = `${year}-${month + 1}`;
+      const monthIndex = this.getMonthIndex(year, month);
+
+      // Calculate monthly minimums
+      const monthlyTotalsByDebtId = {};
+      Object.keys(recurringTemplates).forEach((debtId) => {
+        const template = recurringTemplates[debtId];
+        if (!template) {
+          monthlyTotalsByDebtId[debtId] = 0;
+          return;
+        }
+        const occurrences = this.getRecurringOccurrencesForMonth(template, year, month);
+        const totalPayment = occurrences.reduce((sum, occ) => sum + occ.amount, 0);
+        monthlyTotalsByDebtId[debtId] = totalPayment;
+      });
+
+      // Apply interest
+      Object.keys(balances).forEach((debtId) => {
+        const debt = debtById[debtId];
+        const balance = Number(balances[debtId]) || 0;
+        const interestRate = debt?.interestRate || 0;
+        if (balance <= 0 || interestRate <= 0) return;
+        const interest = roundToCents((balance * interestRate) / 1200);
+        if (interest > 0) {
+          balances[debtId] = roundToCents(balance + interest);
+        }
+      });
+
+      // Apply minimum payments
+      Object.keys(balances).forEach((debtId) => {
+        const balance = Number(balances[debtId]) || 0;
+        const scheduledMin = Number(monthlyTotalsByDebtId[debtId]) || 0;
+        if (balance <= 0 || scheduledMin <= 0) return;
+        const actualMin = Math.min(balance, scheduledMin);
+        balances[debtId] = roundToCents(balance - actualMin);
+      });
+
+      // Get infusions for this month
+      const monthInfusions = infusionsByMonthKey[monthKey] || [];
+
+      // Process each infusion individually to track allocation
+      monthInfusions.forEach((infusion) => {
+        const infusionAmount = Number(infusion.amount) || 0;
+        if (infusionAmount <= 0) return;
+
+        if (infusion.targetDebtId && balances[infusion.targetDebtId] !== undefined) {
+          // Targeted infusion
+          const currentBalance = Number(balances[infusion.targetDebtId]) || 0;
+          if (currentBalance > 0) {
+            const applied = Math.min(currentBalance, infusionAmount);
+            balances[infusion.targetDebtId] = roundToCents(currentBalance - applied);
+            infusionAllocations[infusion.id][infusion.targetDebtId] = applied;
+            if (balances[infusion.targetDebtId] === 0 && !payoffByDebtId[infusion.targetDebtId]) {
+              payoffByDebtId[infusion.targetDebtId] = { year, month };
+            }
+          }
+        } else {
+          // Auto infusion - apply snowball priority
+          const debtOrder = Object.keys(balances)
+            .filter((debtId) => balances[debtId] > 0)
+            .sort((a, b) => balances[a] - balances[b]);
+
+          let remaining = infusionAmount;
+          debtOrder.forEach((debtId) => {
+            if (remaining <= 0) return;
+            const currentBalance = Number(balances[debtId]) || 0;
+            if (currentBalance <= 0) return;
+            const applied = Math.min(currentBalance, remaining);
+            balances[debtId] = roundToCents(currentBalance - applied);
+            infusionAllocations[infusion.id][debtId] =
+              (infusionAllocations[infusion.id][debtId] || 0) + applied;
+            remaining -= applied;
+            if (balances[debtId] === 0 && !payoffByDebtId[debtId]) {
+              payoffByDebtId[debtId] = { year, month };
+            }
+          });
+        }
+      });
+
+      // Check if all debts are paid
+      const activeDebtIds = Object.keys(balances).filter((id) => balances[id] > 0);
+      if (activeDebtIds.length === 0) break;
+
+      month += 1;
+      if (month > 11) {
+        month = 0;
+        year += 1;
+      }
+    }
+
+    return infusionAllocations;
   }
 
   saveSnowballSettings() {
@@ -2032,12 +2552,12 @@ class DebtSnowballUI {
         const rolloverAvailableDate =
           inMonthRollover > 0
             ? this.getRolloverAvailableDate(
-                year,
-                month,
-                minPaidByDebtId,
-                monthlyTotalsByDebtId,
-                debtsById
-              )
+              year,
+              month,
+              minPaidByDebtId,
+              monthlyTotalsByDebtId,
+              debtsById
+            )
             : null;
         Object.keys(snowballPaidByDebtId).forEach((debtId) => {
           const amount = Number(snowballPaidByDebtId[debtId]) || 0;
