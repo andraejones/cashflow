@@ -1,7 +1,7 @@
 // Calculation service
 
 class CalculationService {
-  
+
   constructor(store, recurringManager) {
     this.store = store;
     this.recurringManager = recurringManager;
@@ -9,13 +9,13 @@ class CalculationService {
     this._cachedDailyTotals = {};
   }
 
-  
+
   invalidateCache() {
     this._cachedSummaries = {};
     this._cachedDailyTotals = {};
   }
 
-  
+
   updateMonthlyBalances(viewedDate) {
     const transactions = this.store.getTransactions();
     const monthlyBalances = this.store.getMonthlyBalances();
@@ -36,11 +36,11 @@ class CalculationService {
     }
     if (viewedDate) {
       const viewedMonthStart = new Date(viewedDate.getFullYear(), viewedDate.getMonth(), 1);
-      
+
       if (!latestDate || viewedMonthStart > latestDate) {
         latestDate = viewedMonthStart;
       }
-      
+
       if (!earliestDate) {
         earliestDate = viewedMonthStart;
       }
@@ -48,15 +48,15 @@ class CalculationService {
     if (!earliestDate) {
       const today = new Date();
       const currentMonthKey = `${today.getFullYear()}-${today.getMonth() + 1}`;
-      
+
       monthlyBalances[currentMonthKey] = {
         startingBalance: 0,
         endingBalance: 0
       };
-      
+
       if (viewedDate) {
         const viewedMonthKey = `${viewedDate.getFullYear()}-${viewedDate.getMonth() + 1}`;
-        
+
         if (viewedMonthKey !== currentMonthKey) {
           monthlyBalances[viewedMonthKey] = {
             startingBalance: 0,
@@ -64,7 +64,7 @@ class CalculationService {
           };
         }
       }
-      
+
       return;
     }
     const allMonths = [];
@@ -75,14 +75,14 @@ class CalculationService {
     for (let year = startYear; year <= endYear; year++) {
       const firstMonth = (year === startYear) ? startMonth : 1;
       const lastMonth = (year === endYear) ? endMonth : 12;
-      
+
       for (let month = firstMonth; month <= lastMonth; month++) {
         allMonths.push(`${year}-${month}`);
       }
     }
     const lastMonthYear = endYear;
     const lastMonthMonth = endMonth;
-    
+
     if (lastMonthMonth === 12) {
       allMonths.push(`${lastMonthYear + 1}-1`);
     } else {
@@ -91,13 +91,13 @@ class CalculationService {
     allMonths.sort((a, b) => {
       const [yearA, monthA] = a.split('-').map(Number);
       const [yearB, monthB] = b.split('-').map(Number);
-      
+
       if (yearA !== yearB) {
         return yearA - yearB;
       }
       return monthA - monthB;
     });
-    
+
     let previousBalance = 0;
     allMonths.forEach((monthKey, index) => {
       const [year, month] = monthKey.split("-").map(Number);
@@ -165,7 +165,7 @@ class CalculationService {
     this.store.saveData(false);
   }
 
-  
+
   calculateDailyTotals(dateString) {
     if (this._cachedDailyTotals[dateString]) {
       return this._cachedDailyTotals[dateString];
@@ -214,7 +214,7 @@ class CalculationService {
     return result;
   }
 
-  
+
   calculateMonthlySummary(year, month) {
     const monthKey = `${year}-${month + 1}`;
     if (this._cachedSummaries[monthKey]) {
@@ -223,7 +223,7 @@ class CalculationService {
     let monthIncome = 0;
     let monthExpense = 0;
     const daysInMonth = new Date(year, month + 1, 0).getDate();
-    
+
     for (let day = 1; day <= daysInMonth; day++) {
       const dateString = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
       const dailyTotals = this.calculateDailyTotals(dateString);
@@ -239,7 +239,7 @@ class CalculationService {
     }
     let startingBalance = 0;
     let endingBalance = 0;
-    
+
     if (monthlyBalances[monthKey]) {
       startingBalance = monthlyBalances[monthKey].startingBalance;
       endingBalance = monthlyBalances[monthKey].endingBalance;
@@ -256,5 +256,68 @@ class CalculationService {
     this._cachedSummaries[monthKey] = result;
 
     return result;
+  }
+
+  calculateUnallocated() {
+    // Calculate the minimum running balance from today through the next 30 days
+    const today = new Date();
+    const todayYear = today.getFullYear();
+    const todayMonth = today.getMonth();
+    const todayDay = today.getDate();
+
+    // Get today's starting balance by finding the running balance up to today
+    const todayDateString = `${todayYear}-${String(todayMonth + 1).padStart(2, "0")}-${String(todayDay).padStart(2, "0")}`;
+
+    // Find the starting balance for today's month
+    const monthKey = `${todayYear}-${todayMonth + 1}`;
+    let monthlyBalances = this.store.getMonthlyBalances();
+    if (!monthlyBalances[monthKey]) {
+      this.updateMonthlyBalances(today);
+      monthlyBalances = this.store.getMonthlyBalances();
+    }
+
+    let runningBalance = monthlyBalances[monthKey]?.startingBalance || 0;
+
+    // Calculate running balance up to and including today
+    for (let day = 1; day <= todayDay; day++) {
+      const dateString = `${todayYear}-${String(todayMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      const dailyTotals = this.calculateDailyTotals(dateString);
+
+      if (dailyTotals.balance !== null) {
+        runningBalance = dailyTotals.balance;
+      } else {
+        runningBalance += dailyTotals.income - dailyTotals.expense;
+      }
+    }
+
+    // Track minimum balance from today through next 30 days
+    let minBalance = runningBalance;
+
+    // Now iterate through the next 30 days (starting from tomorrow)
+    for (let i = 1; i <= 30; i++) {
+      const futureDate = new Date(todayYear, todayMonth, todayDay + i);
+      const futureYear = futureDate.getFullYear();
+      const futureMonth = futureDate.getMonth();
+      const futureDay = futureDate.getDate();
+
+      const dateString = `${futureYear}-${String(futureMonth + 1).padStart(2, "0")}-${String(futureDay).padStart(2, "0")}`;
+
+      // Make sure recurring transactions are applied for this month
+      this.recurringManager.applyRecurringTransactions(futureYear, futureMonth);
+
+      const dailyTotals = this.calculateDailyTotals(dateString);
+
+      if (dailyTotals.balance !== null) {
+        runningBalance = dailyTotals.balance;
+      } else {
+        runningBalance += dailyTotals.income - dailyTotals.expense;
+      }
+
+      if (runningBalance < minBalance) {
+        minBalance = runningBalance;
+      }
+    }
+
+    return minBalance;
   }
 }
