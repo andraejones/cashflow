@@ -10,6 +10,7 @@ class TransactionStore {
     this.recurringTransactions = [];
     this.skippedTransactions = {};
     this.debts = [];
+    this.cashInfusions = [];
     this.debtSnowballSettings = {
       extraPayment: 0,
       autoGenerate: false,
@@ -60,6 +61,9 @@ class TransactionStore {
         this.storage.getItem("skippedTransactions")
       );
       const storedDebts = decrypt(this.storage.getItem("debts"));
+      const storedCashInfusions = decrypt(
+        this.storage.getItem("cashInfusions")
+      );
       const storedSnowballSettings = decrypt(
         this.storage.getItem("debtSnowballSettings")
       );
@@ -135,6 +139,18 @@ class TransactionStore {
         }));
       }
 
+      if (storedCashInfusions) {
+        const parsedInfusions = JSON.parse(storedCashInfusions);
+        this.cashInfusions = parsedInfusions.map((infusion) => ({
+          ...infusion,
+          id: infusion.id || Utils.generateUniqueId(),
+          name: typeof infusion.name === "string" ? infusion.name : "",
+          amount: Number(infusion.amount) || 0,
+          date: typeof infusion.date === "string" ? infusion.date : "",
+          targetDebtId: infusion.targetDebtId || null,
+        }));
+      }
+
       if (storedSnowballSettings) {
         const parsedSettings = JSON.parse(storedSnowballSettings);
         this.debtSnowballSettings = {
@@ -159,6 +175,7 @@ class TransactionStore {
       this.recurringTransactions = [];
       this.skippedTransactions = {};
       this.debts = [];
+      this.cashInfusions = [];
       this.debtSnowballSettings = {
         extraPayment: 0,
         autoGenerate: false,
@@ -197,6 +214,10 @@ class TransactionStore {
       );
       this.storage.setItem("debts", encrypt(JSON.stringify(this.debts)));
       this.storage.setItem(
+        "cashInfusions",
+        encrypt(JSON.stringify(this.cashInfusions))
+      );
+      this.storage.setItem(
         "debtSnowballSettings",
         encrypt(JSON.stringify(this.debtSnowballSettings))
       );
@@ -213,6 +234,7 @@ class TransactionStore {
     this.recurringTransactions = [];
     this.skippedTransactions = {};
     this.debts = [];
+    this.cashInfusions = [];
     this.debtSnowballSettings = {
       extraPayment: 0,
       autoGenerate: false,
@@ -249,6 +271,58 @@ class TransactionStore {
   
   getDebtSnowballSettings() {
     return this.debtSnowballSettings;
+  }
+
+  
+  getCashInfusions() {
+    return this.cashInfusions;
+  }
+
+  
+  addCashInfusion(infusion) {
+    if (!infusion) {
+      console.error("Invalid cash infusion data");
+      return null;
+    }
+    if (!infusion.id) {
+      infusion.id = Utils.generateUniqueId();
+    }
+    this.cashInfusions.push(infusion);
+    this.saveData();
+    return infusion.id;
+  }
+
+  
+  updateCashInfusion(id, updates) {
+    if (!id || !updates) {
+      console.error("Invalid parameters for updateCashInfusion");
+      return false;
+    }
+    const index = this.cashInfusions.findIndex((inf) => inf.id === id);
+    if (index === -1) {
+      return false;
+    }
+    this.cashInfusions[index] = {
+      ...this.cashInfusions[index],
+      ...updates,
+    };
+    this.saveData();
+    return true;
+  }
+
+  
+  deleteCashInfusion(id) {
+    if (!id) {
+      console.error("Invalid ID for deleteCashInfusion");
+      return false;
+    }
+    const index = this.cashInfusions.findIndex((inf) => inf.id === id);
+    if (index === -1) {
+      return false;
+    }
+    this.cashInfusions.splice(index, 1);
+    this.saveData();
+    return true;
   }
 
   
@@ -494,6 +568,7 @@ class TransactionStore {
       recurringTransactions: this.recurringTransactions,
       skippedTransactions: this.skippedTransactions,
       debts: this.debts,
+      cashInfusions: this.cashInfusions,
       debtSnowballSettings: this.debtSnowballSettings,
       lastExported: new Date().toISOString(),
       appVersion: "2.0.0"
@@ -559,6 +634,14 @@ class TransactionStore {
         endDate: typeof debt.endDate === "string" ? debt.endDate : "",
         maxOccurrences: Number(debt.maxOccurrences) || null,
         interestRate: Number(debt.interestRate) || 0,
+      }));
+      this.cashInfusions = (data.cashInfusions || []).map((infusion) => ({
+        ...infusion,
+        id: infusion.id || Utils.generateUniqueId(),
+        name: typeof infusion.name === "string" ? infusion.name : "",
+        amount: Number(infusion.amount) || 0,
+        date: typeof infusion.date === "string" ? infusion.date : "",
+        targetDebtId: infusion.targetDebtId || null,
       }));
       this.debtSnowballSettings = {
         extraPayment: Number(data.debtSnowballSettings?.extraPayment) || 0,

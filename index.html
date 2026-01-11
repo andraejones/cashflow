@@ -1,407 +1,320 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1.0, user-scalable=no"
-    />
-    <title>Cashflow Calendar</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Fraunces:wght@500;600;700&family=Source+Sans+3:wght@400;500;600&display=swap"
-      rel="stylesheet"
-    />
-    <link rel="stylesheet" href="styles.css" />
-    <meta
-      name="description"
-      content="Personal cashflow tracking and management calendar"
-    />
-  </head>
-  <body>
-    <div class="calendar" role="application" aria-label="Cashflow calendar">
-      <div class="header" role="heading" aria-level="1">
-        <button id="prevMonth" class="nav-btn" aria-label="Previous month">
-          &#10094;
-        </button>
-        <span id="currentMonth" role="heading" aria-level="2"></span>
-        <button id="nextMonth" class="nav-btn" aria-label="Next month">
-          &#10095;
-        </button>
-      </div>
 
-      <div id="monthSummary" role="region" aria-label="Monthly summary"></div>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Cashflow Calendar</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Fraunces:wght@500;600;700&family=Source+Sans+3:wght@400;500;600&display=swap"
+    rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <meta name="description" content="Personal cashflow tracking and management calendar" />
+</head>
 
-      <div
-        id="calendarDays"
-        class="days"
-        role="grid"
-        aria-label="Calendar days"
-      ></div>
-
-      <div
-        id="calendarOptions"
-        role="toolbar"
-        aria-label="Calendar options"
-      ></div>
+<body>
+  <div class="calendar" role="application" aria-label="Cashflow calendar">
+    <div class="header" role="heading" aria-level="1">
+      <button id="prevMonth" class="nav-btn" aria-label="Previous month">
+        &#10094;
+      </button>
+      <span id="currentMonth" role="heading" aria-level="2"></span>
+      <button id="nextMonth" class="nav-btn" aria-label="Next month">
+        &#10095;
+      </button>
     </div>
 
-    <div
-      id="transactionModal"
-      class="modal"
-      role="dialog"
-      aria-labelledby="modalDate"
-      aria-hidden="true"
-    >
-      <div class="modal-content">
-        <span class="close" aria-label="Close">&times;</span>
-        <h3 id="modalDate" tabindex="-1"></h3>
-        <div id="transactionForm" role="form" aria-label="Add transaction">
-          <input
-            type="date"
-            id="transactionDate"
-            aria-label="Transaction date"
-          />
-          <input
-            type="number"
-            id="transactionAmount"
-            placeholder="Amount"
-            step="0.01"
-            aria-label="Transaction amount"
-          />
-          <select id="transactionType" aria-label="Transaction type">
-            <option value="expense">Expense</option>
-            <option value="income">Income</option>
-            <option value="balance">Balance</option>
-          </select>
-          <input
-            type="text"
-            id="transactionDescription"
-            placeholder="Description"
-            aria-label="Transaction description"
-          />
-          <select
-            id="transactionRecurrence"
-            aria-label="Transaction recurrence"
-          >
-            <option value="once">One-time</option>
-            <option value="daily">Daily</option>
-            <option value="weekly">Weekly</option>
-            <option value="bi-weekly">Bi-weekly</option>
-            <option value="monthly">Monthly</option>
-            <option value="semi-monthly">Twice a month</option>
-            <option value="quarterly">Quarterly</option>
-            <option value="semi-annual">Semi-annually</option>
-            <option value="yearly">Yearly</option>
-            <option value="custom">Custom...</option>
-          </select>
-          <button onclick="addTransaction()" aria-label="Add transaction">
-            Add Transaction
+    <div id="monthSummary" role="region" aria-label="Monthly summary"></div>
+
+    <div id="calendarDays" class="days" role="grid" aria-label="Calendar days"></div>
+
+    <div id="calendarOptions" role="toolbar" aria-label="Calendar options"></div>
+  </div>
+
+  <div id="transactionModal" class="modal" role="dialog" aria-labelledby="modalDate" aria-hidden="true">
+    <div class="modal-content">
+      <span class="close" aria-label="Close">&times;</span>
+      <h3 id="modalDate" tabindex="-1"></h3>
+      <div id="transactionForm" role="form" aria-label="Add transaction">
+        <input type="date" id="transactionDate" aria-label="Transaction date" />
+        <input type="number" id="transactionAmount" placeholder="Amount" step="0.01" aria-label="Transaction amount" />
+        <select id="transactionType" aria-label="Transaction type">
+          <option value="expense">Expense</option>
+          <option value="income">Income</option>
+          <option value="balance">Balance</option>
+        </select>
+        <input type="text" id="transactionDescription" placeholder="Description" aria-label="Transaction description" />
+        <select id="transactionRecurrence" aria-label="Transaction recurrence">
+          <option value="once">One-time</option>
+          <option value="daily">Daily</option>
+          <option value="weekly">Weekly</option>
+          <option value="bi-weekly">Bi-weekly</option>
+          <option value="monthly">Monthly</option>
+          <option value="semi-monthly">Twice a month</option>
+          <option value="quarterly">Quarterly</option>
+          <option value="semi-annual">Semi-annually</option>
+          <option value="yearly">Yearly</option>
+          <option value="custom">Custom...</option>
+        </select>
+        <button onclick="addTransaction()" aria-label="Add transaction">
+          Add Transaction
+        </button>
+      </div>
+      <div id="modalTransactions" role="region" aria-label="Transactions for selected date"></div>
+    </div>
+  </div>
+
+  <div id="searchModal" class="modal" role="dialog" aria-labelledby="searchModalTitle" aria-hidden="true">
+    <div class="modal-content">
+      <span class="close" aria-label="Close">&times;</span>
+      <h3 id="searchModalTitle">Search Transactions</h3>
+
+      <div class="search-form">
+        <div class="search-input-container">
+          <input type="text" id="searchInput" placeholder="Enter search term" aria-label="Search term" />
+          <button id="searchButton" class="primary-button">Search</button>
+          <button id="clearSearchButton" class="secondary-button" disabled>
+            Clear
           </button>
         </div>
-        <div
-          id="modalTransactions"
-          role="region"
-          aria-label="Transactions for selected date"
-        ></div>
+
+        <button id="advancedSearchToggle" aria-expanded="false" class="text-button">
+          Show Advanced Options
+        </button>
+
+        <div id="advancedSearchControls" style="display: none">
+          <div class="advanced-search-grid">
+            <div class="search-filter-group">
+              <label for="dateRangeFrom">From Date:</label>
+              <input type="date" id="dateRangeFrom" aria-label="From date" />
+            </div>
+
+            <div class="search-filter-group">
+              <label for="dateRangeTo">To Date:</label>
+              <input type="date" id="dateRangeTo" aria-label="To date" />
+            </div>
+
+            <div class="search-filter-group">
+              <label for="transactionTypeFilter">Transaction Type:</label>
+              <select id="transactionTypeFilter" aria-label="Transaction type">
+                <option value="">All Types</option>
+                <option value="income">Income</option>
+                <option value="expense">Expense</option>
+                <option value="balance">Balance</option>
+              </select>
+            </div>
+
+            <div class="search-filter-group">
+              <label for="searchSortBy">Sort By:</label>
+              <select id="searchSortBy" aria-label="Sort results by">
+                <option value="dateDesc">Date (Newest First)</option>
+                <option value="dateAsc">Date (Oldest First)</option>
+                <option value="amountDesc">Amount (Highest First)</option>
+                <option value="amountAsc">Amount (Lowest First)</option>
+                <option value="description">Description</option>
+              </select>
+            </div>
+
+            <div class="search-filter-group">
+              <label for="minAmountFilter">Min Amount:</label>
+              <input type="number" id="minAmountFilter" step="0.01" min="0" aria-label="Minimum amount" />
+            </div>
+
+            <div class="search-filter-group">
+              <label for="maxAmountFilter">Max Amount:</label>
+              <input type="number" id="maxAmountFilter" step="0.01" min="0" aria-label="Maximum amount" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="searchResults" role="region" aria-live="polite"></div>
+
+      <div id="paginationControls" style="display: none" class="pagination-controls">
+        <button id="prevPageButton" class="pagination-button" aria-label="Previous page">
+          &laquo; Previous
+        </button>
+        <span id="currentPageInfo" class="pagination-info">Page 1 of 1</span>
+        <button id="nextPageButton" class="pagination-button" aria-label="Next page">
+          Next &raquo;
+        </button>
+      </div>
+
+      <div class="search-actions">
+        <button id="exportResultsButton" class="secondary-button" disabled>
+          Export Results
+        </button>
       </div>
     </div>
+  </div>
 
-    <div
-      id="searchModal"
-      class="modal"
-      role="dialog"
-      aria-labelledby="searchModalTitle"
-      aria-hidden="true"
-    >
-      <div class="modal-content">
-        <span class="close" aria-label="Close">&times;</span>
-        <h3 id="searchModalTitle">Search Transactions</h3>
+  <div id="debtSnowballModal" class="modal" role="dialog" aria-labelledby="debtSnowballTitle" aria-modal="true"
+    aria-hidden="true">
+    <div class="modal-content debt-snowball-modal">
+      <button id="debtSnowballClose" class="debt-close" aria-label="Close" type="button">
+        &times;
+      </button>
+      <h3 id="debtSnowballTitle">Debt Snowball</h3>
 
-        <div class="search-form">
-          <div class="search-input-container">
-            <input
-              type="text"
-              id="searchInput"
-              placeholder="Enter search term"
-              aria-label="Search term"
-            />
-            <button id="searchButton" class="primary-button">Search</button>
-            <button id="clearSearchButton" class="secondary-button" disabled>
-              Clear
+      <div class="debt-snowball-section">
+        <h4>Debts</h4>
+        <div id="debtList" class="debt-list"></div>
+        <button id="addDebtButton" class="primary-button" style="margin-bottom: 8px;">Add Debt</button>
+
+        <div id="debtForm" class="debt-form" style="display: none">
+          <h4 id="debtFormTitle">Add Debt</h4>
+          <div class="debt-form-grid">
+            <label for="debtName">Name</label>
+            <input type="text" id="debtName" />
+            <label for="debtBalance">Balance</label>
+            <input type="number" id="debtBalance" step="0.01" min="0" />
+            <label for="debtMinPayment">Min Payment</label>
+            <input type="number" id="debtMinPayment" step="0.01" min="0" />
+            <label for="debtRecurrence">Recurrence</label>
+            <select id="debtRecurrence">
+              <option value="once">One-time</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="bi-weekly">Bi-weekly</option>
+              <option value="monthly">Monthly</option>
+              <option value="semi-monthly">Twice a month</option>
+              <option value="quarterly">Quarterly</option>
+              <option value="semi-annual">Semi-annually</option>
+              <option value="yearly">Yearly</option>
+              <option value="custom">Custom...</option>
+            </select>
+            <label for="debtStartDate">First due date</label>
+            <input type="date" id="debtStartDate" />
+            <label for="debtDueDay">Due Day</label>
+            <input type="number" id="debtDueDay" min="1" max="31" />
+            <label for="debtDueDayPattern">Day pattern</label>
+            <select id="debtDueDayPattern"></select>
+            <label for="debtInterestRate">Interest Rate (%)</label>
+            <input type="number" id="debtInterestRate" step="0.01" min="0" />
+          </div>
+          <div id="debtAdvancedRecurrenceOptions" class="advanced-recurrence-options" style="display: none"></div>
+          <div class="debt-form-actions">
+            <button id="saveDebtButton" class="primary-button">
+              Save Debt
+            </button>
+            <button id="cancelDebtButton" class="secondary-button">
+              Cancel
             </button>
           </div>
-
-          <button
-            id="advancedSearchToggle"
-            aria-expanded="false"
-            class="text-button"
-          >
-            Show Advanced Options
-          </button>
-
-          <div id="advancedSearchControls" style="display: none">
-            <div class="advanced-search-grid">
-              <div class="search-filter-group">
-                <label for="dateRangeFrom">From Date:</label>
-                <input type="date" id="dateRangeFrom" aria-label="From date" />
-              </div>
-
-              <div class="search-filter-group">
-                <label for="dateRangeTo">To Date:</label>
-                <input type="date" id="dateRangeTo" aria-label="To date" />
-              </div>
-
-              <div class="search-filter-group">
-                <label for="transactionTypeFilter">Transaction Type:</label>
-                <select
-                  id="transactionTypeFilter"
-                  aria-label="Transaction type"
-                >
-                  <option value="">All Types</option>
-                  <option value="income">Income</option>
-                  <option value="expense">Expense</option>
-                  <option value="balance">Balance</option>
-                </select>
-              </div>
-
-              <div class="search-filter-group">
-                <label for="searchSortBy">Sort By:</label>
-                <select id="searchSortBy" aria-label="Sort results by">
-                  <option value="dateDesc">Date (Newest First)</option>
-                  <option value="dateAsc">Date (Oldest First)</option>
-                  <option value="amountDesc">Amount (Highest First)</option>
-                  <option value="amountAsc">Amount (Lowest First)</option>
-                  <option value="description">Description</option>
-                </select>
-              </div>
-
-              <div class="search-filter-group">
-                <label for="minAmountFilter">Min Amount:</label>
-                <input
-                  type="number"
-                  id="minAmountFilter"
-                  step="0.01"
-                  min="0"
-                  aria-label="Minimum amount"
-                />
-              </div>
-
-              <div class="search-filter-group">
-                <label for="maxAmountFilter">Max Amount:</label>
-                <input
-                  type="number"
-                  id="maxAmountFilter"
-                  step="0.01"
-                  min="0"
-                  aria-label="Maximum amount"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div id="searchResults" role="region" aria-live="polite"></div>
-
-        <div
-          id="paginationControls"
-          style="display: none"
-          class="pagination-controls"
-        >
-          <button
-            id="prevPageButton"
-            class="pagination-button"
-            aria-label="Previous page"
-          >
-            &laquo; Previous
-          </button>
-          <span id="currentPageInfo" class="pagination-info">Page 1 of 1</span>
-          <button
-            id="nextPageButton"
-            class="pagination-button"
-            aria-label="Next page"
-          >
-            Next &raquo;
-          </button>
-        </div>
-
-        <div class="search-actions">
-          <button id="exportResultsButton" class="secondary-button" disabled>
-            Export Results
-          </button>
         </div>
       </div>
-    </div>
 
-    <div
-      id="debtSnowballModal"
-      class="modal"
-      role="dialog"
-      aria-labelledby="debtSnowballTitle"
-      aria-modal="true"
-      aria-hidden="true"
-    >
-      <div class="modal-content debt-snowball-modal">
-        <button
-          id="debtSnowballClose"
-          class="debt-close"
-          aria-label="Close"
-          type="button"
-        >
-          &times;
+      <div class="debt-snowball-section">
+        <h4>One-Time Cash Infusions</h4>
+        <div id="cashInfusionList" class="cash-infusion-list"></div>
+        <button id="addCashInfusionButton" class="primary-button">
+          Add Cash Infusion
         </button>
-        <h3 id="debtSnowballTitle">Debt Snowball</h3>
 
-        <div class="debt-snowball-section">
-          <h4>Debts</h4>
-          <div id="debtList" class="debt-list"></div>
-          <button id="addDebtButton" class="primary-button">Add Debt</button>
-
-          <div id="debtForm" class="debt-form" style="display: none">
-            <h4 id="debtFormTitle">Add Debt</h4>
-            <div class="debt-form-grid">
-              <label for="debtName">Name</label>
-              <input type="text" id="debtName" />
-              <label for="debtBalance">Balance</label>
-              <input type="number" id="debtBalance" step="0.01" min="0" />
-              <label for="debtMinPayment">Min Payment</label>
-              <input type="number" id="debtMinPayment" step="0.01" min="0" />
-              <label for="debtRecurrence">Recurrence</label>
-              <select id="debtRecurrence">
-                <option value="once">One-time</option>
-                <option value="daily">Daily</option>
-                <option value="weekly">Weekly</option>
-                <option value="bi-weekly">Bi-weekly</option>
-                <option value="monthly">Monthly</option>
-                <option value="semi-monthly">Twice a month</option>
-                <option value="quarterly">Quarterly</option>
-                <option value="semi-annual">Semi-annually</option>
-                <option value="yearly">Yearly</option>
-                <option value="custom">Custom...</option>
-              </select>
-              <label for="debtStartDate">First due date</label>
-              <input type="date" id="debtStartDate" />
-              <label for="debtDueDay">Due Day</label>
-              <input type="number" id="debtDueDay" min="1" max="31" />
-              <label for="debtDueDayPattern">Day pattern</label>
-              <select id="debtDueDayPattern"></select>
-              <label for="debtInterestRate">Interest Rate (%)</label>
-              <input type="number" id="debtInterestRate" step="0.01" min="0" />
-            </div>
-            <div
-              id="debtAdvancedRecurrenceOptions"
-              class="advanced-recurrence-options"
-              style="display: none"
-            ></div>
-            <div class="debt-form-actions">
-              <button id="saveDebtButton" class="primary-button">
-                Save Debt
-              </button>
-              <button id="cancelDebtButton" class="secondary-button">
-                Cancel
-              </button>
-            </div>
+        <div id="cashInfusionForm" class="cash-infusion-form" style="display: none">
+          <h4 id="cashInfusionFormTitle">Add Cash Infusion</h4>
+          <div class="cash-infusion-form-grid">
+            <label for="cashInfusionName">Description</label>
+            <input type="text" id="cashInfusionName" placeholder="e.g., Tax Refund" />
+            <label for="cashInfusionAmount">Amount</label>
+            <input type="number" id="cashInfusionAmount" step="0.01" min="0" />
+            <label for="cashInfusionDate">Date</label>
+            <input type="date" id="cashInfusionDate" />
+            <label for="cashInfusionTarget">Apply To</label>
+            <select id="cashInfusionTarget">
+              <option value="">Auto (Snowball Priority)</option>
+            </select>
           </div>
-        </div>
-
-        <div class="debt-snowball-section">
-          <h4>Plan</h4>
-          <div class="debt-plan-controls">
-            <label for="snowballExtraAmount">Extra payment per month</label>
-            <input
-              type="number"
-              id="snowballExtraAmount"
-              step="0.01"
-              min="0"
-            />
-            <label class="debt-checkbox">
-              <input type="checkbox" id="snowballAutoGenerate" />
-              Auto-generate monthly snowball payment
-            </label>
-            <div class="debt-plan-actions">
-              <button id="saveSnowballSettings" class="primary-button">
-                Save Settings
-              </button>
-              <button id="generateSnowballPayment" class="secondary-button">
-                Generate for Current Month
-              </button>
-            </div>
+          <div class="cash-infusion-form-actions">
+            <button id="saveCashInfusionButton" class="primary-button">
+              Save
+            </button>
+            <button id="cancelCashInfusionButton" class="secondary-button">
+              Cancel
+            </button>
           </div>
-          <div id="snowballPlanSummary"></div>
-          <div id="snowballPlanList"></div>
         </div>
       </div>
-    </div>
 
-    <div
-      id="appModal"
-      class="modal"
-      role="dialog"
-      aria-labelledby="appModalTitle"
-      aria-modal="true"
-      aria-hidden="true"
-    >
-      <div class="modal-content app-modal-content">
-        <button
-          id="appModalClose"
-          class="close"
-          aria-label="Close"
-          type="button"
-        >
-          &times;
-        </button>
-        <h3 id="appModalTitle"></h3>
-        <div class="app-modal-body">
-          <p id="appModalMessage" class="app-modal-message"></p>
-          <label class="app-modal-input-wrapper" for="appModalInput">
-            <span id="appModalInputLabel" class="app-modal-input-label"></span>
-            <input id="appModalInput" class="app-modal-input" type="text" />
+      <div class="debt-snowball-section">
+        <h4>Plan</h4>
+        <div class="debt-plan-controls">
+          <label for="snowballExtraAmount">Extra payment per month</label>
+          <input type="number" id="snowballExtraAmount" step="0.01" min="0" />
+          <label class="debt-checkbox">
+            <input type="checkbox" id="snowballAutoGenerate" />
+            Auto-generate monthly snowball payment
           </label>
+          <div class="debt-plan-actions">
+            <button id="saveSnowballSettings" class="primary-button">
+              Save Settings
+            </button>
+            <button id="generateSnowballPayment" class="secondary-button">
+              Generate for Current Month
+            </button>
+          </div>
         </div>
-        <div class="app-modal-actions">
-          <button
-            id="appModalCancel"
-            class="secondary-button"
-            type="button"
-          >
-            Cancel
-          </button>
-          <button id="appModalConfirm" class="primary-button" type="button">
-            OK
-          </button>
-        </div>
+        <div id="snowballPlanSummary"></div>
+        <div id="snowballPlanList"></div>
       </div>
     </div>
+  </div>
 
-    <script src="js/utils.js"></script>
+  <div id="appModal" class="modal" role="dialog" aria-labelledby="appModalTitle" aria-modal="true" aria-hidden="true">
+    <div class="modal-content app-modal-content">
+      <button id="appModalClose" class="close" aria-label="Close" type="button">
+        &times;
+      </button>
+      <h3 id="appModalTitle"></h3>
+      <div class="app-modal-body">
+        <p id="appModalMessage" class="app-modal-message"></p>
+        <label class="app-modal-input-wrapper" for="appModalInput">
+          <span id="appModalInputLabel" class="app-modal-input-label"></span>
+          <input id="appModalInput" class="app-modal-input" type="text" />
+        </label>
+      </div>
+      <div class="app-modal-actions">
+        <button id="appModalCancel" class="secondary-button" type="button">
+          Cancel
+        </button>
+        <button id="appModalConfirm" class="primary-button" type="button">
+          OK
+        </button>
+      </div>
+    </div>
+  </div>
 
-    <script src="js/transaction-store.js"></script>
-    <script src="js/recurring-manager.js"></script>
-    <script src="js/calculation-service.js"></script>
+  <script src="js/utils.js"></script>
 
-    <script src="js/transaction-ui.js"></script>
-    <script src="js/calendar-ui.js"></script>
-    <script src="js/search-ui.js"></script>
-    <script src="js/debt-snowball.js"></script>
-    <script src="js/cloud-sync.js"></script>
+  <script src="js/transaction-store.js"></script>
+  <script src="js/recurring-manager.js"></script>
+  <script src="js/calculation-service.js"></script>
 
-    <script src="js/pin-protection.js"></script>
+  <script src="js/transaction-ui.js"></script>
+  <script src="js/calendar-ui.js"></script>
+  <script src="js/search-ui.js"></script>
+  <script src="js/debt-snowball.js"></script>
+  <script src="js/cloud-sync.js"></script>
 
-    <script src="js/app.js"></script>
-    <script>
-      document.addEventListener("DOMContentLoaded", function() {
-        const bodyChildren = document.body.childNodes;
-        for (let i = 0; i < bodyChildren.length; i++) {
-          const node = bodyChildren[i];
-          if (node.nodeType === Node.TEXT_NODE &&
-              (node.textContent.includes("<div") ||
-               node.textContent.includes("modal-content"))) {
-            document.body.removeChild(node);
-            i--;
-          }
+  <script src="js/pin-protection.js"></script>
+
+  <script src="js/app.js"></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      const bodyChildren = document.body.childNodes;
+      for (let i = 0; i < bodyChildren.length; i++) {
+        const node = bodyChildren[i];
+        if (node.nodeType === Node.TEXT_NODE &&
+          (node.textContent.includes("<div") ||
+            node.textContent.includes("modal-content"))) {
+          document.body.removeChild(node);
+          i--;
         }
-      });
-    </script>
-  </body>
+      }
+    });
+  </script>
+</body>
+
 </html>
