@@ -233,6 +233,22 @@ Example:
 ]
 ```
 
+## monthlyNotes
+
+Type: object (keyed by month in "YYYY-M" format)
+
+Each key is a month identifier, and the value is a string containing user notes for that month.
+
+Example:
+
+```
+"monthlyNotes": {
+  "2026-1": "Tax documents due. Check deductions.",
+  "2026-2": "Valentine's Day budget",
+  "2026-12": "Holiday shopping planned"
+}
+```
+
 ## debtSnowballSettings
 
 Type: object

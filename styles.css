@@ -226,6 +226,11 @@ h4 {
   box-shadow: none;
 }
 
+.unallocated-end {
+  border: 2px solid var(--primary-color);
+  box-shadow: 0 0 0 2px rgba(15, 122, 108, 0.15);
+}
+
 .day-content {
   font-size: 14px;
   width: 100%;
@@ -310,6 +315,49 @@ h4 {
   text-align: center;
   font-weight: 700;
   color: var(--ink-color);
+}
+
+.notes-link {
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.notes-link:hover {
+  color: var(--primary-color);
+}
+
+.notes-modal-content {
+  max-width: 500px;
+}
+
+.notes-month-label {
+  color: var(--muted-color);
+  margin: 0 0 12px 0;
+  font-weight: 600;
+}
+
+.notes-textarea {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: 1rem;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.notes-textarea:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 2px rgba(15, 122, 108, 0.15);
+}
+
+.notes-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+  justify-content: flex-end;
 }
 
 #calendarOptions {

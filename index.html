@@ -150,6 +150,23 @@
     </div>
   </div>
 
+  <div id="notesModal" class="modal" role="dialog" aria-labelledby="notesModalTitle" aria-hidden="true">
+    <div class="modal-content notes-modal-content">
+      <span class="close" onclick="app.calendarUI.hideNotesModal()" aria-label="Close">&times;</span>
+      <h3 id="notesModalTitle">Monthly Notes</h3>
+      <p id="notesMonthLabel" class="notes-month-label"></p>
+      <textarea id="notesTextarea" class="notes-textarea" placeholder="Add notes for this month..." rows="8"></textarea>
+      <div class="notes-actions">
+        <button id="saveNotesButton" class="primary-button" onclick="app.calendarUI.saveNotes()">
+          Save
+        </button>
+        <button class="secondary-button" onclick="app.calendarUI.hideNotesModal()">
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+
   <div id="debtSnowballModal" class="modal" role="dialog" aria-labelledby="debtSnowballTitle" aria-modal="true"
     aria-hidden="true">
     <div class="modal-content debt-snowball-modal">

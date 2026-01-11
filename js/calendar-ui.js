@@ -100,6 +100,13 @@ class CalendarUI {
       calendarDays.appendChild(day);
     }
     let runningBalance = summary.startingBalance;
+
+    // Calculate the end date of the 30-day unallocated range
+    const unallocatedEndDate = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const unallocatedEndYear = unallocatedEndDate.getFullYear();
+    const unallocatedEndMonth = unallocatedEndDate.getMonth();
+    const unallocatedEndDay = unallocatedEndDate.getDate();
+
     for (let i = 1; i <= daysInMonth; i++) {
       const day = document.createElement("div");
       day.classList.add("day");
@@ -110,6 +117,14 @@ class CalendarUI {
         i === today.getDate()
       ) {
         day.classList.add("current");
+      }
+      // Highlight the last day of the 30-day unallocated range
+      if (
+        year === unallocatedEndYear &&
+        month === unallocatedEndMonth &&
+        i === unallocatedEndDay
+      ) {
+        day.classList.add("unallocated-end");
       }
       const dateString = `${year}-${(month + 1).toString().padStart(2, "0")}-${i
         .toString()
@@ -189,6 +204,12 @@ class CalendarUI {
       const unallocated = this.calculationService.calculateUnallocated();
       summaryHtml += ` | Unallocated: $${unallocated.toFixed(2)}`;
     }
+
+    // Add Notes link with star indicator if notes exist
+    const monthKey = `${year}-${month + 1}`;
+    const hasNotes = this.store.hasMonthlyNotes(monthKey);
+    const notesIndicator = hasNotes ? ' ★' : '';
+    summaryHtml += ` | <span class="notes-link" onclick="app.calendarUI.showNotesModal()">Notes${notesIndicator}</span>`;
 
     document.getElementById("monthSummary").innerHTML = summaryHtml;
     const pinLabel = window.pinProtection && pinProtection.isPinSet() ? "Change PIN" : "Set PIN";
@@ -314,5 +335,50 @@ class CalendarUI {
   returnToCurrentMonth() {
     this.currentDate = new Date();
     this.generateCalendar();
+  }
+
+  showNotesModal() {
+    const modal = document.getElementById("notesModal");
+    const textarea = document.getElementById("notesTextarea");
+    const monthLabel = document.getElementById("notesMonthLabel");
+
+    if (!modal || !textarea || !monthLabel) return;
+
+    const year = this.currentDate.getFullYear();
+    const month = this.currentDate.getMonth();
+    const monthKey = `${year}-${month + 1}`;
+
+    const monthNames = [
+      "January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December"
+    ];
+
+    monthLabel.textContent = `${monthNames[month]} ${year}`;
+    textarea.value = this.store.getMonthlyNotes(monthKey);
+
+    modal.style.display = "block";
+    modal.setAttribute("aria-hidden", "false");
+    textarea.focus();
+  }
+
+  hideNotesModal() {
+    const modal = document.getElementById("notesModal");
+    if (!modal) return;
+    modal.style.display = "none";
+    modal.setAttribute("aria-hidden", "true");
+  }
+
+  saveNotes() {
+    const textarea = document.getElementById("notesTextarea");
+    if (!textarea) return;
+
+    const year = this.currentDate.getFullYear();
+    const month = this.currentDate.getMonth();
+    const monthKey = `${year}-${month + 1}`;
+
+    this.store.setMonthlyNotes(monthKey, textarea.value);
+    this.hideNotesModal();
+    this.generateCalendar(); // Refresh to update star indicator
+    Utils.showNotification("Notes saved");
   }
 }
