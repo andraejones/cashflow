@@ -11,6 +11,7 @@ class TransactionStore {
     this.skippedTransactions = {};
     this.debts = [];
     this.cashInfusions = [];
+    this.monthlyNotes = {};
     this.debtSnowballSettings = {
       extraPayment: 0,
       autoGenerate: false,
@@ -20,14 +21,14 @@ class TransactionStore {
     this.loadData();
   }
 
-  
+
   registerSaveCallback(callback) {
     if (typeof callback === 'function') {
       this.onSaveCallbacks.push(callback);
     }
   }
 
-  
+
   triggerSaveCallbacks(isDataModified = false) {
     this.onSaveCallbacks.forEach(callback => {
       try {
@@ -38,7 +39,7 @@ class TransactionStore {
     });
   }
 
-  
+
   loadData() {
     try {
       const decrypt = (val) => {
@@ -66,6 +67,9 @@ class TransactionStore {
       );
       const storedSnowballSettings = decrypt(
         this.storage.getItem("debtSnowballSettings")
+      );
+      const storedMonthlyNotes = decrypt(
+        this.storage.getItem("monthlyNotes")
       );
 
       if (storedTransactions) {
@@ -121,13 +125,13 @@ class TransactionStore {
           customInterval:
             debt.customInterval && typeof debt.customInterval === "object"
               ? {
-                  value: Number(debt.customInterval.value) || 1,
-                  unit:
-                    debt.customInterval.unit === "weeks" ||
+                value: Number(debt.customInterval.value) || 1,
+                unit:
+                  debt.customInterval.unit === "weeks" ||
                     debt.customInterval.unit === "months"
-                      ? debt.customInterval.unit
-                      : "days",
-                }
+                    ? debt.customInterval.unit
+                    : "days",
+              }
               : null,
           variableAmount: debt.variableAmount === true,
           variableType:
@@ -158,6 +162,10 @@ class TransactionStore {
           autoGenerate: parsedSettings.autoGenerate === true,
         };
       }
+
+      if (storedMonthlyNotes) {
+        this.monthlyNotes = JSON.parse(storedMonthlyNotes);
+      }
       if (this.debts.length > 0 && this.recurringTransactions.length > 0) {
         const recurringIds = new Set(
           this.recurringTransactions.map((rt) => rt.id)
@@ -183,7 +191,7 @@ class TransactionStore {
     }
   }
 
-  
+
   saveData(isDataModified = true) {
     try {
       const encrypt = (val) => {
@@ -221,13 +229,17 @@ class TransactionStore {
         "debtSnowballSettings",
         encrypt(JSON.stringify(this.debtSnowballSettings))
       );
+      this.storage.setItem(
+        "monthlyNotes",
+        encrypt(JSON.stringify(this.monthlyNotes))
+      );
       this.triggerSaveCallbacks(isDataModified);
     } catch (error) {
       console.error("Error saving data to storage:", error);
     }
   }
 
-  
+
   resetData() {
     this.transactions = {};
     this.monthlyBalances = {};
@@ -235,6 +247,7 @@ class TransactionStore {
     this.skippedTransactions = {};
     this.debts = [];
     this.cashInfusions = [];
+    this.monthlyNotes = {};
     this.debtSnowballSettings = {
       extraPayment: 0,
       autoGenerate: false,
@@ -243,42 +256,42 @@ class TransactionStore {
     return true;
   }
 
-  
+
   getTransactions() {
     return this.transactions;
   }
 
-  
+
   getMonthlyBalances() {
     return this.monthlyBalances;
   }
 
-  
+
   getRecurringTransactions() {
     return this.recurringTransactions;
   }
 
-  
+
   getSkippedTransactions() {
     return this.skippedTransactions;
   }
 
-  
+
   getDebts() {
     return this.debts;
   }
 
-  
+
   getDebtSnowballSettings() {
     return this.debtSnowballSettings;
   }
 
-  
+
   getCashInfusions() {
     return this.cashInfusions;
   }
 
-  
+
   addCashInfusion(infusion) {
     if (!infusion) {
       console.error("Invalid cash infusion data");
@@ -292,7 +305,7 @@ class TransactionStore {
     return infusion.id;
   }
 
-  
+
   updateCashInfusion(id, updates) {
     if (!id || !updates) {
       console.error("Invalid parameters for updateCashInfusion");
@@ -310,7 +323,7 @@ class TransactionStore {
     return true;
   }
 
-  
+
   deleteCashInfusion(id) {
     if (!id) {
       console.error("Invalid ID for deleteCashInfusion");
@@ -325,7 +338,31 @@ class TransactionStore {
     return true;
   }
 
-  
+
+  getMonthlyNotes(monthKey) {
+    return this.monthlyNotes[monthKey] || "";
+  }
+
+  setMonthlyNotes(monthKey, notes) {
+    if (!monthKey) {
+      console.error("Invalid monthKey for setMonthlyNotes");
+      return false;
+    }
+    if (notes && notes.trim()) {
+      this.monthlyNotes[monthKey] = notes.trim();
+    } else {
+      // Remove empty notes
+      delete this.monthlyNotes[monthKey];
+    }
+    this.saveData();
+    return true;
+  }
+
+  hasMonthlyNotes(monthKey) {
+    return !!(this.monthlyNotes[monthKey] && this.monthlyNotes[monthKey].trim());
+  }
+
+
   addDebt(debt) {
     if (!debt) {
       console.error("Invalid debt data");
@@ -339,7 +376,7 @@ class TransactionStore {
     return debt.id;
   }
 
-  
+
   updateDebt(id, updates) {
     if (!id || !updates) {
       console.error("Invalid parameters for updateDebt");
@@ -357,7 +394,7 @@ class TransactionStore {
     return true;
   }
 
-  
+
   deleteDebt(id) {
     if (!id) {
       console.error("Invalid ID for deleteDebt");
@@ -372,7 +409,7 @@ class TransactionStore {
     return true;
   }
 
-  
+
   setDebtSnowballSettings(settings) {
     if (!settings || typeof settings !== "object") {
       console.error("Invalid settings for debt snowball");
@@ -387,7 +424,7 @@ class TransactionStore {
     return true;
   }
 
-  
+
   addTransaction(date, transaction) {
     if (!date || !transaction) {
       console.error("Invalid date or transaction data");
@@ -402,7 +439,7 @@ class TransactionStore {
     this.saveData();
   }
 
-  
+
   updateTransaction(date, index, updatedTransaction) {
     if (!date || index === undefined || !updatedTransaction) {
       console.error("Invalid parameters for updateTransaction");
@@ -418,7 +455,7 @@ class TransactionStore {
     }
   }
 
-  
+
   deleteTransaction(date, index) {
     if (!date || index === undefined) {
       console.error("Invalid parameters for deleteTransaction");
@@ -436,7 +473,7 @@ class TransactionStore {
     }
   }
 
-  
+
   addRecurringTransaction(recurringTransaction) {
     if (!recurringTransaction) {
       console.error("Invalid recurring transaction data");
@@ -452,7 +489,7 @@ class TransactionStore {
     return recurringTransaction.id;
   }
 
-  
+
   updateRecurringTransaction(id, updates) {
     if (!id || !updates) {
       console.error("Invalid parameters for updateRecurringTransaction");
@@ -473,15 +510,15 @@ class TransactionStore {
     return false;
   }
 
-  
+
   deleteRecurringTransaction(id) {
     if (!id) {
       console.error("Invalid ID for deleteRecurringTransaction");
       return false;
     }
-    
+
     const index = this.recurringTransactions.findIndex(rt => rt.id === id);
-    
+
     if (index === -1) {
       return false;
     }
@@ -490,7 +527,7 @@ class TransactionStore {
       this.transactions[dateKey] = this.transactions[dateKey].filter(
         t => !t.recurringId || t.recurringId !== id
       );
-      
+
       if (this.transactions[dateKey].length === 0) {
         delete this.transactions[dateKey];
       }
@@ -499,18 +536,18 @@ class TransactionStore {
       const skipIndex = this.skippedTransactions[dateKey].indexOf(id);
       if (skipIndex > -1) {
         this.skippedTransactions[dateKey].splice(skipIndex, 1);
-        
+
         if (this.skippedTransactions[dateKey].length === 0) {
           delete this.skippedTransactions[dateKey];
         }
       }
     }
-    
+
     this.saveData();
     return true;
   }
 
-  
+
   setTransactionSkipped(date, recurringId, isSkipped, isDataModified = true) {
     if (!date || !recurringId) {
       console.error("Invalid parameters for setTransactionSkipped");
@@ -548,7 +585,7 @@ class TransactionStore {
     }
   }
 
-  
+
   isTransactionSkipped(date, recurringId) {
     if (!date || !recurringId) {
       return false;
@@ -560,7 +597,7 @@ class TransactionStore {
     );
   }
 
-  
+
   exportData() {
     return {
       transactions: this.transactions,
@@ -569,19 +606,20 @@ class TransactionStore {
       skippedTransactions: this.skippedTransactions,
       debts: this.debts,
       cashInfusions: this.cashInfusions,
+      monthlyNotes: this.monthlyNotes,
       debtSnowballSettings: this.debtSnowballSettings,
       lastExported: new Date().toISOString(),
       appVersion: "2.0.0"
     };
   }
 
-  
+
   importData(data) {
     if (!data || typeof data !== 'object') {
       console.error("Invalid data format for import");
       return false;
     }
-    
+
     if (
       !data.transactions ||
       !data.monthlyBalances ||
@@ -619,13 +657,13 @@ class TransactionStore {
         customInterval:
           debt.customInterval && typeof debt.customInterval === "object"
             ? {
-                value: Number(debt.customInterval.value) || 1,
-                unit:
-                  debt.customInterval.unit === "weeks" ||
+              value: Number(debt.customInterval.value) || 1,
+              unit:
+                debt.customInterval.unit === "weeks" ||
                   debt.customInterval.unit === "months"
-                    ? debt.customInterval.unit
-                    : "days",
-              }
+                  ? debt.customInterval.unit
+                  : "days",
+            }
             : null,
         variableAmount: debt.variableAmount === true,
         variableType:
@@ -647,6 +685,7 @@ class TransactionStore {
         extraPayment: Number(data.debtSnowballSettings?.extraPayment) || 0,
         autoGenerate: data.debtSnowballSettings?.autoGenerate === true,
       };
+      this.monthlyNotes = data.monthlyNotes || {};
       this.recurringTransactions.forEach((rt) => {
         if (!rt.id) {
           rt.id = Utils.generateUniqueId();

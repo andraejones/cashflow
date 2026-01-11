@@ -260,23 +260,15 @@ class CalculationService {
 
   calculateUnallocated() {
     // Calculate the minimum running balance from today through the next 30 days
+    // This should match how the calendar displays running balances
     const today = new Date();
     const todayYear = today.getFullYear();
     const todayMonth = today.getMonth();
     const todayDay = today.getDate();
 
-    // Get today's starting balance by finding the running balance up to today
-    const todayDateString = `${todayYear}-${String(todayMonth + 1).padStart(2, "0")}-${String(todayDay).padStart(2, "0")}`;
-
-    // Find the starting balance for today's month
-    const monthKey = `${todayYear}-${todayMonth + 1}`;
-    let monthlyBalances = this.store.getMonthlyBalances();
-    if (!monthlyBalances[monthKey]) {
-      this.updateMonthlyBalances(today);
-      monthlyBalances = this.store.getMonthlyBalances();
-    }
-
-    let runningBalance = monthlyBalances[monthKey]?.startingBalance || 0;
+    // Get the starting balance for the current month using the same method as the calendar
+    const summary = this.calculateMonthlySummary(todayYear, todayMonth);
+    let runningBalance = summary.startingBalance;
 
     // Calculate running balance up to and including today
     for (let day = 1; day <= todayDay; day++) {
@@ -300,6 +292,8 @@ class CalculationService {
       const futureMonth = futureDate.getMonth();
       const futureDay = futureDate.getDate();
 
+      // If we've crossed into a new month, we need to properly continue the running balance
+      // The running balance carries over from the previous day, we just add income/expense for each day
       const dateString = `${futureYear}-${String(futureMonth + 1).padStart(2, "0")}-${String(futureDay).padStart(2, "0")}`;
 
       // Make sure recurring transactions are applied for this month
