@@ -26,6 +26,22 @@ class CalendarUI {
     document.getElementById("nextMonth").addEventListener("click", () => {
       this.changeMonth(1);
     });
+
+    // Notes modal close button
+    const notesModal = document.getElementById("notesModal");
+    const notesCloseBtn = notesModal?.querySelector(".close");
+    if (notesCloseBtn) {
+      notesCloseBtn.addEventListener("click", () => this.hideNotesModal());
+    }
+    // Close notes modal when clicking outside
+    if (notesModal) {
+      notesModal.addEventListener("click", (e) => {
+        if (e.target === notesModal) {
+          this.hideNotesModal();
+        }
+      });
+    }
+
     this.cleanUpHtmlArtifacts();
   }
 
