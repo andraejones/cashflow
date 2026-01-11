@@ -1,7 +1,7 @@
 // Calendar UI logic
 
 class CalendarUI {
-  
+
   constructor(
     store,
     recurringManager,
@@ -18,7 +18,7 @@ class CalendarUI {
     this.initEventListeners();
   }
 
-  
+
   initEventListeners() {
     document.getElementById("prevMonth").addEventListener("click", () => {
       this.changeMonth(-1);
@@ -29,13 +29,13 @@ class CalendarUI {
     this.cleanUpHtmlArtifacts();
   }
 
-  
+
   cleanUpHtmlArtifacts() {
     const bodyChildren = document.body.childNodes;
     for (let i = 0; i < bodyChildren.length; i++) {
       const node = bodyChildren[i];
-      if (node.nodeType === Node.TEXT_NODE && 
-          (node.textContent.includes("<div") || 
+      if (node.nodeType === Node.TEXT_NODE &&
+        (node.textContent.includes("<div") ||
           node.textContent.includes("modal-content"))) {
         document.body.removeChild(node);
         i--;
@@ -43,7 +43,7 @@ class CalendarUI {
     }
   }
 
-  
+
   generateCalendar() {
     const year = this.currentDate.getFullYear();
     const month = this.currentDate.getMonth();
@@ -126,26 +126,22 @@ class CalendarUI {
         runningBalance += dailyTotals.income - dailyTotals.expense;
       }
       day.querySelector(".day-content").innerHTML = `
-        ${
-          dailyTotals.income > 0
-            ? `<div class="income">+${dailyTotals.income.toFixed(2)}</div>`
-            : ""
+        ${dailyTotals.income > 0
+          ? `<div class="income">+${dailyTotals.income.toFixed(2)}</div>`
+          : ""
         }
-        ${
-          dailyTotals.expense > 0
-            ? `<div class="expense">-${dailyTotals.expense.toFixed(2)}</div>`
-            : ""
+        ${dailyTotals.expense > 0
+          ? `<div class="expense">-${dailyTotals.expense.toFixed(2)}</div>`
+          : ""
         }
         <div class="balance">${runningBalance.toFixed(2)}</div>
-        ${
-          transactionCount > 0
-            ? `<div class="transaction-count">(${transactionCount})</div>`
-            : ""
+        ${transactionCount > 0
+          ? `<div class="transaction-count">(${transactionCount})</div>`
+          : ""
         }
-        ${
-          dailyTotals.hasSkippedTransactions
-            ? '<div class="skip-indicator">★</div>'
-            : ""
+        ${dailyTotals.hasSkippedTransactions
+          ? '<div class="skip-indicator">★</div>'
+          : ""
         }
       `;
       day.setAttribute('data-date', dateString);
@@ -169,14 +165,32 @@ class CalendarUI {
       day.innerHTML = `${i}<div class="day-content"></div>`;
       calendarDays.appendChild(day);
     }
-    document.getElementById("monthSummary").innerHTML = `
-      Monthly Summary: Starting Balance: $${summary.startingBalance.toFixed(
-        2
-      )} | 
-      Income: $${summary.income.toFixed(2)} | 
-      Expenses: $${summary.expense.toFixed(2)} | 
-      Ending Balance: $${summary.endingBalance.toFixed(2)}
-    `;
+    // Determine if we should show Unallocated
+    // Show only if the viewed month overlaps with the 30-day window from today
+    const todayYear = today.getFullYear();
+    const todayMonth = today.getMonth();
+    const thirtyDaysFromNow = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+    // Check if viewed month is in the past (before current month)
+    const viewedMonthStart = new Date(year, month, 1);
+    const currentMonthStart = new Date(todayYear, todayMonth, 1);
+    const viewedMonthEnd = new Date(year, month + 1, 0); // Last day of viewed month
+
+    // Show Unallocated if:
+    // 1. Viewed month is not entirely in the past
+    // 2. Viewed month start is within 30 days from today
+    const isPastMonth = viewedMonthEnd < currentMonthStart;
+    const isWithin30Days = viewedMonthStart <= thirtyDaysFromNow;
+    const showUnallocated = !isPastMonth && isWithin30Days;
+
+    let summaryHtml = `Monthly Summary: Income: $${summary.income.toFixed(2)} | Expenses: $${summary.expense.toFixed(2)}`;
+
+    if (showUnallocated) {
+      const unallocated = this.calculationService.calculateUnallocated();
+      summaryHtml += ` | Unallocated: $${unallocated.toFixed(2)}`;
+    }
+
+    document.getElementById("monthSummary").innerHTML = summaryHtml;
     const pinLabel = window.pinProtection && pinProtection.isPinSet() ? "Change PIN" : "Set PIN";
     document.getElementById("calendarOptions").innerHTML = `
       <button
@@ -230,12 +244,12 @@ class CalendarUI {
     `;
   }
 
-  
+
   openTransactionModalFallback(date) {
     const modal = document.getElementById("transactionModal");
     const dateInput = document.getElementById("transactionDate");
     const modalDate = document.getElementById("modalDate");
-    
+
     if (!modal) {
       console.error('Transaction modal element not found');
       return;
@@ -285,7 +299,7 @@ class CalendarUI {
     modal.setAttribute("aria-hidden", "false");
   }
 
-  
+
   changeMonth(delta) {
     const newDate = new Date(
       this.currentDate.getFullYear(),
@@ -296,7 +310,7 @@ class CalendarUI {
     this.generateCalendar();
   }
 
-  
+
   returnToCurrentMonth() {
     this.currentDate = new Date();
     this.generateCalendar();
