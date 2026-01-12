@@ -467,14 +467,16 @@ body.app-locked #calendarOptions {
 .app-modal-reset-btn {
   margin-top: 8px;
   width: 100%;
-  background-color: #dc3545;
-  border-color: #dc3545;
-  color: white;
+  background-color: #fff;
+  color: var(--muted-color);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-soft);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
 }
 
 .app-modal-reset-btn:hover {
-  background-color: #c82333;
-  border-color: #bd2130;
+  background-color: #fff8ee;
+  transform: translateY(-1px);
 }
 
 .close {
