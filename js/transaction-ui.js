@@ -1097,8 +1097,31 @@ class TransactionUI {
     } else {
       // For one-time transactions, simply move it
       // Check if this is an already-moved recurring transaction
-      if (transaction.movedFrom) {
-        // Update the move info
+      if (transaction.movedFrom && transaction.originalRecurringId) {
+        // Check if we're moving back to the original date
+        if (targetDate === transaction.movedFrom) {
+          // Cancel the move entirely - restore original recurring occurrence
+          this.store.cancelMoveTransaction(transaction.originalRecurringId, transaction.movedFrom);
+
+          // Unskip the original recurring occurrence
+          if (this.recurringManager.isTransactionSkipped(transaction.movedFrom, transaction.originalRecurringId)) {
+            this.recurringManager.toggleSkipTransaction(transaction.movedFrom, transaction.originalRecurringId);
+          }
+
+          // Delete the moved one-time transaction
+          this.store.deleteTransaction(date, index);
+
+          this.showTransactionDetails(targetDate);
+          this.onUpdate();
+          if (this.cloudSync) {
+            this.cloudSync.scheduleCloudSave();
+          }
+
+          Utils.showNotification("Transaction restored to original date");
+          return;
+        }
+
+        // Update the move info to new target
         this.store.moveTransaction(
           transaction.originalRecurringId,
           transaction.movedFrom,
