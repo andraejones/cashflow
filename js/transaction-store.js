@@ -173,6 +173,20 @@ class TransactionStore {
 
       if (storedMovedTransactions) {
         this.movedTransactions = JSON.parse(storedMovedTransactions);
+
+        // Clean up stale entries where fromDate equals toDate
+        // (transaction was moved back to original date)
+        let hasStaleEntries = false;
+        Object.keys(this.movedTransactions).forEach(key => {
+          const move = this.movedTransactions[key];
+          if (move.fromDate === move.toDate) {
+            delete this.movedTransactions[key];
+            hasStaleEntries = true;
+          }
+        });
+        if (hasStaleEntries) {
+          console.log("Cleaned up stale movedTransactions entries");
+        }
       }
       if (this.debts.length > 0 && this.recurringTransactions.length > 0) {
         const recurringIds = new Set(
