@@ -9,6 +9,7 @@ class TransactionStore {
     this.monthlyBalances = {};
     this.recurringTransactions = [];
     this.skippedTransactions = {};
+    this.movedTransactions = {};
     this.debts = [];
     this.cashInfusions = [];
     this.monthlyNotes = {};
@@ -70,6 +71,9 @@ class TransactionStore {
       );
       const storedMonthlyNotes = decrypt(
         this.storage.getItem("monthlyNotes")
+      );
+      const storedMovedTransactions = decrypt(
+        this.storage.getItem("movedTransactions")
       );
 
       if (storedTransactions) {
@@ -166,6 +170,10 @@ class TransactionStore {
       if (storedMonthlyNotes) {
         this.monthlyNotes = JSON.parse(storedMonthlyNotes);
       }
+
+      if (storedMovedTransactions) {
+        this.movedTransactions = JSON.parse(storedMovedTransactions);
+      }
       if (this.debts.length > 0 && this.recurringTransactions.length > 0) {
         const recurringIds = new Set(
           this.recurringTransactions.map((rt) => rt.id)
@@ -233,6 +241,10 @@ class TransactionStore {
         "monthlyNotes",
         encrypt(JSON.stringify(this.monthlyNotes))
       );
+      this.storage.setItem(
+        "movedTransactions",
+        encrypt(JSON.stringify(this.movedTransactions))
+      );
       this.triggerSaveCallbacks(isDataModified);
     } catch (error) {
       console.error("Error saving data to storage:", error);
@@ -248,6 +260,7 @@ class TransactionStore {
     this.debts = [];
     this.cashInfusions = [];
     this.monthlyNotes = {};
+    this.movedTransactions = {};
     this.debtSnowballSettings = {
       extraPayment: 0,
       autoGenerate: false,
@@ -360,6 +373,70 @@ class TransactionStore {
 
   hasMonthlyNotes(monthKey) {
     return !!(this.monthlyNotes[monthKey] && this.monthlyNotes[monthKey].trim());
+  }
+
+
+  getMovedTransactions() {
+    return this.movedTransactions;
+  }
+
+  // Move a transaction from one date to another
+  // For recurring transactions, this creates an exception for that specific occurrence
+  moveTransaction(recurringId, fromDate, toDate) {
+    if (!recurringId || !fromDate || !toDate) {
+      console.error("Invalid parameters for moveTransaction");
+      return false;
+    }
+
+    const key = `${recurringId}-${fromDate}`;
+    this.movedTransactions[key] = {
+      recurringId,
+      fromDate,
+      toDate,
+      movedAt: new Date().toISOString()
+    };
+
+    this.saveData();
+    return true;
+  }
+
+  // Check if a recurring transaction occurrence was moved from a specific date
+  getMoveInfoFromDate(recurringId, date) {
+    const key = `${recurringId}-${date}`;
+    return this.movedTransactions[key] || null;
+  }
+
+  // Check if there's a moved transaction TO this date
+  getMoveInfoToDate(date) {
+    const moves = [];
+    Object.values(this.movedTransactions).forEach(move => {
+      if (move.toDate === date) {
+        moves.push(move);
+      }
+    });
+    return moves;
+  }
+
+  // Cancel a move (restore transaction to original date)
+  cancelMoveTransaction(recurringId, fromDate) {
+    const key = `${recurringId}-${fromDate}`;
+    if (this.movedTransactions[key]) {
+      delete this.movedTransactions[key];
+      this.saveData();
+      return true;
+    }
+    return false;
+  }
+
+  // Check if a date has any move anomaly (either moved from or moved to)
+  hasMoveAnomaly(date) {
+    // Check if any transaction was moved FROM this date
+    for (const move of Object.values(this.movedTransactions)) {
+      if (move.fromDate === date || move.toDate === date) {
+        return true;
+      }
+    }
+    return false;
   }
 
 
@@ -604,6 +681,7 @@ class TransactionStore {
       monthlyBalances: this.monthlyBalances,
       recurringTransactions: this.recurringTransactions,
       skippedTransactions: this.skippedTransactions,
+      movedTransactions: this.movedTransactions,
       debts: this.debts,
       cashInfusions: this.cashInfusions,
       monthlyNotes: this.monthlyNotes,
@@ -686,6 +764,7 @@ class TransactionStore {
         autoGenerate: data.debtSnowballSettings?.autoGenerate === true,
       };
       this.monthlyNotes = data.monthlyNotes || {};
+      this.movedTransactions = data.movedTransactions || {};
       this.recurringTransactions.forEach((rt) => {
         if (!rt.id) {
           rt.id = Utils.generateUniqueId();
