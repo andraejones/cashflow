@@ -464,6 +464,19 @@ body.app-locked #calendarOptions {
   min-width: 110px;
 }
 
+.app-modal-reset-btn {
+  margin-top: 8px;
+  width: 100%;
+  background-color: #dc3545;
+  border-color: #dc3545;
+  color: white;
+}
+
+.app-modal-reset-btn:hover {
+  background-color: #c82333;
+  border-color: #bd2130;
+}
+
 .close {
   color: rgba(31, 43, 42, 0.5);
   float: right;

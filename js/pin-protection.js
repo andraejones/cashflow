@@ -67,15 +67,39 @@ class PinProtection {
     if (!this.isPinSet()) {
       return true;
     }
-    const pin = await Utils.showModalPrompt("Enter PIN to unlock:", "Unlock", {
-      inputLabel: "PIN",
-      inputType: "password",
-      confirmText: "Unlock",
-      mandatory: true,
-    });
-    if (pin === null) return false;
-    if (this.verifyPin(pin)) {
-      this.currentPin = pin;
+
+    const result = await this.showUnlockDialog();
+
+    if (result === "reset") {
+      // User chose to reset - confirm with DELETE
+      const confirmation = await Utils.showModalPrompt(
+        "Type DELETE to confirm resetting all data. This cannot be undone.",
+        "Reset Application",
+        {
+          inputLabel: "Type DELETE to confirm",
+          inputType: "text",
+          confirmText: "Reset",
+          cancelText: "Cancel",
+        }
+      );
+
+      if (confirmation === "DELETE") {
+        this.clearPin();
+        localStorage.clear();
+        await Utils.showModalAlert("Application has been reset. The page will now reload.", "Reset Complete");
+        window.location.reload();
+        return false;
+      } else if (confirmation !== null) {
+        await Utils.showModalAlert("Reset cancelled. You must type DELETE exactly.", "Reset Cancelled");
+      }
+      // Return to unlock prompt
+      return this.promptUnlock();
+    }
+
+    if (result === null) return false;
+
+    if (this.verifyPin(result)) {
+      this.currentPin = result;
       this.isLocked = false;
       this.hideLockOverlay();
       this.startInactivityMonitoring();
@@ -83,6 +107,85 @@ class PinProtection {
     }
     await Utils.showModalAlert("Incorrect PIN", "Unlock Failed");
     return this.promptUnlock();
+  }
+
+  showUnlockDialog() {
+    return new Promise((resolve) => {
+      const modal = document.getElementById("appModal");
+      if (!modal) {
+        resolve(null);
+        return;
+      }
+
+      const titleEl = document.getElementById("appModalTitle");
+      const messageEl = document.getElementById("appModalMessage");
+      const inputWrapper = modal.querySelector(".app-modal-input-wrapper");
+      const input = document.getElementById("appModalInput");
+      const inputLabel = document.getElementById("appModalInputLabel");
+      const confirmButton = document.getElementById("appModalConfirm");
+      const cancelButton = document.getElementById("appModalCancel");
+      const closeButton = document.getElementById("appModalClose");
+
+      // Set up the dialog
+      titleEl.textContent = "Unlock";
+      messageEl.textContent = "Enter PIN to unlock:";
+      inputWrapper.classList.add("is-visible");
+      input.type = "password";
+      input.value = "";
+      inputLabel.textContent = "PIN";
+      confirmButton.textContent = "Unlock";
+      cancelButton.style.display = "none";
+      closeButton.style.display = "none";
+
+      // Create reset button if it doesn't exist
+      let resetButton = modal.querySelector("#appModalReset");
+      if (!resetButton) {
+        resetButton = document.createElement("button");
+        resetButton.id = "appModalReset";
+        resetButton.className = "secondary-button app-modal-reset-btn";
+        resetButton.textContent = "Reset Application";
+        resetButton.type = "button";
+        const buttonContainer = confirmButton.parentElement;
+        buttonContainer.appendChild(resetButton);
+      }
+      resetButton.style.display = "inline-flex";
+
+      modal.style.display = "block";
+      modal.setAttribute("aria-hidden", "false");
+
+      const cleanup = () => {
+        confirmButton.removeEventListener("click", handleConfirm);
+        resetButton.removeEventListener("click", handleReset);
+        modal.removeEventListener("keydown", handleKeydown);
+        resetButton.style.display = "none";
+        modal.style.display = "none";
+        modal.setAttribute("aria-hidden", "true");
+      };
+
+      const handleConfirm = () => {
+        const value = input.value;
+        cleanup();
+        resolve(value);
+      };
+
+      const handleReset = () => {
+        cleanup();
+        resolve("reset");
+      };
+
+      const handleKeydown = (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          handleConfirm();
+        }
+      };
+
+      confirmButton.addEventListener("click", handleConfirm);
+      resetButton.addEventListener("click", handleReset);
+      modal.addEventListener("keydown", handleKeydown);
+
+      setTimeout(() => input.focus(), 50);
+    });
   }
 
   async promptChangePin(store) {
