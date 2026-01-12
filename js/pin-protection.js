@@ -71,7 +71,7 @@ class PinProtection {
       inputLabel: "PIN",
       inputType: "password",
       confirmText: "Unlock",
-      cancelText: "Cancel",
+      mandatory: true,
     });
     if (pin === null) return false;
     if (this.verifyPin(pin)) {

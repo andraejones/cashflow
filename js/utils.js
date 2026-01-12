@@ -1,12 +1,12 @@
 // Utility helpers
 
 const Utils = {
-  
+
   generateUniqueId: function () {
     return Date.now().toString(36) + Math.random().toString(36).substring(2);
   },
 
-  
+
   formatDateString: function (date) {
     const year = date.getFullYear();
     const month = (date.getMonth() + 1).toString().padStart(2, "0");
@@ -14,7 +14,7 @@ const Utils = {
     return `${year}-${month}-${day}`;
   },
 
-  
+
   formatDisplayDate: function (dateString) {
     const [year, month, day] = dateString.split("-").map(Number);
     const dateObj = new Date(Date.UTC(year, month - 1, day));
@@ -27,7 +27,7 @@ const Utils = {
     });
   },
 
-  
+
   showNotification: function (message, type = "success") {
     const existingToasts = document.querySelectorAll(
       ".error-toast, .success-toast"
@@ -78,6 +78,7 @@ const Utils = {
     inputValue = "",
     inputType = "text",
     closeReturnsNull = false,
+    mandatory = false,
   } = {}) {
     const elements = this.getAppModalElements();
     if (!elements) {
@@ -106,7 +107,8 @@ const Utils = {
     messageEl.textContent = message;
     confirmButton.textContent = confirmText;
     cancelButton.textContent = cancelText;
-    cancelButton.style.display = showCancel ? "inline-flex" : "none";
+    cancelButton.style.display = (showCancel && !mandatory) ? "inline-flex" : "none";
+    closeButton.style.display = mandatory ? "none" : "block";
 
     if (showInput) {
       inputWrapper.classList.add("is-visible");
@@ -170,7 +172,7 @@ const Utils = {
       };
 
       const handleKeydown = (event) => {
-        if (event.key === "Escape") {
+        if (event.key === "Escape" && !mandatory) {
           event.preventDefault();
           handleClose();
         }
@@ -181,9 +183,11 @@ const Utils = {
       };
 
       confirmButton.addEventListener("click", handleConfirm);
-      cancelButton.addEventListener("click", handleCancel);
-      closeButton.addEventListener("click", handleClose);
-      modal.addEventListener("click", handleBackdrop);
+      if (!mandatory) {
+        cancelButton.addEventListener("click", handleCancel);
+        closeButton.addEventListener("click", handleClose);
+        modal.addEventListener("click", handleBackdrop);
+      }
       modal.addEventListener("keydown", handleKeydown);
 
       setTimeout(() => {
@@ -222,6 +226,7 @@ const Utils = {
       inputType: options.inputType || "text",
       confirmText: options.confirmText || "OK",
       cancelText: options.cancelText || "Cancel",
+      mandatory: options.mandatory === true,
     });
   },
 };
