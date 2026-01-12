@@ -1,0 +1,4692 @@
+{
+  "transactions": {
+    "2026-01-15": [
+      {
+        "amount": 112.49,
+        "type": "expense",
+        "description": "Progressive"
+      },
+      {
+        "amount": 1142.16,
+        "type": "expense",
+        "description": "Rent"
+      },
+      {
+        "amount": 550,
+        "type": "expense",
+        "description": "Check ‘n Go"
+      },
+      {
+        "amount": 2300,
+        "type": "income",
+        "description": ""
+      },
+      {
+        "amount": 1481.84,
+        "type": "expense",
+        "description": "Catchup"
+      },
+      {
+        "amount": 70,
+        "type": "expense",
+        "description": "Pounce"
+      },
+      {
+        "amount": 3116.29,
+        "type": "income",
+        "description": "FSW Pay",
+        "recurringId": "mk73ab1dqfozf7zmsss"
+      },
+      {
+        "amount": 289.6,
+        "type": "expense",
+        "description": "CBW Credit Fresh",
+        "recurringId": "mk7cadzbv6pf5r2kp3"
+      },
+      {
+        "amount": 268.43,
+        "type": "expense",
+        "description": "MoneyKey",
+        "recurringId": "mk7dejrysk5sdryz84"
+      },
+      {
+        "amount": 16.99,
+        "type": "expense",
+        "description": "Peacock TV",
+        "recurringId": "mk7dglaoryxi1p7g9li"
+      },
+      {
+        "amount": 42.86,
+        "type": "expense",
+        "description": "NetCredit",
+        "recurringId": "mk7o3mshejuqow4q6x9"
+      },
+      {
+        "amount": 297.59,
+        "type": "expense",
+        "description": "Xact",
+        "recurringId": "mk7oeogtcxl5o8w0lel"
+      }
+    ],
+    "2026-01-16": [
+      {
+        "amount": 221.15,
+        "type": "expense",
+        "description": "FPL",
+        "recurringId": "mk7d3p30b8msa9zi304",
+        "modifiedInstance": true
+      }
+    ],
+    "2026-03-02": [
+      {
+        "amount": 200,
+        "type": "expense",
+        "description": "Summer Camp Down Payment"
+      },
+      {
+        "amount": 37.35,
+        "type": "expense",
+        "description": "Disney Plus",
+        "recurringId": "mk7djk3w2fkitqnuybi"
+      },
+      {
+        "amount": 37.67,
+        "type": "expense",
+        "description": "Apple Card - Andrae",
+        "recurringId": "mk7du77s0u2aglb0fxm",
+        "originalDate": "2026-03-01"
+      },
+      {
+        "amount": 50,
+        "type": "expense",
+        "description": "Apple Card - Dayra",
+        "recurringId": "mk7duv55yuuoqqbpv7n",
+        "originalDate": "2026-03-01"
+      },
+      {
+        "amount": 227,
+        "type": "expense",
+        "description": "Florida Power and Light (FPL)",
+        "recurringId": "mkabylj2ex8mno5rize"
+      },
+      {
+        "amount": 19,
+        "type": "expense",
+        "description": "Google",
+        "recurringId": "mkakh5r369fropegve4"
+      }
+    ],
+    "2026-02-02": [
+      {
+        "amount": 19,
+        "type": "expense",
+        "description": "Google One",
+        "recurringId": "mkakh5r369fropegve4",
+        "modifiedInstance": true
+      },
+      {
+        "amount": 37.35,
+        "type": "expense",
+        "description": "Disney Plus",
+        "recurringId": "mk7djk3w2fkitqnuybi"
+      },
+      {
+        "amount": 37.67,
+        "type": "expense",
+        "description": "Apple Card - Andrae",
+        "recurringId": "mk7du77s0u2aglb0fxm",
+        "originalDate": "2026-02-01"
+      },
+      {
+        "amount": 50,
+        "type": "expense",
+        "description": "Apple Card - Dayra",
+        "recurringId": "mk7duv55yuuoqqbpv7n",
+        "originalDate": "2026-02-01"
+      },
+      {
+        "amount": 227,
+        "type": "expense",
+        "description": "Florida Power and Light (FPL)",
+        "recurringId": "mkabylj2ex8mno5rize"
+      }
+    ],
+    "2026-03-13": [
+      {
+        "amount": 3116.29,
+        "type": "income",
+        "description": "FSW Pay",
+        "recurringId": "mk73ab1dqfozf7zmsss",
+        "originalDate": "2026-03-15"
+      },
+      {
+        "amount": 30,
+        "type": "expense",
+        "description": "Visible - Andrae",
+        "recurringId": "mk7c7jqutj71jnn5suj"
+      },
+      {
+        "amount": 289.6,
+        "type": "expense",
+        "description": "CBW Credit Fresh",
+        "recurringId": "mk7cadzbv6pf5r2kp3",
+        "originalDate": "2026-03-15"
+      },
+      {
+        "amount": 268.43,
+        "type": "expense",
+        "description": "MoneyKey",
+        "recurringId": "mk7dejrysk5sdryz84",
+        "originalDate": "2026-03-15"
+      },
+      {
+        "amount": 42.86,
+        "type": "expense",
+        "description": "NetCredit",
+        "recurringId": "mk7o3mshejuqow4q6x9",
+        "originalDate": "2026-03-15"
+      },
+      {
+        "amount": 297.59,
+        "type": "expense",
+        "description": "Xact",
+        "recurringId": "mk7oeogtcxl5o8w0lel",
+        "originalDate": "2026-03-15"
+      }
+    ],
+    "2026-03-31": [
+      {
+        "amount": 3116.29,
+        "type": "income",
+        "description": "FSW Pay",
+        "recurringId": "mk73ab1dqfozf7zmsss"
+      },
+      {
+        "amount": 289.6,
+        "type": "expense",
+        "description": "CBW Credit Fresh",
+        "recurringId": "mk7cadzbv6pf5r2kp3"
+      },
+      {
+        "amount": 268.43,
+        "type": "expense",
+        "description": "MoneyKey",
+        "recurringId": "mk7dejrysk5sdryz84"
+      },
+      {
+        "amount": 42.86,
+        "type": "expense",
+        "description": "NetCredit",
+        "recurringId": "mk7o3mshejuqow4q6x9"
+      },
+      {
+        "amount": 297.59,
+        "type": "expense",
+        "description": "Xact",
+        "recurringId": "mk7oeogtcxl5o8w0lel"
+      }
+    ],
+    "2026-03-10": [
+      {
+        "amount": 112.49,
+        "type": "expense",
+        "description": "Progressive Auto Insurance ",
+        "recurringId": "mk73mip3ydb8zoiy8zg"
+      }
+    ],
+    "2026-03-01": [
+      {
+        "amount": 1142.16,
+        "type": "expense",
+        "description": "Rent",
+        "recurringId": "mk73nm8u593a0v9i2m8"
+      },
+      {
+        "amount": 70,
+        "type": "expense",
+        "description": "Pounce",
+        "recurringId": "mk7bexlmw38hj0fcjzb"
+      },
+      {
+        "amount": 48.86,
+        "type": "expense",
+        "description": "Elite Fine Arts Academy",
+        "recurringId": "mk7cbbpkiuwozcpi2tf"
+      }
+    ],
+    "2026-03-09": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Dandelion Therapy",
+        "recurringId": "mk74nz38gq4gbv40gkn"
+      }
+    ],
+    "2026-03-23": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Dandelion Therapy",
+        "recurringId": "mk74nz38gq4gbv40gkn"
+      },
+      {
+        "amount": 30,
+        "type": "expense",
+        "description": "Visible - Raiza",
+        "recurringId": "mk7cfey9ua9a7df53ij"
+      },
+      {
+        "amount": 261.87,
+        "type": "expense",
+        "description": "Best Egg",
+        "recurringId": "mk7ch530t83m41k9p6f"
+      },
+      {
+        "amount": 79.61,
+        "type": "expense",
+        "description": "Best Egg",
+        "recurringId": "mk7chip36krsgu7x81"
+      },
+      {
+        "amount": 2.99,
+        "type": "expense",
+        "description": "Apple Storage - Dayra",
+        "recurringId": "mkakvfk6azcmofxgizg"
+      }
+    ],
+    "2026-03-08": [
+      {
+        "amount": 70,
+        "type": "expense",
+        "description": "Pounce",
+        "recurringId": "mk7bexlmw38hj0fcjzb"
+      }
+    ],
+    "2026-03-15": [
+      {
+        "amount": 70,
+        "type": "expense",
+        "description": "Pounce",
+        "recurringId": "mk7bexlmw38hj0fcjzb"
+      },
+      {
+        "amount": 16.99,
+        "type": "expense",
+        "description": "Peacock TV",
+        "recurringId": "mk7dglaoryxi1p7g9li"
+      }
+    ],
+    "2026-03-22": [
+      {
+        "amount": 70,
+        "type": "expense",
+        "description": "Pounce",
+        "recurringId": "mk7bexlmw38hj0fcjzb"
+      }
+    ],
+    "2026-03-29": [
+      {
+        "amount": 70,
+        "type": "expense",
+        "description": "Pounce",
+        "recurringId": "mk7bexlmw38hj0fcjzb"
+      },
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Mastercard",
+        "recurringId": "mk7ciulif4uusuhgt1n"
+      },
+      {
+        "amount": 29,
+        "type": "expense",
+        "description": "Concora Credit",
+        "recurringId": "mk7cj6n63o6r77imukk"
+      },
+      {
+        "amount": 15.13,
+        "type": "expense",
+        "description": "Amazon Prime",
+        "recurringId": "mk7d3fk9shgto2f3uo9"
+      }
+    ],
+    "2026-03-03": [
+      {
+        "amount": 235.91,
+        "type": "expense",
+        "description": "OneMain Financial",
+        "recurringId": "mk7c3u2akwpbb04jjhb"
+      },
+      {
+        "amount": 75.5,
+        "type": "expense",
+        "description": "Capital One",
+        "recurringId": "mk7c4n7rwi5jkdc7na"
+      }
+    ],
+    "2026-03-12": [
+      {
+        "amount": 20,
+        "type": "expense",
+        "description": "Visible - Sofia",
+        "recurringId": "mk7c5gu0kd6sp7vjtc8"
+      },
+      {
+        "amount": 29,
+        "type": "expense",
+        "description": "Capital One",
+        "recurringId": "mk7c6lgqgdfm70mdxqq"
+      }
+    ],
+    "2026-03-17": [
+      {
+        "amount": 55.67,
+        "type": "expense",
+        "description": "Target Card",
+        "recurringId": "mk7ccqteg0bn4l6jzke"
+      },
+      {
+        "amount": 26.8,
+        "type": "expense",
+        "description": "Planet Fitness",
+        "recurringId": "mk7cd2ro5gbwyf4rafw"
+      },
+      {
+        "amount": 55.67,
+        "type": "expense",
+        "description": "Target Card",
+        "recurringId": "mk7cwzeujmq13qu11wa"
+      },
+      {
+        "amount": 26.8,
+        "type": "expense",
+        "description": "Planet Fitness",
+        "recurringId": "mk7cy5vbluc4jpzu5wh"
+      }
+    ],
+    "2026-03-19": [
+      {
+        "amount": 50,
+        "type": "expense",
+        "description": "Comcast Xfinity",
+        "recurringId": "mk7cdj06acvl2hzr8fu"
+      }
+    ],
+    "2026-03-24": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Visible - Dayra",
+        "recurringId": "mk7cfv2y87jkj6wcph9"
+      }
+    ],
+    "2026-03-26": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Avant",
+        "recurringId": "mk7chz3qkjxjvb2c0pk"
+      }
+    ],
+    "2026-03-30": [
+      {
+        "amount": 57.11,
+        "type": "expense",
+        "description": "Extra Space Storage",
+        "recurringId": "mk7cjmf3ax0cx5cr6qt"
+      }
+    ],
+    "2026-03-20": [
+      {
+        "amount": 20.38,
+        "type": "expense",
+        "description": "Netflix",
+        "recurringId": "mk7d2smllk59znincsh"
+      },
+      {
+        "amount": 6.98,
+        "type": "expense",
+        "description": "Apple Music",
+        "recurringId": "mkakqaimp3ped3qoxbd"
+      }
+    ],
+    "2026-03-07": [
+      {
+        "amount": 26.04,
+        "type": "expense",
+        "description": "YouTube Premium",
+        "recurringId": "mk7dl6gei19bwq34x6"
+      }
+    ],
+    "2026-03-06": [
+      {
+        "amount": 12.95,
+        "type": "expense",
+        "description": "Walmart Plus",
+        "recurringId": "mk7vfr2xntgbm5sbzae"
+      }
+    ],
+    "2026-04-15": [
+      {
+        "amount": 3116.29,
+        "type": "income",
+        "description": "FSW Pay",
+        "recurringId": "mk73ab1dqfozf7zmsss"
+      },
+      {
+        "amount": 289.6,
+        "type": "expense",
+        "description": "CBW Credit Fresh",
+        "recurringId": "mk7cadzbv6pf5r2kp3"
+      },
+      {
+        "amount": 268.43,
+        "type": "expense",
+        "description": "MoneyKey",
+        "recurringId": "mk7dejrysk5sdryz84"
+      },
+      {
+        "amount": 16.99,
+        "type": "expense",
+        "description": "Peacock TV",
+        "recurringId": "mk7dglaoryxi1p7g9li"
+      },
+      {
+        "amount": 42.86,
+        "type": "expense",
+        "description": "NetCredit",
+        "recurringId": "mk7o3mshejuqow4q6x9"
+      },
+      {
+        "amount": 297.59,
+        "type": "expense",
+        "description": "Xact",
+        "recurringId": "mk7oeogtcxl5o8w0lel"
+      }
+    ],
+    "2026-04-30": [
+      {
+        "amount": 3116.29,
+        "type": "income",
+        "description": "FSW Pay",
+        "recurringId": "mk73ab1dqfozf7zmsss"
+      },
+      {
+        "amount": 289.6,
+        "type": "expense",
+        "description": "CBW Credit Fresh",
+        "recurringId": "mk7cadzbv6pf5r2kp3"
+      },
+      {
+        "amount": 57.11,
+        "type": "expense",
+        "description": "Extra Space Storage",
+        "recurringId": "mk7cjmf3ax0cx5cr6qt"
+      },
+      {
+        "amount": 268.43,
+        "type": "expense",
+        "description": "MoneyKey",
+        "recurringId": "mk7dejrysk5sdryz84"
+      },
+      {
+        "amount": 42.86,
+        "type": "expense",
+        "description": "NetCredit",
+        "recurringId": "mk7o3mshejuqow4q6x9"
+      },
+      {
+        "amount": 297.59,
+        "type": "expense",
+        "description": "Xact",
+        "recurringId": "mk7oeogtcxl5o8w0lel"
+      }
+    ],
+    "2026-04-10": [
+      {
+        "amount": 112.49,
+        "type": "expense",
+        "description": "Progressive Auto Insurance ",
+        "recurringId": "mk73mip3ydb8zoiy8zg"
+      }
+    ],
+    "2026-04-01": [
+      {
+        "amount": 1142.16,
+        "type": "expense",
+        "description": "Rent",
+        "recurringId": "mk73nm8u593a0v9i2m8"
+      },
+      {
+        "amount": 48.86,
+        "type": "expense",
+        "description": "Elite Fine Arts Academy",
+        "recurringId": "mk7cbbpkiuwozcpi2tf"
+      },
+      {
+        "amount": 37.67,
+        "type": "expense",
+        "description": "Apple Card - Andrae",
+        "recurringId": "mk7du77s0u2aglb0fxm"
+      },
+      {
+        "amount": 50,
+        "type": "expense",
+        "description": "Apple Card - Dayra",
+        "recurringId": "mk7duv55yuuoqqbpv7n"
+      }
+    ],
+    "2026-04-06": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Dandelion Therapy",
+        "recurringId": "mk74nz38gq4gbv40gkn"
+      },
+      {
+        "amount": 12.95,
+        "type": "expense",
+        "description": "Walmart Plus",
+        "recurringId": "mk7vfr2xntgbm5sbzae"
+      }
+    ],
+    "2026-04-20": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Dandelion Therapy",
+        "recurringId": "mk74nz38gq4gbv40gkn"
+      },
+      {
+        "amount": 20.38,
+        "type": "expense",
+        "description": "Netflix",
+        "recurringId": "mk7d2smllk59znincsh"
+      },
+      {
+        "amount": 6.98,
+        "type": "expense",
+        "description": "Apple Music",
+        "recurringId": "mkakqaimp3ped3qoxbd"
+      }
+    ],
+    "2026-04-05": [
+      {
+        "amount": 70,
+        "type": "expense",
+        "description": "Pounce",
+        "recurringId": "mk7bexlmw38hj0fcjzb"
+      }
+    ],
+    "2026-04-12": [
+      {
+        "amount": 70,
+        "type": "expense",
+        "description": "Pounce",
+        "recurringId": "mk7bexlmw38hj0fcjzb"
+      },
+      {
+        "amount": 20,
+        "type": "expense",
+        "description": "Visible - Sofia",
+        "recurringId": "mk7c5gu0kd6sp7vjtc8"
+      },
+      {
+        "amount": 29,
+        "type": "expense",
+        "description": "Capital One",
+        "recurringId": "mk7c6lgqgdfm70mdxqq"
+      }
+    ],
+    "2026-04-19": [
+      {
+        "amount": 70,
+        "type": "expense",
+        "description": "Pounce",
+        "recurringId": "mk7bexlmw38hj0fcjzb"
+      },
+      {
+        "amount": 50,
+        "type": "expense",
+        "description": "Comcast Xfinity",
+        "recurringId": "mk7cdj06acvl2hzr8fu"
+      }
+    ],
+    "2026-04-26": [
+      {
+        "amount": 70,
+        "type": "expense",
+        "description": "Pounce",
+        "recurringId": "mk7bexlmw38hj0fcjzb"
+      },
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Avant",
+        "recurringId": "mk7chz3qkjxjvb2c0pk"
+      }
+    ],
+    "2026-04-03": [
+      {
+        "amount": 235.91,
+        "type": "expense",
+        "description": "OneMain Financial",
+        "recurringId": "mk7c3u2akwpbb04jjhb"
+      },
+      {
+        "amount": 75.5,
+        "type": "expense",
+        "description": "Capital One",
+        "recurringId": "mk7c4n7rwi5jkdc7na"
+      }
+    ],
+    "2026-04-13": [
+      {
+        "amount": 30,
+        "type": "expense",
+        "description": "Visible - Andrae",
+        "recurringId": "mk7c7jqutj71jnn5suj"
+      }
+    ],
+    "2026-04-17": [
+      {
+        "amount": 55.67,
+        "type": "expense",
+        "description": "Target Card",
+        "recurringId": "mk7ccqteg0bn4l6jzke"
+      },
+      {
+        "amount": 26.8,
+        "type": "expense",
+        "description": "Planet Fitness",
+        "recurringId": "mk7cd2ro5gbwyf4rafw"
+      },
+      {
+        "amount": 55.67,
+        "type": "expense",
+        "description": "Target Card",
+        "recurringId": "mk7cwzeujmq13qu11wa"
+      },
+      {
+        "amount": 26.8,
+        "type": "expense",
+        "description": "Planet Fitness",
+        "recurringId": "mk7cy5vbluc4jpzu5wh"
+      }
+    ],
+    "2026-04-23": [
+      {
+        "amount": 30,
+        "type": "expense",
+        "description": "Visible - Raiza",
+        "recurringId": "mk7cfey9ua9a7df53ij"
+      },
+      {
+        "amount": 261.87,
+        "type": "expense",
+        "description": "Best Egg",
+        "recurringId": "mk7ch530t83m41k9p6f"
+      },
+      {
+        "amount": 79.61,
+        "type": "expense",
+        "description": "Best Egg",
+        "recurringId": "mk7chip36krsgu7x81"
+      },
+      {
+        "amount": 2.99,
+        "type": "expense",
+        "description": "Apple Storage - Dayra",
+        "recurringId": "mkakvfk6azcmofxgizg"
+      }
+    ],
+    "2026-04-24": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Visible - Dayra",
+        "recurringId": "mk7cfv2y87jkj6wcph9"
+      }
+    ],
+    "2026-04-29": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Mastercard",
+        "recurringId": "mk7ciulif4uusuhgt1n"
+      },
+      {
+        "amount": 29,
+        "type": "expense",
+        "description": "Concora Credit",
+        "recurringId": "mk7cj6n63o6r77imukk"
+      },
+      {
+        "amount": 15.13,
+        "type": "expense",
+        "description": "Amazon Prime",
+        "recurringId": "mk7d3fk9shgto2f3uo9"
+      }
+    ],
+    "2026-04-02": [
+      {
+        "amount": 37.35,
+        "type": "expense",
+        "description": "Disney Plus",
+        "recurringId": "mk7djk3w2fkitqnuybi"
+      },
+      {
+        "amount": 227,
+        "type": "expense",
+        "description": "Florida Power and Light (FPL)",
+        "recurringId": "mkabylj2ex8mno5rize"
+      },
+      {
+        "amount": 19,
+        "type": "expense",
+        "description": "Google",
+        "recurringId": "mkakh5r369fropegve4"
+      }
+    ],
+    "2026-04-07": [
+      {
+        "amount": 26.04,
+        "type": "expense",
+        "description": "YouTube Premium",
+        "recurringId": "mk7dl6gei19bwq34x6"
+      }
+    ],
+    "2026-05-15": [
+      {
+        "amount": 3116.29,
+        "type": "income",
+        "description": "FSW Pay",
+        "recurringId": "mk73ab1dqfozf7zmsss"
+      },
+      {
+        "amount": 289.6,
+        "type": "expense",
+        "description": "CBW Credit Fresh",
+        "recurringId": "mk7cadzbv6pf5r2kp3"
+      },
+      {
+        "amount": 268.43,
+        "type": "expense",
+        "description": "MoneyKey",
+        "recurringId": "mk7dejrysk5sdryz84"
+      },
+      {
+        "amount": 16.99,
+        "type": "expense",
+        "description": "Peacock TV",
+        "recurringId": "mk7dglaoryxi1p7g9li"
+      },
+      {
+        "amount": 42.86,
+        "type": "expense",
+        "description": "NetCredit",
+        "recurringId": "mk7o3mshejuqow4q6x9"
+      },
+      {
+        "amount": 297.59,
+        "type": "expense",
+        "description": "Xact",
+        "recurringId": "mk7oeogtcxl5o8w0lel"
+      }
+    ],
+    "2026-05-29": [
+      {
+        "amount": 3116.29,
+        "type": "income",
+        "description": "FSW Pay",
+        "recurringId": "mk73ab1dqfozf7zmsss",
+        "originalDate": "2026-05-31"
+      },
+      {
+        "amount": 289.6,
+        "type": "expense",
+        "description": "CBW Credit Fresh",
+        "recurringId": "mk7cadzbv6pf5r2kp3",
+        "originalDate": "2026-05-31"
+      },
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Mastercard",
+        "recurringId": "mk7ciulif4uusuhgt1n"
+      },
+      {
+        "amount": 29,
+        "type": "expense",
+        "description": "Concora Credit",
+        "recurringId": "mk7cj6n63o6r77imukk"
+      },
+      {
+        "amount": 15.13,
+        "type": "expense",
+        "description": "Amazon Prime",
+        "recurringId": "mk7d3fk9shgto2f3uo9"
+      },
+      {
+        "amount": 268.43,
+        "type": "expense",
+        "description": "MoneyKey",
+        "recurringId": "mk7dejrysk5sdryz84",
+        "originalDate": "2026-05-31"
+      },
+      {
+        "amount": 42.86,
+        "type": "expense",
+        "description": "NetCredit",
+        "recurringId": "mk7o3mshejuqow4q6x9",
+        "originalDate": "2026-05-31"
+      },
+      {
+        "amount": 297.59,
+        "type": "expense",
+        "description": "Xact",
+        "recurringId": "mk7oeogtcxl5o8w0lel",
+        "originalDate": "2026-05-31"
+      }
+    ],
+    "2026-05-10": [
+      {
+        "amount": 112.49,
+        "type": "expense",
+        "description": "Progressive Auto Insurance ",
+        "recurringId": "mk73mip3ydb8zoiy8zg"
+      },
+      {
+        "amount": 70,
+        "type": "expense",
+        "description": "Pounce",
+        "recurringId": "mk7bexlmw38hj0fcjzb"
+      }
+    ],
+    "2026-05-01": [
+      {
+        "amount": 1142.16,
+        "type": "expense",
+        "description": "Rent",
+        "recurringId": "mk73nm8u593a0v9i2m8"
+      },
+      {
+        "amount": 48.86,
+        "type": "expense",
+        "description": "Elite Fine Arts Academy",
+        "recurringId": "mk7cbbpkiuwozcpi2tf"
+      },
+      {
+        "amount": 37.67,
+        "type": "expense",
+        "description": "Apple Card - Andrae",
+        "recurringId": "mk7du77s0u2aglb0fxm"
+      },
+      {
+        "amount": 50,
+        "type": "expense",
+        "description": "Apple Card - Dayra",
+        "recurringId": "mk7duv55yuuoqqbpv7n"
+      }
+    ],
+    "2026-05-04": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Dandelion Therapy",
+        "recurringId": "mk74nz38gq4gbv40gkn"
+      }
+    ],
+    "2026-05-18": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Dandelion Therapy",
+        "recurringId": "mk74nz38gq4gbv40gkn"
+      }
+    ],
+    "2026-05-03": [
+      {
+        "amount": 70,
+        "type": "expense",
+        "description": "Pounce",
+        "recurringId": "mk7bexlmw38hj0fcjzb"
+      },
+      {
+        "amount": 235.91,
+        "type": "expense",
+        "description": "OneMain Financial",
+        "recurringId": "mk7c3u2akwpbb04jjhb"
+      },
+      {
+        "amount": 75.5,
+        "type": "expense",
+        "description": "Capital One",
+        "recurringId": "mk7c4n7rwi5jkdc7na"
+      }
+    ],
+    "2026-05-17": [
+      {
+        "amount": 70,
+        "type": "expense",
+        "description": "Pounce",
+        "recurringId": "mk7bexlmw38hj0fcjzb"
+      },
+      {
+        "amount": 55.67,
+        "type": "expense",
+        "description": "Target Card",
+        "recurringId": "mk7ccqteg0bn4l6jzke"
+      },
+      {
+        "amount": 26.8,
+        "type": "expense",
+        "description": "Planet Fitness",
+        "recurringId": "mk7cd2ro5gbwyf4rafw"
+      },
+      {
+        "amount": 55.67,
+        "type": "expense",
+        "description": "Target Card",
+        "recurringId": "mk7cwzeujmq13qu11wa"
+      },
+      {
+        "amount": 26.8,
+        "type": "expense",
+        "description": "Planet Fitness",
+        "recurringId": "mk7cy5vbluc4jpzu5wh"
+      }
+    ],
+    "2026-05-24": [
+      {
+        "amount": 70,
+        "type": "expense",
+        "description": "Pounce",
+        "recurringId": "mk7bexlmw38hj0fcjzb"
+      },
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Visible - Dayra",
+        "recurringId": "mk7cfv2y87jkj6wcph9"
+      }
+    ],
+    "2026-05-31": [
+      {
+        "amount": 70,
+        "type": "expense",
+        "description": "Pounce",
+        "recurringId": "mk7bexlmw38hj0fcjzb"
+      }
+    ],
+    "2026-05-12": [
+      {
+        "amount": 20,
+        "type": "expense",
+        "description": "Visible - Sofia",
+        "recurringId": "mk7c5gu0kd6sp7vjtc8"
+      },
+      {
+        "amount": 29,
+        "type": "expense",
+        "description": "Capital One",
+        "recurringId": "mk7c6lgqgdfm70mdxqq"
+      }
+    ],
+    "2026-05-13": [
+      {
+        "amount": 30,
+        "type": "expense",
+        "description": "Visible - Andrae",
+        "recurringId": "mk7c7jqutj71jnn5suj"
+      }
+    ],
+    "2026-05-19": [
+      {
+        "amount": 50,
+        "type": "expense",
+        "description": "Comcast Xfinity",
+        "recurringId": "mk7cdj06acvl2hzr8fu"
+      }
+    ],
+    "2026-05-23": [
+      {
+        "amount": 30,
+        "type": "expense",
+        "description": "Visible - Raiza",
+        "recurringId": "mk7cfey9ua9a7df53ij"
+      },
+      {
+        "amount": 261.87,
+        "type": "expense",
+        "description": "Best Egg",
+        "recurringId": "mk7ch530t83m41k9p6f"
+      },
+      {
+        "amount": 79.61,
+        "type": "expense",
+        "description": "Best Egg",
+        "recurringId": "mk7chip36krsgu7x81"
+      },
+      {
+        "amount": 2.99,
+        "type": "expense",
+        "description": "Apple Storage - Dayra",
+        "recurringId": "mkakvfk6azcmofxgizg"
+      }
+    ],
+    "2026-05-26": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Avant",
+        "recurringId": "mk7chz3qkjxjvb2c0pk"
+      }
+    ],
+    "2026-05-30": [
+      {
+        "amount": 57.11,
+        "type": "expense",
+        "description": "Extra Space Storage",
+        "recurringId": "mk7cjmf3ax0cx5cr6qt"
+      }
+    ],
+    "2026-05-20": [
+      {
+        "amount": 20.38,
+        "type": "expense",
+        "description": "Netflix",
+        "recurringId": "mk7d2smllk59znincsh"
+      },
+      {
+        "amount": 6.98,
+        "type": "expense",
+        "description": "Apple Music",
+        "recurringId": "mkakqaimp3ped3qoxbd"
+      }
+    ],
+    "2026-05-02": [
+      {
+        "amount": 37.35,
+        "type": "expense",
+        "description": "Disney Plus",
+        "recurringId": "mk7djk3w2fkitqnuybi"
+      },
+      {
+        "amount": 227,
+        "type": "expense",
+        "description": "Florida Power and Light (FPL)",
+        "recurringId": "mkabylj2ex8mno5rize"
+      },
+      {
+        "amount": 19,
+        "type": "expense",
+        "description": "Google",
+        "recurringId": "mkakh5r369fropegve4"
+      }
+    ],
+    "2026-05-07": [
+      {
+        "amount": 26.04,
+        "type": "expense",
+        "description": "YouTube Premium",
+        "recurringId": "mk7dl6gei19bwq34x6"
+      }
+    ],
+    "2026-05-06": [
+      {
+        "amount": 12.95,
+        "type": "expense",
+        "description": "Walmart Plus",
+        "recurringId": "mk7vfr2xntgbm5sbzae"
+      }
+    ],
+    "2026-06-15": [
+      {
+        "amount": 3116.29,
+        "type": "income",
+        "description": "FSW Pay",
+        "recurringId": "mk73ab1dqfozf7zmsss"
+      },
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Dandelion Therapy",
+        "recurringId": "mk74nz38gq4gbv40gkn"
+      },
+      {
+        "amount": 289.6,
+        "type": "expense",
+        "description": "CBW Credit Fresh",
+        "recurringId": "mk7cadzbv6pf5r2kp3"
+      },
+      {
+        "amount": 268.43,
+        "type": "expense",
+        "description": "MoneyKey",
+        "recurringId": "mk7dejrysk5sdryz84"
+      },
+      {
+        "amount": 16.99,
+        "type": "expense",
+        "description": "Peacock TV",
+        "recurringId": "mk7dglaoryxi1p7g9li"
+      },
+      {
+        "amount": 42.86,
+        "type": "expense",
+        "description": "NetCredit",
+        "recurringId": "mk7o3mshejuqow4q6x9"
+      },
+      {
+        "amount": 297.59,
+        "type": "expense",
+        "description": "Xact",
+        "recurringId": "mk7oeogtcxl5o8w0lel"
+      }
+    ],
+    "2026-06-30": [
+      {
+        "amount": 3116.29,
+        "type": "income",
+        "description": "FSW Pay",
+        "recurringId": "mk73ab1dqfozf7zmsss"
+      },
+      {
+        "amount": 289.6,
+        "type": "expense",
+        "description": "CBW Credit Fresh",
+        "recurringId": "mk7cadzbv6pf5r2kp3"
+      },
+      {
+        "amount": 57.11,
+        "type": "expense",
+        "description": "Extra Space Storage",
+        "recurringId": "mk7cjmf3ax0cx5cr6qt"
+      },
+      {
+        "amount": 268.43,
+        "type": "expense",
+        "description": "MoneyKey",
+        "recurringId": "mk7dejrysk5sdryz84"
+      },
+      {
+        "amount": 42.86,
+        "type": "expense",
+        "description": "NetCredit",
+        "recurringId": "mk7o3mshejuqow4q6x9"
+      },
+      {
+        "amount": 297.59,
+        "type": "expense",
+        "description": "Xact",
+        "recurringId": "mk7oeogtcxl5o8w0lel"
+      }
+    ],
+    "2026-06-10": [
+      {
+        "amount": 112.49,
+        "type": "expense",
+        "description": "Progressive Auto Insurance ",
+        "recurringId": "mk73mip3ydb8zoiy8zg"
+      }
+    ],
+    "2026-06-01": [
+      {
+        "amount": 1142.16,
+        "type": "expense",
+        "description": "Rent",
+        "recurringId": "mk73nm8u593a0v9i2m8"
+      },
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Dandelion Therapy",
+        "recurringId": "mk74nz38gq4gbv40gkn"
+      },
+      {
+        "amount": 48.86,
+        "type": "expense",
+        "description": "Elite Fine Arts Academy",
+        "recurringId": "mk7cbbpkiuwozcpi2tf"
+      },
+      {
+        "amount": 37.67,
+        "type": "expense",
+        "description": "Apple Card - Andrae",
+        "recurringId": "mk7du77s0u2aglb0fxm"
+      },
+      {
+        "amount": 50,
+        "type": "expense",
+        "description": "Apple Card - Dayra",
+        "recurringId": "mk7duv55yuuoqqbpv7n"
+      }
+    ],
+    "2026-06-29": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Dandelion Therapy",
+        "recurringId": "mk74nz38gq4gbv40gkn"
+      },
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Mastercard",
+        "recurringId": "mk7ciulif4uusuhgt1n"
+      },
+      {
+        "amount": 29,
+        "type": "expense",
+        "description": "Concora Credit",
+        "recurringId": "mk7cj6n63o6r77imukk"
+      },
+      {
+        "amount": 15.13,
+        "type": "expense",
+        "description": "Amazon Prime",
+        "recurringId": "mk7d3fk9shgto2f3uo9"
+      }
+    ],
+    "2026-06-03": [
+      {
+        "amount": 235.91,
+        "type": "expense",
+        "description": "OneMain Financial",
+        "recurringId": "mk7c3u2akwpbb04jjhb"
+      },
+      {
+        "amount": 75.5,
+        "type": "expense",
+        "description": "Capital One",
+        "recurringId": "mk7c4n7rwi5jkdc7na"
+      }
+    ],
+    "2026-06-12": [
+      {
+        "amount": 20,
+        "type": "expense",
+        "description": "Visible - Sofia",
+        "recurringId": "mk7c5gu0kd6sp7vjtc8"
+      },
+      {
+        "amount": 29,
+        "type": "expense",
+        "description": "Capital One",
+        "recurringId": "mk7c6lgqgdfm70mdxqq"
+      }
+    ],
+    "2026-06-13": [
+      {
+        "amount": 30,
+        "type": "expense",
+        "description": "Visible - Andrae",
+        "recurringId": "mk7c7jqutj71jnn5suj"
+      }
+    ],
+    "2026-06-17": [
+      {
+        "amount": 55.67,
+        "type": "expense",
+        "description": "Target Card",
+        "recurringId": "mk7ccqteg0bn4l6jzke"
+      },
+      {
+        "amount": 26.8,
+        "type": "expense",
+        "description": "Planet Fitness",
+        "recurringId": "mk7cd2ro5gbwyf4rafw"
+      },
+      {
+        "amount": 55.67,
+        "type": "expense",
+        "description": "Target Card",
+        "recurringId": "mk7cwzeujmq13qu11wa"
+      },
+      {
+        "amount": 26.8,
+        "type": "expense",
+        "description": "Planet Fitness",
+        "recurringId": "mk7cy5vbluc4jpzu5wh"
+      }
+    ],
+    "2026-06-19": [
+      {
+        "amount": 50,
+        "type": "expense",
+        "description": "Comcast Xfinity",
+        "recurringId": "mk7cdj06acvl2hzr8fu"
+      }
+    ],
+    "2026-06-23": [
+      {
+        "amount": 30,
+        "type": "expense",
+        "description": "Visible - Raiza",
+        "recurringId": "mk7cfey9ua9a7df53ij"
+      },
+      {
+        "amount": 261.87,
+        "type": "expense",
+        "description": "Best Egg",
+        "recurringId": "mk7ch530t83m41k9p6f"
+      },
+      {
+        "amount": 79.61,
+        "type": "expense",
+        "description": "Best Egg",
+        "recurringId": "mk7chip36krsgu7x81"
+      },
+      {
+        "amount": 2.99,
+        "type": "expense",
+        "description": "Apple Storage - Dayra",
+        "recurringId": "mkakvfk6azcmofxgizg"
+      }
+    ],
+    "2026-06-24": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Visible - Dayra",
+        "recurringId": "mk7cfv2y87jkj6wcph9"
+      }
+    ],
+    "2026-06-26": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Avant",
+        "recurringId": "mk7chz3qkjxjvb2c0pk"
+      }
+    ],
+    "2026-06-20": [
+      {
+        "amount": 20.38,
+        "type": "expense",
+        "description": "Netflix",
+        "recurringId": "mk7d2smllk59znincsh"
+      },
+      {
+        "amount": 6.98,
+        "type": "expense",
+        "description": "Apple Music",
+        "recurringId": "mkakqaimp3ped3qoxbd"
+      }
+    ],
+    "2026-06-02": [
+      {
+        "amount": 37.35,
+        "type": "expense",
+        "description": "Disney Plus",
+        "recurringId": "mk7djk3w2fkitqnuybi"
+      },
+      {
+        "amount": 227,
+        "type": "expense",
+        "description": "Florida Power and Light (FPL)",
+        "recurringId": "mkabylj2ex8mno5rize"
+      },
+      {
+        "amount": 19,
+        "type": "expense",
+        "description": "Google",
+        "recurringId": "mkakh5r369fropegve4"
+      }
+    ],
+    "2026-06-07": [
+      {
+        "amount": 26.04,
+        "type": "expense",
+        "description": "YouTube Premium",
+        "recurringId": "mk7dl6gei19bwq34x6"
+      }
+    ],
+    "2026-06-06": [
+      {
+        "amount": 12.95,
+        "type": "expense",
+        "description": "Walmart Plus",
+        "recurringId": "mk7vfr2xntgbm5sbzae"
+      }
+    ],
+    "2026-07-15": [
+      {
+        "amount": 3116.29,
+        "type": "income",
+        "description": "FSW Pay",
+        "recurringId": "mk73ab1dqfozf7zmsss"
+      },
+      {
+        "amount": 289.6,
+        "type": "expense",
+        "description": "CBW Credit Fresh",
+        "recurringId": "mk7cadzbv6pf5r2kp3"
+      },
+      {
+        "amount": 268.43,
+        "type": "expense",
+        "description": "MoneyKey",
+        "recurringId": "mk7dejrysk5sdryz84"
+      },
+      {
+        "amount": 16.99,
+        "type": "expense",
+        "description": "Peacock TV",
+        "recurringId": "mk7dglaoryxi1p7g9li"
+      },
+      {
+        "amount": 42.86,
+        "type": "expense",
+        "description": "NetCredit",
+        "recurringId": "mk7o3mshejuqow4q6x9"
+      },
+      {
+        "amount": 297.59,
+        "type": "expense",
+        "description": "Xact",
+        "recurringId": "mk7oeogtcxl5o8w0lel"
+      }
+    ],
+    "2026-07-31": [
+      {
+        "amount": 3116.29,
+        "type": "income",
+        "description": "FSW Pay",
+        "recurringId": "mk73ab1dqfozf7zmsss"
+      },
+      {
+        "amount": 289.6,
+        "type": "expense",
+        "description": "CBW Credit Fresh",
+        "recurringId": "mk7cadzbv6pf5r2kp3"
+      },
+      {
+        "amount": 268.43,
+        "type": "expense",
+        "description": "MoneyKey",
+        "recurringId": "mk7dejrysk5sdryz84"
+      },
+      {
+        "amount": 42.86,
+        "type": "expense",
+        "description": "NetCredit",
+        "recurringId": "mk7o3mshejuqow4q6x9"
+      },
+      {
+        "amount": 297.59,
+        "type": "expense",
+        "description": "Xact",
+        "recurringId": "mk7oeogtcxl5o8w0lel"
+      }
+    ],
+    "2026-07-10": [
+      {
+        "amount": 112.49,
+        "type": "expense",
+        "description": "Progressive Auto Insurance ",
+        "recurringId": "mk73mip3ydb8zoiy8zg"
+      }
+    ],
+    "2026-07-01": [
+      {
+        "amount": 1142.16,
+        "type": "expense",
+        "description": "Rent",
+        "recurringId": "mk73nm8u593a0v9i2m8"
+      },
+      {
+        "amount": 48.86,
+        "type": "expense",
+        "description": "Elite Fine Arts Academy",
+        "recurringId": "mk7cbbpkiuwozcpi2tf"
+      },
+      {
+        "amount": 37.67,
+        "type": "expense",
+        "description": "Apple Card - Andrae",
+        "recurringId": "mk7du77s0u2aglb0fxm"
+      },
+      {
+        "amount": 50,
+        "type": "expense",
+        "description": "Apple Card - Dayra",
+        "recurringId": "mk7duv55yuuoqqbpv7n"
+      }
+    ],
+    "2026-07-13": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Dandelion Therapy",
+        "recurringId": "mk74nz38gq4gbv40gkn"
+      },
+      {
+        "amount": 30,
+        "type": "expense",
+        "description": "Visible - Andrae",
+        "recurringId": "mk7c7jqutj71jnn5suj"
+      }
+    ],
+    "2026-07-27": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Dandelion Therapy",
+        "recurringId": "mk74nz38gq4gbv40gkn"
+      }
+    ],
+    "2026-07-03": [
+      {
+        "amount": 235.91,
+        "type": "expense",
+        "description": "OneMain Financial",
+        "recurringId": "mk7c3u2akwpbb04jjhb"
+      },
+      {
+        "amount": 75.5,
+        "type": "expense",
+        "description": "Capital One",
+        "recurringId": "mk7c4n7rwi5jkdc7na"
+      }
+    ],
+    "2026-07-12": [
+      {
+        "amount": 20,
+        "type": "expense",
+        "description": "Visible - Sofia",
+        "recurringId": "mk7c5gu0kd6sp7vjtc8"
+      },
+      {
+        "amount": 29,
+        "type": "expense",
+        "description": "Capital One",
+        "recurringId": "mk7c6lgqgdfm70mdxqq"
+      }
+    ],
+    "2026-07-17": [
+      {
+        "amount": 55.67,
+        "type": "expense",
+        "description": "Target Card",
+        "recurringId": "mk7ccqteg0bn4l6jzke"
+      },
+      {
+        "amount": 26.8,
+        "type": "expense",
+        "description": "Planet Fitness",
+        "recurringId": "mk7cd2ro5gbwyf4rafw"
+      },
+      {
+        "amount": 55.67,
+        "type": "expense",
+        "description": "Target Card",
+        "recurringId": "mk7cwzeujmq13qu11wa"
+      },
+      {
+        "amount": 26.8,
+        "type": "expense",
+        "description": "Planet Fitness",
+        "recurringId": "mk7cy5vbluc4jpzu5wh"
+      }
+    ],
+    "2026-07-19": [
+      {
+        "amount": 50,
+        "type": "expense",
+        "description": "Comcast Xfinity",
+        "recurringId": "mk7cdj06acvl2hzr8fu"
+      }
+    ],
+    "2026-07-23": [
+      {
+        "amount": 30,
+        "type": "expense",
+        "description": "Visible - Raiza",
+        "recurringId": "mk7cfey9ua9a7df53ij"
+      },
+      {
+        "amount": 261.87,
+        "type": "expense",
+        "description": "Best Egg",
+        "recurringId": "mk7ch530t83m41k9p6f"
+      },
+      {
+        "amount": 79.61,
+        "type": "expense",
+        "description": "Best Egg",
+        "recurringId": "mk7chip36krsgu7x81"
+      },
+      {
+        "amount": 2.99,
+        "type": "expense",
+        "description": "Apple Storage - Dayra",
+        "recurringId": "mkakvfk6azcmofxgizg"
+      }
+    ],
+    "2026-07-24": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Visible - Dayra",
+        "recurringId": "mk7cfv2y87jkj6wcph9"
+      }
+    ],
+    "2026-07-26": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Avant",
+        "recurringId": "mk7chz3qkjxjvb2c0pk"
+      }
+    ],
+    "2026-07-29": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Mastercard",
+        "recurringId": "mk7ciulif4uusuhgt1n"
+      },
+      {
+        "amount": 29,
+        "type": "expense",
+        "description": "Concora Credit",
+        "recurringId": "mk7cj6n63o6r77imukk"
+      },
+      {
+        "amount": 15.13,
+        "type": "expense",
+        "description": "Amazon Prime",
+        "recurringId": "mk7d3fk9shgto2f3uo9"
+      }
+    ],
+    "2026-07-30": [
+      {
+        "amount": 57.11,
+        "type": "expense",
+        "description": "Extra Space Storage",
+        "recurringId": "mk7cjmf3ax0cx5cr6qt"
+      }
+    ],
+    "2026-07-20": [
+      {
+        "amount": 20.38,
+        "type": "expense",
+        "description": "Netflix",
+        "recurringId": "mk7d2smllk59znincsh"
+      },
+      {
+        "amount": 6.98,
+        "type": "expense",
+        "description": "Apple Music",
+        "recurringId": "mkakqaimp3ped3qoxbd"
+      }
+    ],
+    "2026-07-02": [
+      {
+        "amount": 37.35,
+        "type": "expense",
+        "description": "Disney Plus",
+        "recurringId": "mk7djk3w2fkitqnuybi"
+      },
+      {
+        "amount": 227,
+        "type": "expense",
+        "description": "Florida Power and Light (FPL)",
+        "recurringId": "mkabylj2ex8mno5rize"
+      },
+      {
+        "amount": 19,
+        "type": "expense",
+        "description": "Google",
+        "recurringId": "mkakh5r369fropegve4"
+      }
+    ],
+    "2026-07-07": [
+      {
+        "amount": 26.04,
+        "type": "expense",
+        "description": "YouTube Premium",
+        "recurringId": "mk7dl6gei19bwq34x6"
+      }
+    ],
+    "2026-07-06": [
+      {
+        "amount": 12.95,
+        "type": "expense",
+        "description": "Walmart Plus",
+        "recurringId": "mk7vfr2xntgbm5sbzae"
+      }
+    ],
+    "2026-08-14": [
+      {
+        "amount": 3116.29,
+        "type": "income",
+        "description": "FSW Pay",
+        "recurringId": "mk73ab1dqfozf7zmsss",
+        "originalDate": "2026-08-15"
+      },
+      {
+        "amount": 289.6,
+        "type": "expense",
+        "description": "CBW Credit Fresh",
+        "recurringId": "mk7cadzbv6pf5r2kp3",
+        "originalDate": "2026-08-15"
+      },
+      {
+        "amount": 268.43,
+        "type": "expense",
+        "description": "MoneyKey",
+        "recurringId": "mk7dejrysk5sdryz84",
+        "originalDate": "2026-08-15"
+      },
+      {
+        "amount": 42.86,
+        "type": "expense",
+        "description": "NetCredit",
+        "recurringId": "mk7o3mshejuqow4q6x9",
+        "originalDate": "2026-08-15"
+      },
+      {
+        "amount": 297.59,
+        "type": "expense",
+        "description": "Xact",
+        "recurringId": "mk7oeogtcxl5o8w0lel",
+        "originalDate": "2026-08-15"
+      }
+    ],
+    "2026-08-31": [
+      {
+        "amount": 3116.29,
+        "type": "income",
+        "description": "FSW Pay",
+        "recurringId": "mk73ab1dqfozf7zmsss"
+      },
+      {
+        "amount": 289.6,
+        "type": "expense",
+        "description": "CBW Credit Fresh",
+        "recurringId": "mk7cadzbv6pf5r2kp3"
+      },
+      {
+        "amount": 268.43,
+        "type": "expense",
+        "description": "MoneyKey",
+        "recurringId": "mk7dejrysk5sdryz84"
+      },
+      {
+        "amount": 42.86,
+        "type": "expense",
+        "description": "NetCredit",
+        "recurringId": "mk7o3mshejuqow4q6x9"
+      },
+      {
+        "amount": 297.59,
+        "type": "expense",
+        "description": "Xact",
+        "recurringId": "mk7oeogtcxl5o8w0lel"
+      }
+    ],
+    "2026-08-10": [
+      {
+        "amount": 112.49,
+        "type": "expense",
+        "description": "Progressive Auto Insurance ",
+        "recurringId": "mk73mip3ydb8zoiy8zg"
+      },
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Dandelion Therapy",
+        "recurringId": "mk74nz38gq4gbv40gkn"
+      }
+    ],
+    "2026-08-01": [
+      {
+        "amount": 1142.16,
+        "type": "expense",
+        "description": "Rent",
+        "recurringId": "mk73nm8u593a0v9i2m8"
+      },
+      {
+        "amount": 48.86,
+        "type": "expense",
+        "description": "Elite Fine Arts Academy",
+        "recurringId": "mk7cbbpkiuwozcpi2tf"
+      }
+    ],
+    "2026-08-24": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Dandelion Therapy",
+        "recurringId": "mk74nz38gq4gbv40gkn"
+      },
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Visible - Dayra",
+        "recurringId": "mk7cfv2y87jkj6wcph9"
+      }
+    ],
+    "2026-08-03": [
+      {
+        "amount": 235.91,
+        "type": "expense",
+        "description": "OneMain Financial",
+        "recurringId": "mk7c3u2akwpbb04jjhb"
+      },
+      {
+        "amount": 75.5,
+        "type": "expense",
+        "description": "Capital One",
+        "recurringId": "mk7c4n7rwi5jkdc7na"
+      },
+      {
+        "amount": 37.67,
+        "type": "expense",
+        "description": "Apple Card - Andrae",
+        "recurringId": "mk7du77s0u2aglb0fxm",
+        "originalDate": "2026-08-01"
+      },
+      {
+        "amount": 50,
+        "type": "expense",
+        "description": "Apple Card - Dayra",
+        "recurringId": "mk7duv55yuuoqqbpv7n",
+        "originalDate": "2026-08-01"
+      }
+    ],
+    "2026-08-12": [
+      {
+        "amount": 20,
+        "type": "expense",
+        "description": "Visible - Sofia",
+        "recurringId": "mk7c5gu0kd6sp7vjtc8"
+      },
+      {
+        "amount": 29,
+        "type": "expense",
+        "description": "Capital One",
+        "recurringId": "mk7c6lgqgdfm70mdxqq"
+      }
+    ],
+    "2026-08-13": [
+      {
+        "amount": 30,
+        "type": "expense",
+        "description": "Visible - Andrae",
+        "recurringId": "mk7c7jqutj71jnn5suj"
+      }
+    ],
+    "2026-08-17": [
+      {
+        "amount": 55.67,
+        "type": "expense",
+        "description": "Target Card",
+        "recurringId": "mk7ccqteg0bn4l6jzke"
+      },
+      {
+        "amount": 26.8,
+        "type": "expense",
+        "description": "Planet Fitness",
+        "recurringId": "mk7cd2ro5gbwyf4rafw"
+      },
+      {
+        "amount": 55.67,
+        "type": "expense",
+        "description": "Target Card",
+        "recurringId": "mk7cwzeujmq13qu11wa"
+      },
+      {
+        "amount": 26.8,
+        "type": "expense",
+        "description": "Planet Fitness",
+        "recurringId": "mk7cy5vbluc4jpzu5wh"
+      }
+    ],
+    "2026-08-19": [
+      {
+        "amount": 50,
+        "type": "expense",
+        "description": "Comcast Xfinity",
+        "recurringId": "mk7cdj06acvl2hzr8fu"
+      }
+    ],
+    "2026-08-23": [
+      {
+        "amount": 30,
+        "type": "expense",
+        "description": "Visible - Raiza",
+        "recurringId": "mk7cfey9ua9a7df53ij"
+      },
+      {
+        "amount": 261.87,
+        "type": "expense",
+        "description": "Best Egg",
+        "recurringId": "mk7ch530t83m41k9p6f"
+      },
+      {
+        "amount": 79.61,
+        "type": "expense",
+        "description": "Best Egg",
+        "recurringId": "mk7chip36krsgu7x81"
+      },
+      {
+        "amount": 2.99,
+        "type": "expense",
+        "description": "Apple Storage - Dayra",
+        "recurringId": "mkakvfk6azcmofxgizg"
+      }
+    ],
+    "2026-08-26": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Avant",
+        "recurringId": "mk7chz3qkjxjvb2c0pk"
+      }
+    ],
+    "2026-08-29": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Mastercard",
+        "recurringId": "mk7ciulif4uusuhgt1n"
+      },
+      {
+        "amount": 29,
+        "type": "expense",
+        "description": "Concora Credit",
+        "recurringId": "mk7cj6n63o6r77imukk"
+      },
+      {
+        "amount": 15.13,
+        "type": "expense",
+        "description": "Amazon Prime",
+        "recurringId": "mk7d3fk9shgto2f3uo9"
+      }
+    ],
+    "2026-08-30": [
+      {
+        "amount": 57.11,
+        "type": "expense",
+        "description": "Extra Space Storage",
+        "recurringId": "mk7cjmf3ax0cx5cr6qt"
+      }
+    ],
+    "2026-08-20": [
+      {
+        "amount": 20.38,
+        "type": "expense",
+        "description": "Netflix",
+        "recurringId": "mk7d2smllk59znincsh"
+      },
+      {
+        "amount": 6.98,
+        "type": "expense",
+        "description": "Apple Music",
+        "recurringId": "mkakqaimp3ped3qoxbd"
+      }
+    ],
+    "2026-08-15": [
+      {
+        "amount": 16.99,
+        "type": "expense",
+        "description": "Peacock TV",
+        "recurringId": "mk7dglaoryxi1p7g9li"
+      }
+    ],
+    "2026-08-02": [
+      {
+        "amount": 37.35,
+        "type": "expense",
+        "description": "Disney Plus",
+        "recurringId": "mk7djk3w2fkitqnuybi"
+      },
+      {
+        "amount": 227,
+        "type": "expense",
+        "description": "Florida Power and Light (FPL)",
+        "recurringId": "mkabylj2ex8mno5rize"
+      },
+      {
+        "amount": 19,
+        "type": "expense",
+        "description": "Google",
+        "recurringId": "mkakh5r369fropegve4"
+      }
+    ],
+    "2026-08-07": [
+      {
+        "amount": 26.04,
+        "type": "expense",
+        "description": "YouTube Premium",
+        "recurringId": "mk7dl6gei19bwq34x6"
+      }
+    ],
+    "2026-08-06": [
+      {
+        "amount": 12.95,
+        "type": "expense",
+        "description": "Walmart Plus",
+        "recurringId": "mk7vfr2xntgbm5sbzae"
+      }
+    ],
+    "2026-09-15": [
+      {
+        "amount": 3116.29,
+        "type": "income",
+        "description": "FSW Pay",
+        "recurringId": "mk73ab1dqfozf7zmsss"
+      },
+      {
+        "amount": 289.6,
+        "type": "expense",
+        "description": "CBW Credit Fresh",
+        "recurringId": "mk7cadzbv6pf5r2kp3"
+      },
+      {
+        "amount": 268.43,
+        "type": "expense",
+        "description": "MoneyKey",
+        "recurringId": "mk7dejrysk5sdryz84"
+      },
+      {
+        "amount": 16.99,
+        "type": "expense",
+        "description": "Peacock TV",
+        "recurringId": "mk7dglaoryxi1p7g9li"
+      },
+      {
+        "amount": 42.86,
+        "type": "expense",
+        "description": "NetCredit",
+        "recurringId": "mk7o3mshejuqow4q6x9"
+      },
+      {
+        "amount": 297.59,
+        "type": "expense",
+        "description": "Xact",
+        "recurringId": "mk7oeogtcxl5o8w0lel"
+      }
+    ],
+    "2026-09-30": [
+      {
+        "amount": 3116.29,
+        "type": "income",
+        "description": "FSW Pay",
+        "recurringId": "mk73ab1dqfozf7zmsss"
+      },
+      {
+        "amount": 289.6,
+        "type": "expense",
+        "description": "CBW Credit Fresh",
+        "recurringId": "mk7cadzbv6pf5r2kp3"
+      },
+      {
+        "amount": 57.11,
+        "type": "expense",
+        "description": "Extra Space Storage",
+        "recurringId": "mk7cjmf3ax0cx5cr6qt"
+      },
+      {
+        "amount": 268.43,
+        "type": "expense",
+        "description": "MoneyKey",
+        "recurringId": "mk7dejrysk5sdryz84"
+      },
+      {
+        "amount": 42.86,
+        "type": "expense",
+        "description": "NetCredit",
+        "recurringId": "mk7o3mshejuqow4q6x9"
+      },
+      {
+        "amount": 297.59,
+        "type": "expense",
+        "description": "Xact",
+        "recurringId": "mk7oeogtcxl5o8w0lel"
+      }
+    ],
+    "2026-09-10": [
+      {
+        "amount": 112.49,
+        "type": "expense",
+        "description": "Progressive Auto Insurance ",
+        "recurringId": "mk73mip3ydb8zoiy8zg"
+      }
+    ],
+    "2026-09-01": [
+      {
+        "amount": 1142.16,
+        "type": "expense",
+        "description": "Rent",
+        "recurringId": "mk73nm8u593a0v9i2m8"
+      },
+      {
+        "amount": 48.86,
+        "type": "expense",
+        "description": "Elite Fine Arts Academy",
+        "recurringId": "mk7cbbpkiuwozcpi2tf"
+      },
+      {
+        "amount": 37.67,
+        "type": "expense",
+        "description": "Apple Card - Andrae",
+        "recurringId": "mk7du77s0u2aglb0fxm"
+      },
+      {
+        "amount": 50,
+        "type": "expense",
+        "description": "Apple Card - Dayra",
+        "recurringId": "mk7duv55yuuoqqbpv7n"
+      }
+    ],
+    "2026-09-07": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Dandelion Therapy",
+        "recurringId": "mk74nz38gq4gbv40gkn"
+      },
+      {
+        "amount": 26.04,
+        "type": "expense",
+        "description": "YouTube Premium",
+        "recurringId": "mk7dl6gei19bwq34x6"
+      }
+    ],
+    "2026-09-21": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Dandelion Therapy",
+        "recurringId": "mk74nz38gq4gbv40gkn"
+      }
+    ],
+    "2026-09-03": [
+      {
+        "amount": 235.91,
+        "type": "expense",
+        "description": "OneMain Financial",
+        "recurringId": "mk7c3u2akwpbb04jjhb"
+      },
+      {
+        "amount": 75.5,
+        "type": "expense",
+        "description": "Capital One",
+        "recurringId": "mk7c4n7rwi5jkdc7na"
+      }
+    ],
+    "2026-09-12": [
+      {
+        "amount": 20,
+        "type": "expense",
+        "description": "Visible - Sofia",
+        "recurringId": "mk7c5gu0kd6sp7vjtc8"
+      },
+      {
+        "amount": 29,
+        "type": "expense",
+        "description": "Capital One",
+        "recurringId": "mk7c6lgqgdfm70mdxqq"
+      }
+    ],
+    "2026-09-13": [
+      {
+        "amount": 30,
+        "type": "expense",
+        "description": "Visible - Andrae",
+        "recurringId": "mk7c7jqutj71jnn5suj"
+      }
+    ],
+    "2026-09-17": [
+      {
+        "amount": 55.67,
+        "type": "expense",
+        "description": "Target Card",
+        "recurringId": "mk7ccqteg0bn4l6jzke"
+      },
+      {
+        "amount": 26.8,
+        "type": "expense",
+        "description": "Planet Fitness",
+        "recurringId": "mk7cd2ro5gbwyf4rafw"
+      },
+      {
+        "amount": 55.67,
+        "type": "expense",
+        "description": "Target Card",
+        "recurringId": "mk7cwzeujmq13qu11wa"
+      },
+      {
+        "amount": 26.8,
+        "type": "expense",
+        "description": "Planet Fitness",
+        "recurringId": "mk7cy5vbluc4jpzu5wh"
+      }
+    ],
+    "2026-09-19": [
+      {
+        "amount": 50,
+        "type": "expense",
+        "description": "Comcast Xfinity",
+        "recurringId": "mk7cdj06acvl2hzr8fu"
+      }
+    ],
+    "2026-09-23": [
+      {
+        "amount": 30,
+        "type": "expense",
+        "description": "Visible - Raiza",
+        "recurringId": "mk7cfey9ua9a7df53ij"
+      },
+      {
+        "amount": 261.87,
+        "type": "expense",
+        "description": "Best Egg",
+        "recurringId": "mk7ch530t83m41k9p6f"
+      },
+      {
+        "amount": 79.61,
+        "type": "expense",
+        "description": "Best Egg",
+        "recurringId": "mk7chip36krsgu7x81"
+      },
+      {
+        "amount": 2.99,
+        "type": "expense",
+        "description": "Apple Storage - Dayra",
+        "recurringId": "mkakvfk6azcmofxgizg"
+      }
+    ],
+    "2026-09-24": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Visible - Dayra",
+        "recurringId": "mk7cfv2y87jkj6wcph9"
+      }
+    ],
+    "2026-09-26": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Avant",
+        "recurringId": "mk7chz3qkjxjvb2c0pk"
+      }
+    ],
+    "2026-09-29": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Mastercard",
+        "recurringId": "mk7ciulif4uusuhgt1n"
+      },
+      {
+        "amount": 29,
+        "type": "expense",
+        "description": "Concora Credit",
+        "recurringId": "mk7cj6n63o6r77imukk"
+      },
+      {
+        "amount": 15.13,
+        "type": "expense",
+        "description": "Amazon Prime",
+        "recurringId": "mk7d3fk9shgto2f3uo9"
+      }
+    ],
+    "2026-09-20": [
+      {
+        "amount": 20.38,
+        "type": "expense",
+        "description": "Netflix",
+        "recurringId": "mk7d2smllk59znincsh"
+      },
+      {
+        "amount": 6.98,
+        "type": "expense",
+        "description": "Apple Music",
+        "recurringId": "mkakqaimp3ped3qoxbd"
+      }
+    ],
+    "2026-09-02": [
+      {
+        "amount": 37.35,
+        "type": "expense",
+        "description": "Disney Plus",
+        "recurringId": "mk7djk3w2fkitqnuybi"
+      },
+      {
+        "amount": 227,
+        "type": "expense",
+        "description": "Florida Power and Light (FPL)",
+        "recurringId": "mkabylj2ex8mno5rize"
+      },
+      {
+        "amount": 19,
+        "type": "expense",
+        "description": "Google",
+        "recurringId": "mkakh5r369fropegve4"
+      }
+    ],
+    "2026-09-06": [
+      {
+        "amount": 12.95,
+        "type": "expense",
+        "description": "Walmart Plus",
+        "recurringId": "mk7vfr2xntgbm5sbzae"
+      }
+    ],
+    "2026-10-15": [
+      {
+        "amount": 3116.29,
+        "type": "income",
+        "description": "FSW Pay",
+        "recurringId": "mk73ab1dqfozf7zmsss"
+      },
+      {
+        "amount": 289.6,
+        "type": "expense",
+        "description": "CBW Credit Fresh",
+        "recurringId": "mk7cadzbv6pf5r2kp3"
+      },
+      {
+        "amount": 268.43,
+        "type": "expense",
+        "description": "MoneyKey",
+        "recurringId": "mk7dejrysk5sdryz84"
+      },
+      {
+        "amount": 16.99,
+        "type": "expense",
+        "description": "Peacock TV",
+        "recurringId": "mk7dglaoryxi1p7g9li"
+      },
+      {
+        "amount": 42.86,
+        "type": "expense",
+        "description": "NetCredit",
+        "recurringId": "mk7o3mshejuqow4q6x9"
+      },
+      {
+        "amount": 297.59,
+        "type": "expense",
+        "description": "Xact",
+        "recurringId": "mk7oeogtcxl5o8w0lel"
+      }
+    ],
+    "2026-10-30": [
+      {
+        "amount": 3116.29,
+        "type": "income",
+        "description": "FSW Pay",
+        "recurringId": "mk73ab1dqfozf7zmsss",
+        "originalDate": "2026-10-31"
+      },
+      {
+        "amount": 289.6,
+        "type": "expense",
+        "description": "CBW Credit Fresh",
+        "recurringId": "mk7cadzbv6pf5r2kp3",
+        "originalDate": "2026-10-31"
+      },
+      {
+        "amount": 57.11,
+        "type": "expense",
+        "description": "Extra Space Storage",
+        "recurringId": "mk7cjmf3ax0cx5cr6qt"
+      },
+      {
+        "amount": 268.43,
+        "type": "expense",
+        "description": "MoneyKey",
+        "recurringId": "mk7dejrysk5sdryz84",
+        "originalDate": "2026-10-31"
+      },
+      {
+        "amount": 42.86,
+        "type": "expense",
+        "description": "NetCredit",
+        "recurringId": "mk7o3mshejuqow4q6x9",
+        "originalDate": "2026-10-31"
+      },
+      {
+        "amount": 297.59,
+        "type": "expense",
+        "description": "Xact",
+        "recurringId": "mk7oeogtcxl5o8w0lel",
+        "originalDate": "2026-10-31"
+      }
+    ],
+    "2026-10-10": [
+      {
+        "amount": 112.49,
+        "type": "expense",
+        "description": "Progressive Auto Insurance ",
+        "recurringId": "mk73mip3ydb8zoiy8zg"
+      }
+    ],
+    "2026-10-01": [
+      {
+        "amount": 1142.16,
+        "type": "expense",
+        "description": "Rent",
+        "recurringId": "mk73nm8u593a0v9i2m8"
+      },
+      {
+        "amount": 48.86,
+        "type": "expense",
+        "description": "Elite Fine Arts Academy",
+        "recurringId": "mk7cbbpkiuwozcpi2tf"
+      },
+      {
+        "amount": 37.67,
+        "type": "expense",
+        "description": "Apple Card - Andrae",
+        "recurringId": "mk7du77s0u2aglb0fxm"
+      },
+      {
+        "amount": 50,
+        "type": "expense",
+        "description": "Apple Card - Dayra",
+        "recurringId": "mk7duv55yuuoqqbpv7n"
+      }
+    ],
+    "2026-10-05": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Dandelion Therapy",
+        "recurringId": "mk74nz38gq4gbv40gkn"
+      }
+    ],
+    "2026-10-19": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Dandelion Therapy",
+        "recurringId": "mk74nz38gq4gbv40gkn"
+      },
+      {
+        "amount": 50,
+        "type": "expense",
+        "description": "Comcast Xfinity",
+        "recurringId": "mk7cdj06acvl2hzr8fu"
+      }
+    ],
+    "2026-10-03": [
+      {
+        "amount": 235.91,
+        "type": "expense",
+        "description": "OneMain Financial",
+        "recurringId": "mk7c3u2akwpbb04jjhb"
+      },
+      {
+        "amount": 75.5,
+        "type": "expense",
+        "description": "Capital One",
+        "recurringId": "mk7c4n7rwi5jkdc7na"
+      }
+    ],
+    "2026-10-12": [
+      {
+        "amount": 20,
+        "type": "expense",
+        "description": "Visible - Sofia",
+        "recurringId": "mk7c5gu0kd6sp7vjtc8"
+      },
+      {
+        "amount": 29,
+        "type": "expense",
+        "description": "Capital One",
+        "recurringId": "mk7c6lgqgdfm70mdxqq"
+      }
+    ],
+    "2026-10-13": [
+      {
+        "amount": 30,
+        "type": "expense",
+        "description": "Visible - Andrae",
+        "recurringId": "mk7c7jqutj71jnn5suj"
+      }
+    ],
+    "2026-10-17": [
+      {
+        "amount": 55.67,
+        "type": "expense",
+        "description": "Target Card",
+        "recurringId": "mk7ccqteg0bn4l6jzke"
+      },
+      {
+        "amount": 26.8,
+        "type": "expense",
+        "description": "Planet Fitness",
+        "recurringId": "mk7cd2ro5gbwyf4rafw"
+      },
+      {
+        "amount": 55.67,
+        "type": "expense",
+        "description": "Target Card",
+        "recurringId": "mk7cwzeujmq13qu11wa"
+      },
+      {
+        "amount": 26.8,
+        "type": "expense",
+        "description": "Planet Fitness",
+        "recurringId": "mk7cy5vbluc4jpzu5wh"
+      }
+    ],
+    "2026-10-23": [
+      {
+        "amount": 30,
+        "type": "expense",
+        "description": "Visible - Raiza",
+        "recurringId": "mk7cfey9ua9a7df53ij"
+      },
+      {
+        "amount": 261.87,
+        "type": "expense",
+        "description": "Best Egg",
+        "recurringId": "mk7ch530t83m41k9p6f"
+      },
+      {
+        "amount": 79.61,
+        "type": "expense",
+        "description": "Best Egg",
+        "recurringId": "mk7chip36krsgu7x81"
+      },
+      {
+        "amount": 2.99,
+        "type": "expense",
+        "description": "Apple Storage - Dayra",
+        "recurringId": "mkakvfk6azcmofxgizg"
+      }
+    ],
+    "2026-10-24": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Visible - Dayra",
+        "recurringId": "mk7cfv2y87jkj6wcph9"
+      }
+    ],
+    "2026-10-26": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Avant",
+        "recurringId": "mk7chz3qkjxjvb2c0pk"
+      }
+    ],
+    "2026-10-29": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Mastercard",
+        "recurringId": "mk7ciulif4uusuhgt1n"
+      },
+      {
+        "amount": 29,
+        "type": "expense",
+        "description": "Concora Credit",
+        "recurringId": "mk7cj6n63o6r77imukk"
+      },
+      {
+        "amount": 15.13,
+        "type": "expense",
+        "description": "Amazon Prime",
+        "recurringId": "mk7d3fk9shgto2f3uo9"
+      }
+    ],
+    "2026-10-20": [
+      {
+        "amount": 20.38,
+        "type": "expense",
+        "description": "Netflix",
+        "recurringId": "mk7d2smllk59znincsh"
+      },
+      {
+        "amount": 6.98,
+        "type": "expense",
+        "description": "Apple Music",
+        "recurringId": "mkakqaimp3ped3qoxbd"
+      }
+    ],
+    "2026-10-02": [
+      {
+        "amount": 37.35,
+        "type": "expense",
+        "description": "Disney Plus",
+        "recurringId": "mk7djk3w2fkitqnuybi"
+      },
+      {
+        "amount": 227,
+        "type": "expense",
+        "description": "Florida Power and Light (FPL)",
+        "recurringId": "mkabylj2ex8mno5rize"
+      },
+      {
+        "amount": 19,
+        "type": "expense",
+        "description": "Google",
+        "recurringId": "mkakh5r369fropegve4"
+      }
+    ],
+    "2026-10-07": [
+      {
+        "amount": 26.04,
+        "type": "expense",
+        "description": "YouTube Premium",
+        "recurringId": "mk7dl6gei19bwq34x6"
+      }
+    ],
+    "2026-10-06": [
+      {
+        "amount": 12.95,
+        "type": "expense",
+        "description": "Walmart Plus",
+        "recurringId": "mk7vfr2xntgbm5sbzae"
+      }
+    ],
+    "2026-11-13": [
+      {
+        "amount": 3116.29,
+        "type": "income",
+        "description": "FSW Pay",
+        "recurringId": "mk73ab1dqfozf7zmsss",
+        "originalDate": "2026-11-15"
+      },
+      {
+        "amount": 30,
+        "type": "expense",
+        "description": "Visible - Andrae",
+        "recurringId": "mk7c7jqutj71jnn5suj"
+      },
+      {
+        "amount": 289.6,
+        "type": "expense",
+        "description": "CBW Credit Fresh",
+        "recurringId": "mk7cadzbv6pf5r2kp3",
+        "originalDate": "2026-11-15"
+      },
+      {
+        "amount": 268.43,
+        "type": "expense",
+        "description": "MoneyKey",
+        "recurringId": "mk7dejrysk5sdryz84",
+        "originalDate": "2026-11-15"
+      },
+      {
+        "amount": 42.86,
+        "type": "expense",
+        "description": "NetCredit",
+        "recurringId": "mk7o3mshejuqow4q6x9",
+        "originalDate": "2026-11-15"
+      },
+      {
+        "amount": 297.59,
+        "type": "expense",
+        "description": "Xact",
+        "recurringId": "mk7oeogtcxl5o8w0lel",
+        "originalDate": "2026-11-15"
+      }
+    ],
+    "2026-11-30": [
+      {
+        "amount": 3116.29,
+        "type": "income",
+        "description": "FSW Pay",
+        "recurringId": "mk73ab1dqfozf7zmsss"
+      },
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Dandelion Therapy",
+        "recurringId": "mk74nz38gq4gbv40gkn"
+      },
+      {
+        "amount": 289.6,
+        "type": "expense",
+        "description": "CBW Credit Fresh",
+        "recurringId": "mk7cadzbv6pf5r2kp3"
+      },
+      {
+        "amount": 57.11,
+        "type": "expense",
+        "description": "Extra Space Storage",
+        "recurringId": "mk7cjmf3ax0cx5cr6qt"
+      },
+      {
+        "amount": 268.43,
+        "type": "expense",
+        "description": "MoneyKey",
+        "recurringId": "mk7dejrysk5sdryz84"
+      },
+      {
+        "amount": 42.86,
+        "type": "expense",
+        "description": "NetCredit",
+        "recurringId": "mk7o3mshejuqow4q6x9"
+      },
+      {
+        "amount": 297.59,
+        "type": "expense",
+        "description": "Xact",
+        "recurringId": "mk7oeogtcxl5o8w0lel"
+      }
+    ],
+    "2026-11-10": [
+      {
+        "amount": 112.49,
+        "type": "expense",
+        "description": "Progressive Auto Insurance ",
+        "recurringId": "mk73mip3ydb8zoiy8zg"
+      }
+    ],
+    "2026-11-01": [
+      {
+        "amount": 1142.16,
+        "type": "expense",
+        "description": "Rent",
+        "recurringId": "mk73nm8u593a0v9i2m8"
+      },
+      {
+        "amount": 48.86,
+        "type": "expense",
+        "description": "Elite Fine Arts Academy",
+        "recurringId": "mk7cbbpkiuwozcpi2tf"
+      }
+    ],
+    "2026-11-02": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Dandelion Therapy",
+        "recurringId": "mk74nz38gq4gbv40gkn"
+      },
+      {
+        "amount": 37.35,
+        "type": "expense",
+        "description": "Disney Plus",
+        "recurringId": "mk7djk3w2fkitqnuybi"
+      },
+      {
+        "amount": 37.67,
+        "type": "expense",
+        "description": "Apple Card - Andrae",
+        "recurringId": "mk7du77s0u2aglb0fxm",
+        "originalDate": "2026-11-01"
+      },
+      {
+        "amount": 50,
+        "type": "expense",
+        "description": "Apple Card - Dayra",
+        "recurringId": "mk7duv55yuuoqqbpv7n",
+        "originalDate": "2026-11-01"
+      },
+      {
+        "amount": 227,
+        "type": "expense",
+        "description": "Florida Power and Light (FPL)",
+        "recurringId": "mkabylj2ex8mno5rize"
+      },
+      {
+        "amount": 19,
+        "type": "expense",
+        "description": "Google",
+        "recurringId": "mkakh5r369fropegve4"
+      }
+    ],
+    "2026-11-16": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Dandelion Therapy",
+        "recurringId": "mk74nz38gq4gbv40gkn"
+      }
+    ],
+    "2026-11-03": [
+      {
+        "amount": 235.91,
+        "type": "expense",
+        "description": "OneMain Financial",
+        "recurringId": "mk7c3u2akwpbb04jjhb"
+      },
+      {
+        "amount": 75.5,
+        "type": "expense",
+        "description": "Capital One",
+        "recurringId": "mk7c4n7rwi5jkdc7na"
+      }
+    ],
+    "2026-11-12": [
+      {
+        "amount": 20,
+        "type": "expense",
+        "description": "Visible - Sofia",
+        "recurringId": "mk7c5gu0kd6sp7vjtc8"
+      },
+      {
+        "amount": 29,
+        "type": "expense",
+        "description": "Capital One",
+        "recurringId": "mk7c6lgqgdfm70mdxqq"
+      }
+    ],
+    "2026-11-17": [
+      {
+        "amount": 55.67,
+        "type": "expense",
+        "description": "Target Card",
+        "recurringId": "mk7ccqteg0bn4l6jzke"
+      },
+      {
+        "amount": 26.8,
+        "type": "expense",
+        "description": "Planet Fitness",
+        "recurringId": "mk7cd2ro5gbwyf4rafw"
+      },
+      {
+        "amount": 55.67,
+        "type": "expense",
+        "description": "Target Card",
+        "recurringId": "mk7cwzeujmq13qu11wa"
+      },
+      {
+        "amount": 26.8,
+        "type": "expense",
+        "description": "Planet Fitness",
+        "recurringId": "mk7cy5vbluc4jpzu5wh"
+      }
+    ],
+    "2026-11-19": [
+      {
+        "amount": 50,
+        "type": "expense",
+        "description": "Comcast Xfinity",
+        "recurringId": "mk7cdj06acvl2hzr8fu"
+      }
+    ],
+    "2026-11-23": [
+      {
+        "amount": 30,
+        "type": "expense",
+        "description": "Visible - Raiza",
+        "recurringId": "mk7cfey9ua9a7df53ij"
+      },
+      {
+        "amount": 261.87,
+        "type": "expense",
+        "description": "Best Egg",
+        "recurringId": "mk7ch530t83m41k9p6f"
+      },
+      {
+        "amount": 79.61,
+        "type": "expense",
+        "description": "Best Egg",
+        "recurringId": "mk7chip36krsgu7x81"
+      },
+      {
+        "amount": 2.99,
+        "type": "expense",
+        "description": "Apple Storage - Dayra",
+        "recurringId": "mkakvfk6azcmofxgizg"
+      }
+    ],
+    "2026-11-24": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Visible - Dayra",
+        "recurringId": "mk7cfv2y87jkj6wcph9"
+      }
+    ],
+    "2026-11-26": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Avant",
+        "recurringId": "mk7chz3qkjxjvb2c0pk"
+      }
+    ],
+    "2026-11-29": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Mastercard",
+        "recurringId": "mk7ciulif4uusuhgt1n"
+      },
+      {
+        "amount": 29,
+        "type": "expense",
+        "description": "Concora Credit",
+        "recurringId": "mk7cj6n63o6r77imukk"
+      },
+      {
+        "amount": 15.13,
+        "type": "expense",
+        "description": "Amazon Prime",
+        "recurringId": "mk7d3fk9shgto2f3uo9"
+      }
+    ],
+    "2026-11-20": [
+      {
+        "amount": 20.38,
+        "type": "expense",
+        "description": "Netflix",
+        "recurringId": "mk7d2smllk59znincsh"
+      },
+      {
+        "amount": 6.98,
+        "type": "expense",
+        "description": "Apple Music",
+        "recurringId": "mkakqaimp3ped3qoxbd"
+      }
+    ],
+    "2026-11-15": [
+      {
+        "amount": 16.99,
+        "type": "expense",
+        "description": "Peacock TV",
+        "recurringId": "mk7dglaoryxi1p7g9li"
+      }
+    ],
+    "2026-11-07": [
+      {
+        "amount": 26.04,
+        "type": "expense",
+        "description": "YouTube Premium",
+        "recurringId": "mk7dl6gei19bwq34x6"
+      }
+    ],
+    "2026-11-06": [
+      {
+        "amount": 12.95,
+        "type": "expense",
+        "description": "Walmart Plus",
+        "recurringId": "mk7vfr2xntgbm5sbzae"
+      }
+    ],
+    "2026-12-15": [
+      {
+        "amount": 3116.29,
+        "type": "income",
+        "description": "FSW Pay",
+        "recurringId": "mk73ab1dqfozf7zmsss"
+      },
+      {
+        "amount": 289.6,
+        "type": "expense",
+        "description": "CBW Credit Fresh",
+        "recurringId": "mk7cadzbv6pf5r2kp3"
+      },
+      {
+        "amount": 268.43,
+        "type": "expense",
+        "description": "MoneyKey",
+        "recurringId": "mk7dejrysk5sdryz84"
+      },
+      {
+        "amount": 16.99,
+        "type": "expense",
+        "description": "Peacock TV",
+        "recurringId": "mk7dglaoryxi1p7g9li"
+      },
+      {
+        "amount": 42.86,
+        "type": "expense",
+        "description": "NetCredit",
+        "recurringId": "mk7o3mshejuqow4q6x9"
+      },
+      {
+        "amount": 297.59,
+        "type": "expense",
+        "description": "Xact",
+        "recurringId": "mk7oeogtcxl5o8w0lel"
+      }
+    ],
+    "2026-12-31": [
+      {
+        "amount": 3116.29,
+        "type": "income",
+        "description": "FSW Pay",
+        "recurringId": "mk73ab1dqfozf7zmsss"
+      },
+      {
+        "amount": 289.6,
+        "type": "expense",
+        "description": "CBW Credit Fresh",
+        "recurringId": "mk7cadzbv6pf5r2kp3"
+      },
+      {
+        "amount": 268.43,
+        "type": "expense",
+        "description": "MoneyKey",
+        "recurringId": "mk7dejrysk5sdryz84"
+      },
+      {
+        "amount": 42.86,
+        "type": "expense",
+        "description": "NetCredit",
+        "recurringId": "mk7o3mshejuqow4q6x9"
+      },
+      {
+        "amount": 297.59,
+        "type": "expense",
+        "description": "Xact",
+        "recurringId": "mk7oeogtcxl5o8w0lel"
+      }
+    ],
+    "2026-12-10": [
+      {
+        "amount": 112.49,
+        "type": "expense",
+        "description": "Progressive Auto Insurance ",
+        "recurringId": "mk73mip3ydb8zoiy8zg"
+      }
+    ],
+    "2026-12-01": [
+      {
+        "amount": 1142.16,
+        "type": "expense",
+        "description": "Rent",
+        "recurringId": "mk73nm8u593a0v9i2m8"
+      },
+      {
+        "amount": 48.86,
+        "type": "expense",
+        "description": "Elite Fine Arts Academy",
+        "recurringId": "mk7cbbpkiuwozcpi2tf"
+      },
+      {
+        "amount": 37.67,
+        "type": "expense",
+        "description": "Apple Card - Andrae",
+        "recurringId": "mk7du77s0u2aglb0fxm"
+      },
+      {
+        "amount": 50,
+        "type": "expense",
+        "description": "Apple Card - Dayra",
+        "recurringId": "mk7duv55yuuoqqbpv7n"
+      }
+    ],
+    "2026-12-14": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Dandelion Therapy",
+        "recurringId": "mk74nz38gq4gbv40gkn"
+      }
+    ],
+    "2026-12-28": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Dandelion Therapy",
+        "recurringId": "mk74nz38gq4gbv40gkn"
+      }
+    ],
+    "2026-12-03": [
+      {
+        "amount": 235.91,
+        "type": "expense",
+        "description": "OneMain Financial",
+        "recurringId": "mk7c3u2akwpbb04jjhb"
+      },
+      {
+        "amount": 75.5,
+        "type": "expense",
+        "description": "Capital One",
+        "recurringId": "mk7c4n7rwi5jkdc7na"
+      }
+    ],
+    "2026-12-12": [
+      {
+        "amount": 20,
+        "type": "expense",
+        "description": "Visible - Sofia",
+        "recurringId": "mk7c5gu0kd6sp7vjtc8"
+      },
+      {
+        "amount": 29,
+        "type": "expense",
+        "description": "Capital One",
+        "recurringId": "mk7c6lgqgdfm70mdxqq"
+      }
+    ],
+    "2026-12-13": [
+      {
+        "amount": 30,
+        "type": "expense",
+        "description": "Visible - Andrae",
+        "recurringId": "mk7c7jqutj71jnn5suj"
+      }
+    ],
+    "2026-12-17": [
+      {
+        "amount": 55.67,
+        "type": "expense",
+        "description": "Target Card",
+        "recurringId": "mk7ccqteg0bn4l6jzke"
+      },
+      {
+        "amount": 26.8,
+        "type": "expense",
+        "description": "Planet Fitness",
+        "recurringId": "mk7cd2ro5gbwyf4rafw"
+      },
+      {
+        "amount": 55.67,
+        "type": "expense",
+        "description": "Target Card",
+        "recurringId": "mk7cwzeujmq13qu11wa"
+      },
+      {
+        "amount": 26.8,
+        "type": "expense",
+        "description": "Planet Fitness",
+        "recurringId": "mk7cy5vbluc4jpzu5wh"
+      }
+    ],
+    "2026-12-19": [
+      {
+        "amount": 50,
+        "type": "expense",
+        "description": "Comcast Xfinity",
+        "recurringId": "mk7cdj06acvl2hzr8fu"
+      }
+    ],
+    "2026-12-23": [
+      {
+        "amount": 30,
+        "type": "expense",
+        "description": "Visible - Raiza",
+        "recurringId": "mk7cfey9ua9a7df53ij"
+      },
+      {
+        "amount": 261.87,
+        "type": "expense",
+        "description": "Best Egg",
+        "recurringId": "mk7ch530t83m41k9p6f"
+      },
+      {
+        "amount": 79.61,
+        "type": "expense",
+        "description": "Best Egg",
+        "recurringId": "mk7chip36krsgu7x81"
+      },
+      {
+        "amount": 2.99,
+        "type": "expense",
+        "description": "Apple Storage - Dayra",
+        "recurringId": "mkakvfk6azcmofxgizg"
+      }
+    ],
+    "2026-12-24": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Visible - Dayra",
+        "recurringId": "mk7cfv2y87jkj6wcph9"
+      }
+    ],
+    "2026-12-26": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Avant",
+        "recurringId": "mk7chz3qkjxjvb2c0pk"
+      }
+    ],
+    "2026-12-29": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Mastercard",
+        "recurringId": "mk7ciulif4uusuhgt1n"
+      },
+      {
+        "amount": 29,
+        "type": "expense",
+        "description": "Concora Credit",
+        "recurringId": "mk7cj6n63o6r77imukk"
+      },
+      {
+        "amount": 15.13,
+        "type": "expense",
+        "description": "Amazon Prime",
+        "recurringId": "mk7d3fk9shgto2f3uo9"
+      }
+    ],
+    "2026-12-30": [
+      {
+        "amount": 57.11,
+        "type": "expense",
+        "description": "Extra Space Storage",
+        "recurringId": "mk7cjmf3ax0cx5cr6qt"
+      }
+    ],
+    "2026-12-20": [
+      {
+        "amount": 20.38,
+        "type": "expense",
+        "description": "Netflix",
+        "recurringId": "mk7d2smllk59znincsh"
+      },
+      {
+        "amount": 6.98,
+        "type": "expense",
+        "description": "Apple Music",
+        "recurringId": "mkakqaimp3ped3qoxbd"
+      }
+    ],
+    "2026-12-02": [
+      {
+        "amount": 37.35,
+        "type": "expense",
+        "description": "Disney Plus",
+        "recurringId": "mk7djk3w2fkitqnuybi"
+      },
+      {
+        "amount": 227,
+        "type": "expense",
+        "description": "Florida Power and Light (FPL)",
+        "recurringId": "mkabylj2ex8mno5rize"
+      },
+      {
+        "amount": 19,
+        "type": "expense",
+        "description": "Google",
+        "recurringId": "mkakh5r369fropegve4"
+      }
+    ],
+    "2026-12-07": [
+      {
+        "amount": 26.04,
+        "type": "expense",
+        "description": "YouTube Premium",
+        "recurringId": "mk7dl6gei19bwq34x6"
+      }
+    ],
+    "2026-12-06": [
+      {
+        "amount": 12.95,
+        "type": "expense",
+        "description": "Walmart Plus",
+        "recurringId": "mk7vfr2xntgbm5sbzae"
+      }
+    ],
+    "2027-01-15": [
+      {
+        "amount": 3116.29,
+        "type": "income",
+        "description": "FSW Pay",
+        "recurringId": "mk73ab1dqfozf7zmsss"
+      },
+      {
+        "amount": 289.6,
+        "type": "expense",
+        "description": "CBW Credit Fresh",
+        "recurringId": "mk7cadzbv6pf5r2kp3"
+      },
+      {
+        "amount": 268.43,
+        "type": "expense",
+        "description": "MoneyKey",
+        "recurringId": "mk7dejrysk5sdryz84"
+      },
+      {
+        "amount": 16.99,
+        "type": "expense",
+        "description": "Peacock TV",
+        "recurringId": "mk7dglaoryxi1p7g9li"
+      },
+      {
+        "amount": 42.86,
+        "type": "expense",
+        "description": "NetCredit",
+        "recurringId": "mk7o3mshejuqow4q6x9"
+      },
+      {
+        "amount": 297.59,
+        "type": "expense",
+        "description": "Xact",
+        "recurringId": "mk7oeogtcxl5o8w0lel"
+      }
+    ],
+    "2027-01-29": [
+      {
+        "amount": 3116.29,
+        "type": "income",
+        "description": "FSW Pay",
+        "recurringId": "mk73ab1dqfozf7zmsss",
+        "originalDate": "2027-01-31"
+      },
+      {
+        "amount": 289.6,
+        "type": "expense",
+        "description": "CBW Credit Fresh",
+        "recurringId": "mk7cadzbv6pf5r2kp3",
+        "originalDate": "2027-01-31"
+      },
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Mastercard",
+        "recurringId": "mk7ciulif4uusuhgt1n"
+      },
+      {
+        "amount": 29,
+        "type": "expense",
+        "description": "Concora Credit",
+        "recurringId": "mk7cj6n63o6r77imukk"
+      },
+      {
+        "amount": 15.13,
+        "type": "expense",
+        "description": "Amazon Prime",
+        "recurringId": "mk7d3fk9shgto2f3uo9"
+      },
+      {
+        "amount": 268.43,
+        "type": "expense",
+        "description": "MoneyKey",
+        "recurringId": "mk7dejrysk5sdryz84",
+        "originalDate": "2027-01-31"
+      },
+      {
+        "amount": 42.86,
+        "type": "expense",
+        "description": "NetCredit",
+        "recurringId": "mk7o3mshejuqow4q6x9",
+        "originalDate": "2027-01-31"
+      },
+      {
+        "amount": 297.59,
+        "type": "expense",
+        "description": "Xact",
+        "recurringId": "mk7oeogtcxl5o8w0lel",
+        "originalDate": "2027-01-31"
+      }
+    ],
+    "2027-01-10": [
+      {
+        "amount": 112.49,
+        "type": "expense",
+        "description": "Progressive Auto Insurance ",
+        "recurringId": "mk73mip3ydb8zoiy8zg"
+      }
+    ],
+    "2027-01-01": [
+      {
+        "amount": 1142.16,
+        "type": "expense",
+        "description": "Rent",
+        "recurringId": "mk73nm8u593a0v9i2m8"
+      },
+      {
+        "amount": 48.86,
+        "type": "expense",
+        "description": "Elite Fine Arts Academy",
+        "recurringId": "mk7cbbpkiuwozcpi2tf"
+      },
+      {
+        "amount": 37.67,
+        "type": "expense",
+        "description": "Apple Card - Andrae",
+        "recurringId": "mk7du77s0u2aglb0fxm"
+      },
+      {
+        "amount": 50,
+        "type": "expense",
+        "description": "Apple Card - Dayra",
+        "recurringId": "mk7duv55yuuoqqbpv7n"
+      }
+    ],
+    "2027-01-11": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Dandelion Therapy",
+        "recurringId": "mk74nz38gq4gbv40gkn"
+      }
+    ],
+    "2027-01-25": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Dandelion Therapy",
+        "recurringId": "mk74nz38gq4gbv40gkn"
+      }
+    ],
+    "2027-01-03": [
+      {
+        "amount": 235.91,
+        "type": "expense",
+        "description": "OneMain Financial",
+        "recurringId": "mk7c3u2akwpbb04jjhb"
+      },
+      {
+        "amount": 75.5,
+        "type": "expense",
+        "description": "Capital One",
+        "recurringId": "mk7c4n7rwi5jkdc7na"
+      }
+    ],
+    "2027-01-12": [
+      {
+        "amount": 20,
+        "type": "expense",
+        "description": "Visible - Sofia",
+        "recurringId": "mk7c5gu0kd6sp7vjtc8"
+      },
+      {
+        "amount": 29,
+        "type": "expense",
+        "description": "Capital One",
+        "recurringId": "mk7c6lgqgdfm70mdxqq"
+      }
+    ],
+    "2027-01-13": [
+      {
+        "amount": 30,
+        "type": "expense",
+        "description": "Visible - Andrae",
+        "recurringId": "mk7c7jqutj71jnn5suj"
+      }
+    ],
+    "2027-01-17": [
+      {
+        "amount": 55.67,
+        "type": "expense",
+        "description": "Target Card",
+        "recurringId": "mk7ccqteg0bn4l6jzke"
+      },
+      {
+        "amount": 26.8,
+        "type": "expense",
+        "description": "Planet Fitness",
+        "recurringId": "mk7cd2ro5gbwyf4rafw"
+      },
+      {
+        "amount": 55.67,
+        "type": "expense",
+        "description": "Target Card",
+        "recurringId": "mk7cwzeujmq13qu11wa"
+      },
+      {
+        "amount": 26.8,
+        "type": "expense",
+        "description": "Planet Fitness",
+        "recurringId": "mk7cy5vbluc4jpzu5wh"
+      }
+    ],
+    "2027-01-19": [
+      {
+        "amount": 50,
+        "type": "expense",
+        "description": "Comcast Xfinity",
+        "recurringId": "mk7cdj06acvl2hzr8fu"
+      }
+    ],
+    "2027-01-23": [
+      {
+        "amount": 30,
+        "type": "expense",
+        "description": "Visible - Raiza",
+        "recurringId": "mk7cfey9ua9a7df53ij"
+      },
+      {
+        "amount": 261.87,
+        "type": "expense",
+        "description": "Best Egg",
+        "recurringId": "mk7ch530t83m41k9p6f"
+      },
+      {
+        "amount": 79.61,
+        "type": "expense",
+        "description": "Best Egg",
+        "recurringId": "mk7chip36krsgu7x81"
+      },
+      {
+        "amount": 2.99,
+        "type": "expense",
+        "description": "Apple Storage - Dayra",
+        "recurringId": "mkakvfk6azcmofxgizg"
+      }
+    ],
+    "2027-01-24": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Visible - Dayra",
+        "recurringId": "mk7cfv2y87jkj6wcph9"
+      }
+    ],
+    "2027-01-26": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Avant",
+        "recurringId": "mk7chz3qkjxjvb2c0pk"
+      }
+    ],
+    "2027-01-30": [
+      {
+        "amount": 57.11,
+        "type": "expense",
+        "description": "Extra Space Storage",
+        "recurringId": "mk7cjmf3ax0cx5cr6qt"
+      }
+    ],
+    "2027-01-20": [
+      {
+        "amount": 20.38,
+        "type": "expense",
+        "description": "Netflix",
+        "recurringId": "mk7d2smllk59znincsh"
+      },
+      {
+        "amount": 6.98,
+        "type": "expense",
+        "description": "Apple Music",
+        "recurringId": "mkakqaimp3ped3qoxbd"
+      }
+    ],
+    "2027-01-02": [
+      {
+        "amount": 37.35,
+        "type": "expense",
+        "description": "Disney Plus",
+        "recurringId": "mk7djk3w2fkitqnuybi"
+      },
+      {
+        "amount": 227,
+        "type": "expense",
+        "description": "Florida Power and Light (FPL)",
+        "recurringId": "mkabylj2ex8mno5rize"
+      },
+      {
+        "amount": 19,
+        "type": "expense",
+        "description": "Google",
+        "recurringId": "mkakh5r369fropegve4"
+      }
+    ],
+    "2027-01-07": [
+      {
+        "amount": 26.04,
+        "type": "expense",
+        "description": "YouTube Premium",
+        "recurringId": "mk7dl6gei19bwq34x6"
+      }
+    ],
+    "2027-01-06": [
+      {
+        "amount": 12.95,
+        "type": "expense",
+        "description": "Walmart Plus",
+        "recurringId": "mk7vfr2xntgbm5sbzae"
+      }
+    ],
+    "2026-01-30": [
+      {
+        "amount": 3116.29,
+        "type": "income",
+        "description": "FSW Pay",
+        "recurringId": "mk73ab1dqfozf7zmsss",
+        "originalDate": "2026-01-31"
+      },
+      {
+        "amount": 289.6,
+        "type": "expense",
+        "description": "CBW Credit Fresh",
+        "recurringId": "mk7cadzbv6pf5r2kp3",
+        "originalDate": "2026-01-31"
+      },
+      {
+        "amount": 57.11,
+        "type": "expense",
+        "description": "Extra Space Storage",
+        "recurringId": "mk7cjmf3ax0cx5cr6qt"
+      },
+      {
+        "amount": 268.43,
+        "type": "expense",
+        "description": "MoneyKey",
+        "recurringId": "mk7dejrysk5sdryz84",
+        "originalDate": "2026-01-31"
+      },
+      {
+        "amount": 42.86,
+        "type": "expense",
+        "description": "NetCredit",
+        "recurringId": "mk7o3mshejuqow4q6x9",
+        "originalDate": "2026-01-31"
+      },
+      {
+        "amount": 297.59,
+        "type": "expense",
+        "description": "Xact",
+        "recurringId": "mk7oeogtcxl5o8w0lel",
+        "originalDate": "2026-01-31"
+      }
+    ],
+    "2026-01-26": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Dandelion Therapy",
+        "recurringId": "mk74nz38gq4gbv40gkn"
+      },
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Avant",
+        "recurringId": "mk7chz3qkjxjvb2c0pk"
+      }
+    ],
+    "2026-01-18": [
+      {
+        "amount": 70,
+        "type": "expense",
+        "description": "Pounce",
+        "recurringId": "mk7bexlmw38hj0fcjzb"
+      }
+    ],
+    "2026-01-25": [
+      {
+        "amount": 70,
+        "type": "expense",
+        "description": "Pounce",
+        "recurringId": "mk7bexlmw38hj0fcjzb"
+      }
+    ],
+    "2026-01-23": [
+      {
+        "amount": 30,
+        "type": "expense",
+        "description": "Visible - Raiza",
+        "recurringId": "mk7cfey9ua9a7df53ij"
+      },
+      {
+        "amount": 261.87,
+        "type": "expense",
+        "description": "Best Egg",
+        "recurringId": "mk7ch530t83m41k9p6f"
+      },
+      {
+        "amount": 79.61,
+        "type": "expense",
+        "description": "Best Egg",
+        "recurringId": "mk7chip36krsgu7x81"
+      },
+      {
+        "amount": 2.99,
+        "type": "expense",
+        "description": "Apple Storage - Dayra",
+        "recurringId": "mkakvfk6azcmofxgizg"
+      }
+    ],
+    "2026-01-24": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Visible - Dayra",
+        "recurringId": "mk7cfv2y87jkj6wcph9"
+      }
+    ],
+    "2026-01-29": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Mastercard",
+        "recurringId": "mk7ciulif4uusuhgt1n"
+      },
+      {
+        "amount": 29,
+        "type": "expense",
+        "description": "Concora Credit",
+        "recurringId": "mk7cj6n63o6r77imukk"
+      },
+      {
+        "amount": 15.13,
+        "type": "expense",
+        "description": "Amazon Prime",
+        "recurringId": "mk7d3fk9shgto2f3uo9"
+      }
+    ],
+    "2026-01-17": [
+      {
+        "amount": 55.67,
+        "type": "expense",
+        "description": "Target Card",
+        "recurringId": "mk7cwzeujmq13qu11wa"
+      },
+      {
+        "amount": 26.8,
+        "type": "expense",
+        "description": "Planet Fitness",
+        "recurringId": "mk7cy5vbluc4jpzu5wh"
+      }
+    ],
+    "2026-01-19": [
+      {
+        "amount": 50,
+        "type": "expense",
+        "description": "Comcast Xfinity",
+        "recurringId": "mk7cyq4ghu5m564lbn6"
+      }
+    ],
+    "2026-01-20": [
+      {
+        "amount": 20.38,
+        "type": "expense",
+        "description": "Netflix",
+        "recurringId": "mk7d2smllk59znincsh"
+      },
+      {
+        "amount": 6.98,
+        "type": "expense",
+        "description": "Apple Music",
+        "recurringId": "mkakqaimp3ped3qoxbd"
+      }
+    ],
+    "2026-02-13": [
+      {
+        "amount": 3116.29,
+        "type": "income",
+        "description": "FSW Pay",
+        "recurringId": "mk73ab1dqfozf7zmsss",
+        "originalDate": "2026-02-15"
+      },
+      {
+        "amount": 30,
+        "type": "expense",
+        "description": "Visible - Andrae",
+        "recurringId": "mk7c7jqutj71jnn5suj"
+      },
+      {
+        "amount": 289.6,
+        "type": "expense",
+        "description": "CBW Credit Fresh",
+        "recurringId": "mk7cadzbv6pf5r2kp3",
+        "originalDate": "2026-02-15"
+      },
+      {
+        "amount": 268.43,
+        "type": "expense",
+        "description": "MoneyKey",
+        "recurringId": "mk7dejrysk5sdryz84",
+        "originalDate": "2026-02-15"
+      },
+      {
+        "amount": 42.86,
+        "type": "expense",
+        "description": "NetCredit",
+        "recurringId": "mk7o3mshejuqow4q6x9",
+        "originalDate": "2026-02-15"
+      },
+      {
+        "amount": 297.59,
+        "type": "expense",
+        "description": "Xact",
+        "recurringId": "mk7oeogtcxl5o8w0lel",
+        "originalDate": "2026-02-15"
+      }
+    ],
+    "2026-02-27": [
+      {
+        "amount": 3116.29,
+        "type": "income",
+        "description": "FSW Pay",
+        "recurringId": "mk73ab1dqfozf7zmsss",
+        "originalDate": "2026-02-28"
+      },
+      {
+        "amount": 289.6,
+        "type": "expense",
+        "description": "CBW Credit Fresh",
+        "recurringId": "mk7cadzbv6pf5r2kp3",
+        "originalDate": "2026-02-28"
+      },
+      {
+        "amount": 268.43,
+        "type": "expense",
+        "description": "MoneyKey",
+        "recurringId": "mk7dejrysk5sdryz84",
+        "originalDate": "2026-02-28"
+      },
+      {
+        "amount": 42.86,
+        "type": "expense",
+        "description": "NetCredit",
+        "recurringId": "mk7o3mshejuqow4q6x9",
+        "originalDate": "2026-02-28"
+      },
+      {
+        "amount": 297.59,
+        "type": "expense",
+        "description": "Xact",
+        "recurringId": "mk7oeogtcxl5o8w0lel",
+        "originalDate": "2026-02-28"
+      }
+    ],
+    "2026-02-10": [
+      {
+        "amount": 112.49,
+        "type": "expense",
+        "description": "Progressive Auto Insurance ",
+        "recurringId": "mk73mip3ydb8zoiy8zg"
+      }
+    ],
+    "2026-02-01": [
+      {
+        "amount": 1142.16,
+        "type": "expense",
+        "description": "Rent",
+        "recurringId": "mk73nm8u593a0v9i2m8"
+      },
+      {
+        "amount": 70,
+        "type": "expense",
+        "description": "Pounce",
+        "recurringId": "mk7bexlmw38hj0fcjzb"
+      },
+      {
+        "amount": 48.86,
+        "type": "expense",
+        "description": "Elite Fine Arts Academy",
+        "recurringId": "mk7cbbpkiuwozcpi2tf"
+      }
+    ],
+    "2026-02-09": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Dandelion Therapy",
+        "recurringId": "mk74nz38gq4gbv40gkn"
+      }
+    ],
+    "2026-02-23": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Dandelion Therapy",
+        "recurringId": "mk74nz38gq4gbv40gkn"
+      },
+      {
+        "amount": 30,
+        "type": "expense",
+        "description": "Visible - Raiza",
+        "recurringId": "mk7cfey9ua9a7df53ij"
+      },
+      {
+        "amount": 261.87,
+        "type": "expense",
+        "description": "Best Egg",
+        "recurringId": "mk7ch530t83m41k9p6f"
+      },
+      {
+        "amount": 79.61,
+        "type": "expense",
+        "description": "Best Egg",
+        "recurringId": "mk7chip36krsgu7x81"
+      },
+      {
+        "amount": 2.99,
+        "type": "expense",
+        "description": "Apple Storage - Dayra",
+        "recurringId": "mkakvfk6azcmofxgizg"
+      }
+    ],
+    "2026-02-08": [
+      {
+        "amount": 70,
+        "type": "expense",
+        "description": "Pounce",
+        "recurringId": "mk7bexlmw38hj0fcjzb"
+      }
+    ],
+    "2026-02-15": [
+      {
+        "amount": 70,
+        "type": "expense",
+        "description": "Pounce",
+        "recurringId": "mk7bexlmw38hj0fcjzb"
+      },
+      {
+        "amount": 16.99,
+        "type": "expense",
+        "description": "Peacock TV",
+        "recurringId": "mk7dglaoryxi1p7g9li"
+      }
+    ],
+    "2026-02-22": [
+      {
+        "amount": 70,
+        "type": "expense",
+        "description": "Pounce",
+        "recurringId": "mk7bexlmw38hj0fcjzb"
+      }
+    ],
+    "2026-02-03": [
+      {
+        "amount": 235.91,
+        "type": "expense",
+        "description": "OneMain Financial",
+        "recurringId": "mk7c3u2akwpbb04jjhb"
+      },
+      {
+        "amount": 75.5,
+        "type": "expense",
+        "description": "Capital One",
+        "recurringId": "mk7c4n7rwi5jkdc7na"
+      }
+    ],
+    "2026-02-12": [
+      {
+        "amount": 20,
+        "type": "expense",
+        "description": "Visible - Sofia",
+        "recurringId": "mk7c5gu0kd6sp7vjtc8"
+      },
+      {
+        "amount": 29,
+        "type": "expense",
+        "description": "Capital One",
+        "recurringId": "mk7c6lgqgdfm70mdxqq"
+      }
+    ],
+    "2026-02-17": [
+      {
+        "amount": 55.67,
+        "type": "expense",
+        "description": "Target Card",
+        "recurringId": "mk7ccqteg0bn4l6jzke"
+      },
+      {
+        "amount": 26.8,
+        "type": "expense",
+        "description": "Planet Fitness",
+        "recurringId": "mk7cd2ro5gbwyf4rafw"
+      },
+      {
+        "amount": 55.67,
+        "type": "expense",
+        "description": "Target Card",
+        "recurringId": "mk7cwzeujmq13qu11wa"
+      },
+      {
+        "amount": 26.8,
+        "type": "expense",
+        "description": "Planet Fitness",
+        "recurringId": "mk7cy5vbluc4jpzu5wh"
+      }
+    ],
+    "2026-02-19": [
+      {
+        "amount": 50,
+        "type": "expense",
+        "description": "Comcast Xfinity",
+        "recurringId": "mk7cdj06acvl2hzr8fu"
+      }
+    ],
+    "2026-02-24": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Visible - Dayra",
+        "recurringId": "mk7cfv2y87jkj6wcph9"
+      }
+    ],
+    "2026-02-26": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Avant",
+        "recurringId": "mk7chz3qkjxjvb2c0pk"
+      }
+    ],
+    "2026-02-28": [
+      {
+        "amount": 25,
+        "type": "expense",
+        "description": "Mastercard",
+        "recurringId": "mk7ciulif4uusuhgt1n"
+      },
+      {
+        "amount": 29,
+        "type": "expense",
+        "description": "Concora Credit",
+        "recurringId": "mk7cj6n63o6r77imukk"
+      },
+      {
+        "amount": 57.11,
+        "type": "expense",
+        "description": "Extra Space Storage",
+        "recurringId": "mk7cjmf3ax0cx5cr6qt"
+      },
+      {
+        "amount": 15.13,
+        "type": "expense",
+        "description": "Amazon Prime",
+        "recurringId": "mk7d3fk9shgto2f3uo9"
+      }
+    ],
+    "2026-02-20": [
+      {
+        "amount": 20.38,
+        "type": "expense",
+        "description": "Netflix",
+        "recurringId": "mk7d2smllk59znincsh"
+      },
+      {
+        "amount": 6.98,
+        "type": "expense",
+        "description": "Apple Music",
+        "recurringId": "mkakqaimp3ped3qoxbd"
+      }
+    ],
+    "2026-02-07": [
+      {
+        "amount": 26.04,
+        "type": "expense",
+        "description": "YouTube Premium",
+        "recurringId": "mk7dl6gei19bwq34x6"
+      }
+    ],
+    "2026-02-06": [
+      {
+        "amount": 12.95,
+        "type": "expense",
+        "description": "Walmart Plus",
+        "recurringId": "mk7vfr2xntgbm5sbzae"
+      }
+    ]
+  },
+  "monthlyBalances": {
+    "2026-1": {
+      "startingBalance": 0,
+      "endingBalance": 2656.9300000000003
+    },
+    "2026-2": {
+      "startingBalance": 2656.9300000000003,
+      "endingBalance": 3848.6199999999994
+    },
+    "2026-3": {
+      "startingBalance": 3848.6199999999994,
+      "endingBalance": 4770.309999999997
+    },
+    "2026-4": {
+      "startingBalance": 4770.309999999997,
+      "endingBalance": 5961.999999999996
+    },
+    "2026-5": {
+      "startingBalance": 5961.999999999996,
+      "endingBalance": 7083.689999999997
+    },
+    "2026-6": {
+      "startingBalance": 7083.689999999997,
+      "endingBalance": 8530.379999999996
+    },
+    "2026-7": {
+      "startingBalance": 8530.379999999996,
+      "endingBalance": 10002.069999999998
+    },
+    "2026-8": {
+      "startingBalance": 10002.069999999998,
+      "endingBalance": 11473.759999999997
+    },
+    "2026-9": {
+      "startingBalance": 11473.759999999997,
+      "endingBalance": 12945.449999999995
+    },
+    "2026-10": {
+      "startingBalance": 12945.449999999995,
+      "endingBalance": 14417.139999999994
+    },
+    "2026-11": {
+      "startingBalance": 14417.139999999994,
+      "endingBalance": 15863.829999999994
+    },
+    "2026-12": {
+      "startingBalance": 15863.829999999994,
+      "endingBalance": 17335.519999999993
+    },
+    "2027-1": {
+      "startingBalance": 17335.519999999993,
+      "endingBalance": 18807.209999999992
+    },
+    "2027-2": {
+      "startingBalance": 18807.209999999992,
+      "endingBalance": 18807.209999999992
+    }
+  },
+  "recurringTransactions": [
+    {
+      "id": "mk73ab1dqfozf7zmsss",
+      "startDate": "2026-01-15",
+      "amount": 3116.29,
+      "type": "income",
+      "description": "FSW Pay",
+      "recurrence": "semi-monthly",
+      "semiMonthlyLastDay": true,
+      "semiMonthlyDays": [
+        15,
+        31
+      ],
+      "businessDayAdjustment": "previous"
+    },
+    {
+      "id": "mk73mip3ydb8zoiy8zg",
+      "startDate": "2026-02-10",
+      "amount": 112.49,
+      "type": "expense",
+      "description": "Progressive Auto Insurance ",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none"
+    },
+    {
+      "id": "mk73nm8u593a0v9i2m8",
+      "startDate": "2026-02-01",
+      "amount": 1142.16,
+      "type": "expense",
+      "description": "Rent",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none"
+    },
+    {
+      "id": "mk74kzq0xkag0wqqhh",
+      "startDate": "2026-01-12",
+      "amount": 25,
+      "type": "expense",
+      "description": "Sofia’s Therapy  ",
+      "recurrence": "bi-weekly",
+      "businessDayAdjustment": "none",
+      "endDate": "2026-01-11"
+    },
+    {
+      "id": "mk74nz38gq4gbv40gkn",
+      "startDate": "2026-01-26",
+      "amount": 25,
+      "type": "expense",
+      "description": "Dandelion Therapy",
+      "recurrence": "bi-weekly",
+      "businessDayAdjustment": "none"
+    },
+    {
+      "id": "mk7bexlmw38hj0fcjzb",
+      "startDate": "2026-01-18",
+      "amount": 70,
+      "type": "expense",
+      "description": "Pounce",
+      "recurrence": "weekly",
+      "businessDayAdjustment": "none",
+      "maxOccurrences": 20
+    },
+    {
+      "id": "mk7c3u2akwpbb04jjhb",
+      "startDate": "2026-02-03",
+      "amount": 235.91,
+      "type": "expense",
+      "description": "OneMain Financial",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none"
+    },
+    {
+      "id": "mk7c4n7rwi5jkdc7na",
+      "startDate": "2026-02-03",
+      "amount": 75.5,
+      "type": "expense",
+      "description": "Capital One",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none"
+    },
+    {
+      "id": "mk7c5gu0kd6sp7vjtc8",
+      "startDate": "2026-02-12",
+      "amount": 20,
+      "type": "expense",
+      "description": "Visible - Sofia",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none"
+    },
+    {
+      "id": "mk7c6lgqgdfm70mdxqq",
+      "startDate": "2026-02-12",
+      "amount": 29,
+      "type": "expense",
+      "description": "Capital One",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none"
+    },
+    {
+      "id": "mk7c7jqutj71jnn5suj",
+      "startDate": "2026-02-13",
+      "amount": 30,
+      "type": "expense",
+      "description": "Visible - Andrae",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none"
+    },
+    {
+      "id": "mk7c90xach0h4uaherd",
+      "startDate": "2026-01-15",
+      "amount": 268.43,
+      "type": "expense",
+      "description": "MoneyKey",
+      "recurrence": "semi-monthly",
+      "semiMonthlyLastDay": true,
+      "semiMonthlyDays": [
+        1,
+        31
+      ],
+      "businessDayAdjustment": "previous",
+      "endDate": "2026-01-29"
+    },
+    {
+      "id": "mk7cadzbv6pf5r2kp3",
+      "startDate": "2026-01-15",
+      "amount": 289.6,
+      "type": "expense",
+      "description": "CBW Credit Fresh",
+      "recurrence": "semi-monthly",
+      "semiMonthlyLastDay": true,
+      "semiMonthlyDays": [
+        15,
+        31
+      ],
+      "businessDayAdjustment": "previous"
+    },
+    {
+      "id": "mk7cbbpkiuwozcpi2tf",
+      "startDate": "2026-02-01",
+      "amount": 48.86,
+      "type": "expense",
+      "description": "Elite Fine Arts Academy",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none"
+    },
+    {
+      "id": "mk7cbwtcjar7wqojr8n",
+      "startDate": "2026-02-13",
+      "amount": 16.99,
+      "type": "expense",
+      "description": "Peacock TV",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none",
+      "endDate": "2026-02-12"
+    },
+    {
+      "id": "mk7ccqteg0bn4l6jzke",
+      "startDate": "2026-02-17",
+      "amount": 55.67,
+      "type": "expense",
+      "description": "Target Card",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none"
+    },
+    {
+      "id": "mk7cd2ro5gbwyf4rafw",
+      "startDate": "2026-02-17",
+      "amount": 26.8,
+      "type": "expense",
+      "description": "Planet Fitness",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none"
+    },
+    {
+      "id": "mk7cdj06acvl2hzr8fu",
+      "startDate": "2026-02-19",
+      "amount": 50,
+      "type": "expense",
+      "description": "Comcast Xfinity",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none"
+    },
+    {
+      "id": "mk7cfey9ua9a7df53ij",
+      "startDate": "2026-01-23",
+      "amount": 30,
+      "type": "expense",
+      "description": "Visible - Raiza",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none"
+    },
+    {
+      "id": "mk7cfv2y87jkj6wcph9",
+      "startDate": "2026-01-24",
+      "amount": 25,
+      "type": "expense",
+      "description": "Visible - Dayra",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none"
+    },
+    {
+      "id": "mk7ch530t83m41k9p6f",
+      "startDate": "2026-01-23",
+      "amount": 261.87,
+      "type": "expense",
+      "description": "Best Egg",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none"
+    },
+    {
+      "id": "mk7chip36krsgu7x81",
+      "startDate": "2026-01-23",
+      "amount": 79.61,
+      "type": "expense",
+      "description": "Best Egg",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none"
+    },
+    {
+      "id": "mk7chz3qkjxjvb2c0pk",
+      "startDate": "2026-01-26",
+      "amount": 25,
+      "type": "expense",
+      "description": "Avant",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none"
+    },
+    {
+      "id": "mk7ciulif4uusuhgt1n",
+      "startDate": "2026-01-29",
+      "amount": 25,
+      "type": "expense",
+      "description": "Mastercard",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none"
+    },
+    {
+      "id": "mk7cj6n63o6r77imukk",
+      "startDate": "2026-01-29",
+      "amount": 29,
+      "type": "expense",
+      "description": "Concora Credit",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none"
+    },
+    {
+      "id": "mk7cjmf3ax0cx5cr6qt",
+      "startDate": "2026-01-30",
+      "amount": 57.11,
+      "type": "expense",
+      "description": "Extra Space Storage",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none"
+    },
+    {
+      "id": "mk7cwzeujmq13qu11wa",
+      "startDate": "2026-01-17",
+      "amount": 55.67,
+      "type": "expense",
+      "description": "Target Card",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none"
+    },
+    {
+      "id": "mk7cy5vbluc4jpzu5wh",
+      "startDate": "2026-01-17",
+      "amount": 26.8,
+      "type": "expense",
+      "description": "Planet Fitness",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none"
+    },
+    {
+      "id": "mk7cyq4ghu5m564lbn6",
+      "startDate": "2026-01-19",
+      "amount": 50,
+      "type": "expense",
+      "description": "Comcast Xfinity",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none",
+      "endDate": "2026-02-18"
+    },
+    {
+      "id": "mk7d2smllk59znincsh",
+      "startDate": "2026-01-20",
+      "amount": 20.38,
+      "type": "expense",
+      "description": "Netflix",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none"
+    },
+    {
+      "id": "mk7d3fk9shgto2f3uo9",
+      "startDate": "2026-01-29",
+      "amount": 15.13,
+      "type": "expense",
+      "description": "Amazon Prime",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none"
+    },
+    {
+      "id": "mk7d3p30b8msa9zi304",
+      "startDate": "2026-01-16",
+      "amount": 215,
+      "type": "expense",
+      "description": "FPL",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none",
+      "endDate": "2026-02-15"
+    },
+    {
+      "id": "mk7dcgt3tcj8zbieqx",
+      "startDate": "2026-01-15",
+      "amount": 268.43,
+      "type": "expense",
+      "description": "MoneyKey",
+      "recurrence": "semi-monthly",
+      "semiMonthlyLastDay": true,
+      "semiMonthlyDays": [
+        15,
+        31
+      ],
+      "businessDayAdjustment": "none",
+      "endDate": "2026-01-14"
+    },
+    {
+      "id": "mk7dejrysk5sdryz84",
+      "startDate": "2026-01-15",
+      "amount": 268.43,
+      "type": "expense",
+      "description": "MoneyKey",
+      "recurrence": "semi-monthly",
+      "semiMonthlyLastDay": true,
+      "semiMonthlyDays": [
+        15,
+        31
+      ],
+      "businessDayAdjustment": "previous"
+    },
+    {
+      "id": "mk7dglaoryxi1p7g9li",
+      "startDate": "2026-01-15",
+      "amount": 16.99,
+      "type": "expense",
+      "description": "Peacock TV",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none"
+    },
+    {
+      "id": "mk7djk3w2fkitqnuybi",
+      "startDate": "2026-02-02",
+      "amount": 37.35,
+      "type": "expense",
+      "description": "Disney Plus",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none"
+    },
+    {
+      "id": "mk7dl6gei19bwq34x6",
+      "startDate": "2026-02-07",
+      "amount": 26.04,
+      "type": "expense",
+      "description": "YouTube Premium",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none"
+    },
+    {
+      "id": "mk7du77s0u2aglb0fxm",
+      "startDate": "2026-02-01",
+      "amount": 37.67,
+      "type": "expense",
+      "description": "Apple Card - Andrae",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "next"
+    },
+    {
+      "id": "mk7duv55yuuoqqbpv7n",
+      "startDate": "2026-02-01",
+      "amount": 50,
+      "type": "expense",
+      "description": "Apple Card - Dayra",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "next"
+    },
+    {
+      "id": "mk7o190aihah0d7ndd",
+      "startDate": "2026-01-15",
+      "amount": 297.59,
+      "type": "expense",
+      "description": "Xact",
+      "recurrence": "semi-monthly",
+      "semiMonthlyLastDay": true,
+      "semiMonthlyDays": [
+        15,
+        31
+      ],
+      "businessDayAdjustment": "none",
+      "endDate": "2026-01-14"
+    },
+    {
+      "id": "mk7o3mshejuqow4q6x9",
+      "startDate": "2026-01-15",
+      "amount": 42.86,
+      "type": "expense",
+      "description": "NetCredit",
+      "recurrence": "semi-monthly",
+      "semiMonthlyLastDay": true,
+      "semiMonthlyDays": [
+        15,
+        31
+      ],
+      "businessDayAdjustment": "previous"
+    },
+    {
+      "id": "mk7oeogtcxl5o8w0lel",
+      "startDate": "2026-01-15",
+      "amount": 297.59,
+      "type": "expense",
+      "description": "Xact",
+      "recurrence": "semi-monthly",
+      "semiMonthlyLastDay": true,
+      "semiMonthlyDays": [
+        15,
+        31
+      ],
+      "businessDayAdjustment": "previous"
+    },
+    {
+      "id": "mk7v4xqvfbk8a43t76b",
+      "startDate": "2026-02-07",
+      "amount": 9.06,
+      "type": "expense",
+      "description": "Google One",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none",
+      "endDate": "2026-02-06"
+    },
+    {
+      "id": "mk7vfr2xntgbm5sbzae",
+      "startDate": "2026-02-06",
+      "amount": 12.95,
+      "type": "expense",
+      "description": "Walmart Plus",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none"
+    },
+    {
+      "id": "mkabylj2ex8mno5rize",
+      "startDate": "2026-02-02",
+      "amount": 227,
+      "type": "expense",
+      "description": "Florida Power and Light (FPL)",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none"
+    },
+    {
+      "id": "mkakh5r369fropegve4",
+      "startDate": "2026-02-02",
+      "amount": 19,
+      "type": "expense",
+      "description": "Google",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none"
+    },
+    {
+      "id": "mkakqaimp3ped3qoxbd",
+      "startDate": "2026-01-20",
+      "amount": 6.98,
+      "type": "expense",
+      "description": "Apple Music",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none"
+    },
+    {
+      "id": "mkakvfk6azcmofxgizg",
+      "startDate": "2026-01-23",
+      "amount": 2.99,
+      "type": "expense",
+      "description": "Apple Storage - Dayra",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none"
+    },
+    {
+      "id": "mkakw2u0i235mhkw91",
+      "startDate": "2026-01-28",
+      "amount": 0.99,
+      "type": "expense",
+      "description": "Apple Storage - Raiza",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none",
+      "endDate": "2026-01-27"
+    }
+  ],
+  "skippedTransactions": {
+    "2026-01-23": [
+      "mk7ch530t83m41k9p6f",
+      "mk7chip36krsgu7x81"
+    ],
+    "2026-01-19": [
+      "mk7cyq4ghu5m564lbn6"
+    ]
+  },
+  "movedTransactions": {
+    "mkakw2u0i235mhkw91-2026-01-28": {
+      "recurringId": "mkakw2u0i235mhkw91",
+      "fromDate": "2026-01-28",
+      "toDate": "2026-01-28",
+      "movedAt": "2026-01-12T12:23:23.460Z"
+    }
+  },
+  "debts": [],
+  "cashInfusions": [],
+  "monthlyNotes": {
+    "2026-1": "Pay Disney and Walmart Plus\nSwitch Peacock to Walmart Plus\nSwitch Sofia to Xfinity Mobile\nCar parts\nYouTube\nSofia's therapy\nDayra's book\nDayra's NCLEX\nGoogle One\nGoogle Storage\nVehicle registration",
+    "2026-3": "Camp registration 3/2"
+  },
+  "debtSnowballSettings": {
+    "extraPayment": 0,
+    "autoGenerate": true
+  },
+  "lastExported": "2026-01-12T12:40:28.216Z",
+  "appVersion": "2.0.0"
+}
