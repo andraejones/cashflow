@@ -156,6 +156,9 @@ class CalendarUI {
       } else {
         runningBalance += dailyTotals.income - dailyTotals.expense;
       }
+      // Check if this date has any moved transactions (from or to)
+      const hasMoveAnomaly = this.store.hasMoveAnomaly(dateString);
+
       day.querySelector(".day-content").innerHTML = `
         ${dailyTotals.income > 0
           ? `<div class="income">+${dailyTotals.income.toFixed(2)}</div>`
@@ -170,7 +173,7 @@ class CalendarUI {
           ? `<div class="transaction-count">(${transactionCount})</div>`
           : ""
         }
-        ${dailyTotals.hasSkippedTransactions
+        ${dailyTotals.hasSkippedTransactions || hasMoveAnomaly
           ? '<div class="skip-indicator">★</div>'
           : ""
         }
