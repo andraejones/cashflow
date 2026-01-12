@@ -471,6 +471,7 @@ body.app-locked #calendarOptions {
 .app-modal-reset-btn {
   margin-top: 8px;
   width: 100%;
+  text-align: center;
   background-color: #fff;
   color: var(--muted-color);
   border: 1px solid var(--border-color);
