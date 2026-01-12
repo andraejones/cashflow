@@ -464,6 +464,10 @@ body.app-locked #calendarOptions {
   min-width: 110px;
 }
 
+#appModalConfirm {
+  width: 100%;
+}
+
 .app-modal-reset-btn {
   margin-top: 8px;
   width: 100%;
