@@ -462,6 +462,8 @@ body.app-locked #calendarOptions {
 
 .app-modal-actions button {
   min-width: 110px;
+  width: 100%;
+  text-align: center;
 }
 
 #appModalConfirm {
