@@ -42,7 +42,7 @@ class CashflowApp {
     this.init();
   }
 
-  
+
   async init() {
     try {
       this.cleanUpHtmlArtifacts();
@@ -52,27 +52,38 @@ class CashflowApp {
     }
     this.updateUI();
     window.addTransaction = () => this.transactionUI.addTransaction();
+
+    // Set up callback to refresh from cloud after PIN unlock (session resume)
+    this.pinProtection.onUnlockCallback = async () => {
+      try {
+        await this.cloudSync.loadFromCloud();
+        this.calculationService.invalidateCache();
+        this.updateUI();
+      } catch (error) {
+        console.error("Error refreshing from cloud after unlock:", error);
+      }
+    };
   }
 
-  
+
   cleanUpHtmlArtifacts() {
     const bodyChildren = document.body.childNodes;
     for (let i = bodyChildren.length - 1; i >= 0; i--) {
       const node = bodyChildren[i];
-      if (node.nodeType === Node.TEXT_NODE && 
-          (node.textContent.includes("<div") || 
-           node.textContent.includes("modal-content"))) {
+      if (node.nodeType === Node.TEXT_NODE &&
+        (node.textContent.includes("<div") ||
+          node.textContent.includes("modal-content"))) {
         document.body.removeChild(node);
       }
     }
   }
 
-  
+
   updateUI() {
     this.calendarUI.generateCalendar();
   }
 
-  
+
   exportData() {
     try {
       this.cloudSync.cancelPendingCloudSave();
@@ -108,7 +119,7 @@ class CashflowApp {
     }
   }
 
-  
+
   importData() {
     try {
       this.cloudSync.cancelPendingCloudSave();
@@ -122,7 +133,7 @@ class CashflowApp {
           Utils.showNotification("No file selected", "error");
           return;
         }
-        
+
         const file = e.target.files[0];
         const reader = new FileReader();
 
@@ -131,7 +142,7 @@ class CashflowApp {
             if (!readerEvent.target.result) {
               throw new Error("Could not read file");
             }
-            
+
             const content = JSON.parse(readerEvent.target.result);
 
             const success = this.store.importData(content);
@@ -139,7 +150,7 @@ class CashflowApp {
             if (success) {
               this.calculationService.invalidateCache();
               this.updateUI();
-              
+
               Utils.showNotification("Data imported successfully!");
             } else {
               throw new Error("Invalid file format");
@@ -167,7 +178,7 @@ class CashflowApp {
     }
   }
 
-  
+
   async resetData() {
     try {
       this.cloudSync.cancelPendingCloudSave();
@@ -186,7 +197,7 @@ class CashflowApp {
       this.cloudSync.clearCloudCredentials();
       this.calculationService.invalidateCache();
       this.updateUI();
-      
+
       Utils.showNotification("All data has been reset.");
     } catch (error) {
       console.error("Error resetting data:", error);

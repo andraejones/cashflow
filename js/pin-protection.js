@@ -6,6 +6,7 @@ class PinProtection {
     this.isLocked = false;
     this.activityEvents = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'click'];
     this.boundResetTimer = this.resetInactivityTimer.bind(this);
+    this.onUnlockCallback = null;
   }
 
   encodeBase64(value) {
@@ -103,6 +104,10 @@ class PinProtection {
       this.isLocked = false;
       this.hideLockOverlay();
       this.startInactivityMonitoring();
+      // Call unlock callback if set (for cloud refresh, etc.)
+      if (this.onUnlockCallback) {
+        this.onUnlockCallback();
+      }
       return true;
     }
     await Utils.showModalAlert("Incorrect PIN", "Unlock Failed");
