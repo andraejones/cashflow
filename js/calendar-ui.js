@@ -123,11 +123,33 @@ class CalendarUI {
     const unallocatedEndMonth = unallocatedEndDate.getMonth();
     const unallocatedEndDay = unallocatedEndDate.getDate();
 
-    // Calculate the start date of the unallocated range (tomorrow)
-    const unallocatedStartDate = new Date(today.getTime() + 1 * 24 * 60 * 60 * 1000);
-    const unallocatedStartYear = unallocatedStartDate.getFullYear();
-    const unallocatedStartMonth = unallocatedStartDate.getMonth();
-    const unallocatedStartDay = unallocatedStartDate.getDate();
+    // Find the day with the lowest balance in the 30-day unallocated range
+    // by pre-calculating balances for each day
+    let lowestBalanceDate = null;
+    let lowestBalance = Infinity;
+    let tempBalance = summary.startingBalance;
+
+    // Calculate balances for all days in the month to find the lowest in the 30-day range
+    for (let i = 1; i <= daysInMonth; i++) {
+      const dateString = `${year}-${(month + 1).toString().padStart(2, "0")}-${i.toString().padStart(2, "0")}`;
+      const dailyTotals = this.calculationService.calculateDailyTotals(dateString);
+
+      if (dailyTotals.balance !== null) {
+        tempBalance = dailyTotals.balance;
+      } else {
+        tempBalance += dailyTotals.income - dailyTotals.expense;
+      }
+
+      // Check if this date is within the 30-day unallocated range
+      const checkDate = new Date(year, month, i);
+      const daysFromToday = Math.floor((checkDate - today) / (24 * 60 * 60 * 1000));
+      if (daysFromToday >= 1 && daysFromToday <= 30) {
+        if (tempBalance < lowestBalance) {
+          lowestBalance = tempBalance;
+          lowestBalanceDate = dateString;
+        }
+      }
+    }
 
     for (let i = 1; i <= daysInMonth; i++) {
       const day = document.createElement("div");
@@ -148,13 +170,10 @@ class CalendarUI {
       ) {
         day.classList.add("unallocated-end");
       }
-      // Highlight the first day of the unallocated range (tomorrow)
-      if (
-        year === unallocatedStartYear &&
-        month === unallocatedStartMonth &&
-        i === unallocatedStartDay
-      ) {
-        day.classList.add("unallocated-start");
+      // Highlight the day with the lowest balance in the 30-day range
+      const currentDateString = `${year}-${(month + 1).toString().padStart(2, "0")}-${i.toString().padStart(2, "0")}`;
+      if (lowestBalanceDate && currentDateString === lowestBalanceDate) {
+        day.classList.add("lowest-balance");
       }
       const dateString = `${year}-${(month + 1).toString().padStart(2, "0")}-${i
         .toString()
