@@ -123,9 +123,9 @@ class CalendarUI {
     const unallocatedEndMonth = unallocatedEndDate.getMonth();
     const unallocatedEndDay = unallocatedEndDate.getDate();
 
-    // Find the day with the lowest balance in the 30-day unallocated range
+    // Find the day(s) with the lowest balance in the 30-day unallocated range
     // Calculate across the entire 30-day range (not just the displayed month)
-    let lowestBalanceDate = null;
+    let lowestBalanceDates = [];
     let lowestBalance = Infinity;
 
     // We need to track running balance starting from today
@@ -160,7 +160,9 @@ class CalendarUI {
 
       if (currentBalance < lowestBalance) {
         lowestBalance = currentBalance;
-        lowestBalanceDate = dateStr;
+        lowestBalanceDates = [dateStr];
+      } else if (currentBalance === lowestBalance) {
+        lowestBalanceDates.push(dateStr);
       }
     }
 
@@ -183,9 +185,9 @@ class CalendarUI {
       ) {
         day.classList.add("unallocated-end");
       }
-      // Highlight the day with the lowest balance in the 30-day range
+      // Highlight the day(s) with the lowest balance in the 30-day range
       const currentDateString = `${year}-${(month + 1).toString().padStart(2, "0")}-${i.toString().padStart(2, "0")}`;
-      if (lowestBalanceDate && currentDateString === lowestBalanceDate) {
+      if (lowestBalanceDates.includes(currentDateString)) {
         day.classList.add("lowest-balance");
       }
       const dateString = `${year}-${(month + 1).toString().padStart(2, "0")}-${i
