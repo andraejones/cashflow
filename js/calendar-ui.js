@@ -124,30 +124,43 @@ class CalendarUI {
     const unallocatedEndDay = unallocatedEndDate.getDate();
 
     // Find the day with the lowest balance in the 30-day unallocated range
-    // by pre-calculating balances for each day
+    // Calculate across the entire 30-day range (not just the displayed month)
     let lowestBalanceDate = null;
     let lowestBalance = Infinity;
-    let tempBalance = summary.startingBalance;
 
-    // Calculate balances for all days in the month to find the lowest in the 30-day range
-    for (let i = 1; i <= daysInMonth; i++) {
-      const dateString = `${year}-${(month + 1).toString().padStart(2, "0")}-${i.toString().padStart(2, "0")}`;
-      const dailyTotals = this.calculationService.calculateDailyTotals(dateString);
+    // We need to track running balance starting from today
+    // First, calculate balance at end of today
+    const todayStr = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, "0")}-${today.getDate().toString().padStart(2, "0")}`;
+    const todayMonthKey = `${today.getFullYear()}-${today.getMonth() + 1}`;
+    const monthlyBalances = this.store.getMonthlyBalances();
+    let currentBalance = monthlyBalances[todayMonthKey]?.startingBalance || 0;
+
+    // Calculate balance up through today
+    for (let d = 1; d <= today.getDate(); d++) {
+      const dateStr = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, "0")}-${d.toString().padStart(2, "0")}`;
+      const dailyTotals = this.calculationService.calculateDailyTotals(dateStr);
+      if (dailyTotals.balance !== null) {
+        currentBalance = dailyTotals.balance;
+      } else {
+        currentBalance += dailyTotals.income - dailyTotals.expense;
+      }
+    }
+
+    // Now iterate through the next 30 days to find the lowest
+    for (let d = 1; d <= 30; d++) {
+      const checkDate = new Date(today.getTime() + d * 24 * 60 * 60 * 1000);
+      const dateStr = `${checkDate.getFullYear()}-${(checkDate.getMonth() + 1).toString().padStart(2, "0")}-${checkDate.getDate().toString().padStart(2, "0")}`;
+      const dailyTotals = this.calculationService.calculateDailyTotals(dateStr);
 
       if (dailyTotals.balance !== null) {
-        tempBalance = dailyTotals.balance;
+        currentBalance = dailyTotals.balance;
       } else {
-        tempBalance += dailyTotals.income - dailyTotals.expense;
+        currentBalance += dailyTotals.income - dailyTotals.expense;
       }
 
-      // Check if this date is within the 30-day unallocated range
-      const checkDate = new Date(year, month, i);
-      const daysFromToday = Math.floor((checkDate - today) / (24 * 60 * 60 * 1000));
-      if (daysFromToday >= 1 && daysFromToday <= 30) {
-        if (tempBalance < lowestBalance) {
-          lowestBalance = tempBalance;
-          lowestBalanceDate = dateString;
-        }
+      if (currentBalance < lowestBalance) {
+        lowestBalance = currentBalance;
+        lowestBalanceDate = dateStr;
       }
     }
 
