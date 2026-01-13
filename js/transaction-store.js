@@ -784,6 +784,14 @@ class TransactionStore {
       };
       this.monthlyNotes = data.monthlyNotes || {};
       this.movedTransactions = data.movedTransactions || {};
+
+      // Clean up stale movedTransactions entries where fromDate equals toDate
+      Object.keys(this.movedTransactions).forEach(key => {
+        const move = this.movedTransactions[key];
+        if (move.fromDate === move.toDate) {
+          delete this.movedTransactions[key];
+        }
+      });
       this.recurringTransactions.forEach((rt) => {
         if (!rt.id) {
           rt.id = Utils.generateUniqueId();
