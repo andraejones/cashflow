@@ -32,6 +32,11 @@
         "description": "Pounce"
       },
       {
+        "amount": 86,
+        "type": "expense",
+        "description": "Sofia"
+      },
+      {
         "amount": 3116.29,
         "type": "income",
         "description": "FSW Pay",
@@ -3796,6 +3801,14 @@
         "recurringId": "mkakqaimp3ped3qoxbd"
       }
     ],
+    "2026-01-28": [
+      {
+        "amount": 0.99,
+        "type": "expense",
+        "description": "Apple Storage - Raiza",
+        "recurringId": "mkb5o906jl6siyglg1"
+      }
+    ],
     "2026-02-13": [
       {
         "amount": 3116.29,
@@ -4076,6 +4089,12 @@
         "type": "expense",
         "description": "Amazon Prime",
         "recurringId": "mk7d3fk9shgto2f3uo9"
+      },
+      {
+        "amount": 0.99,
+        "type": "expense",
+        "description": "Apple Storage - Raiza",
+        "recurringId": "mkb5o906jl6siyglg1"
       }
     ],
     "2026-02-20": [
@@ -4112,59 +4131,59 @@
   "monthlyBalances": {
     "2026-1": {
       "startingBalance": 0,
-      "endingBalance": 2656.9300000000003
+      "endingBalance": 2569.9399999999996
     },
     "2026-2": {
-      "startingBalance": 2656.9300000000003,
-      "endingBalance": 3848.6199999999994
+      "startingBalance": 2569.9399999999996,
+      "endingBalance": 3760.639999999999
     },
     "2026-3": {
-      "startingBalance": 3848.6199999999994,
-      "endingBalance": 4770.309999999997
+      "startingBalance": 3760.639999999999,
+      "endingBalance": 4682.329999999997
     },
     "2026-4": {
-      "startingBalance": 4770.309999999997,
-      "endingBalance": 5961.999999999996
+      "startingBalance": 4682.329999999997,
+      "endingBalance": 5874.019999999997
     },
     "2026-5": {
-      "startingBalance": 5961.999999999996,
-      "endingBalance": 7083.689999999997
+      "startingBalance": 5874.019999999997,
+      "endingBalance": 6995.709999999997
     },
     "2026-6": {
-      "startingBalance": 7083.689999999997,
-      "endingBalance": 8530.379999999996
+      "startingBalance": 6995.709999999997,
+      "endingBalance": 8442.399999999996
     },
     "2026-7": {
-      "startingBalance": 8530.379999999996,
-      "endingBalance": 10002.069999999998
+      "startingBalance": 8442.399999999996,
+      "endingBalance": 9914.089999999998
     },
     "2026-8": {
-      "startingBalance": 10002.069999999998,
-      "endingBalance": 11473.759999999997
+      "startingBalance": 9914.089999999998,
+      "endingBalance": 11385.779999999997
     },
     "2026-9": {
-      "startingBalance": 11473.759999999997,
-      "endingBalance": 12945.449999999995
+      "startingBalance": 11385.779999999997,
+      "endingBalance": 12857.469999999996
     },
     "2026-10": {
-      "startingBalance": 12945.449999999995,
-      "endingBalance": 14417.139999999994
+      "startingBalance": 12857.469999999996,
+      "endingBalance": 14329.159999999994
     },
     "2026-11": {
-      "startingBalance": 14417.139999999994,
-      "endingBalance": 15863.829999999994
+      "startingBalance": 14329.159999999994,
+      "endingBalance": 15775.849999999995
     },
     "2026-12": {
-      "startingBalance": 15863.829999999994,
-      "endingBalance": 17335.519999999993
+      "startingBalance": 15775.849999999995,
+      "endingBalance": 17247.539999999994
     },
     "2027-1": {
-      "startingBalance": 17335.519999999993,
-      "endingBalance": 18807.209999999992
+      "startingBalance": 17247.539999999994,
+      "endingBalance": 18719.229999999992
     },
     "2027-2": {
-      "startingBalance": 18807.209999999992,
-      "endingBalance": 18807.209999999992
+      "startingBalance": 18719.229999999992,
+      "endingBalance": 18719.229999999992
     }
   },
   "recurringTransactions": [
@@ -4658,6 +4677,15 @@
       "recurrence": "monthly",
       "businessDayAdjustment": "none",
       "endDate": "2026-01-27"
+    },
+    {
+      "id": "mkb5o906jl6siyglg1",
+      "startDate": "2026-01-28",
+      "amount": 0.99,
+      "type": "expense",
+      "description": "Apple Storage - Raiza",
+      "recurrence": "monthly",
+      "businessDayAdjustment": "none"
     }
   ],
   "skippedTransactions": {
@@ -4687,6 +4715,6 @@
     "extraPayment": 0,
     "autoGenerate": true
   },
-  "lastExported": "2026-01-12T12:40:28.216Z",
+  "lastExported": "2026-01-13T03:35:32.914Z",
   "appVersion": "2.0.0"
 }

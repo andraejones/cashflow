@@ -186,6 +186,11 @@ class TransactionStore {
         });
         if (hasStaleEntries) {
           console.log("Cleaned up stale movedTransactions entries");
+          // Save the cleaned data back to storage
+          this.storage.setItem(
+            "movedTransactions",
+            JSON.stringify(this.movedTransactions)
+          );
         }
       }
       if (this.debts.length > 0 && this.recurringTransactions.length > 0) {
