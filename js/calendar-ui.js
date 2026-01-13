@@ -123,6 +123,12 @@ class CalendarUI {
     const unallocatedEndMonth = unallocatedEndDate.getMonth();
     const unallocatedEndDay = unallocatedEndDate.getDate();
 
+    // Calculate the start date of the unallocated range (tomorrow)
+    const unallocatedStartDate = new Date(today.getTime() + 1 * 24 * 60 * 60 * 1000);
+    const unallocatedStartYear = unallocatedStartDate.getFullYear();
+    const unallocatedStartMonth = unallocatedStartDate.getMonth();
+    const unallocatedStartDay = unallocatedStartDate.getDate();
+
     for (let i = 1; i <= daysInMonth; i++) {
       const day = document.createElement("div");
       day.classList.add("day");
@@ -141,6 +147,14 @@ class CalendarUI {
         i === unallocatedEndDay
       ) {
         day.classList.add("unallocated-end");
+      }
+      // Highlight the first day of the unallocated range (tomorrow)
+      if (
+        year === unallocatedStartYear &&
+        month === unallocatedStartMonth &&
+        i === unallocatedStartDay
+      ) {
+        day.classList.add("unallocated-start");
       }
       const dateString = `${year}-${(month + 1).toString().padStart(2, "0")}-${i
         .toString()
