@@ -236,6 +236,22 @@ h4 {
   box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.15);
 }
 
+/* All days with negative or zero balance */
+.negative-balance {
+  background-color: rgba(228, 87, 46, 0.12);
+}
+
+/* First cash flow crisis day (first ≤0) */
+.first-crisis {
+  border: 2px solid var(--error-color);
+  box-shadow: 0 0 0 2px rgba(228, 87, 46, 0.25);
+}
+
+/* Red styling for negative unallocated value in summary */
+.unallocated-negative {
+  color: var(--error-color);
+}
+
 .day-content {
   font-size: 14px;
   width: 100%;

@@ -127,6 +127,9 @@ class CalendarUI {
     // Calculate across the entire 30-day range (not just the displayed month)
     let lowestBalanceDates = [];
     let lowestBalance = Infinity;
+    // Track first crisis (first day with balance ≤0) and all negative days
+    let firstCrisisDate = null;
+    let negativeBalanceDates = [];
 
     // We need to track running balance starting from today
     // First, calculate balance at end of today
@@ -156,6 +159,16 @@ class CalendarUI {
         currentBalance = dailyTotals.balance;
       } else {
         currentBalance += dailyTotals.income - dailyTotals.expense;
+      }
+
+      // Track first crisis date (first day with balance ≤0)
+      if (firstCrisisDate === null && currentBalance <= 0) {
+        firstCrisisDate = dateStr;
+      }
+
+      // Track all negative/zero balance dates
+      if (currentBalance <= 0) {
+        negativeBalanceDates.push(dateStr);
       }
 
       if (currentBalance < lowestBalance) {
@@ -189,6 +202,14 @@ class CalendarUI {
       const currentDateString = `${year}-${(month + 1).toString().padStart(2, "0")}-${i.toString().padStart(2, "0")}`;
       if (lowestBalanceDates.includes(currentDateString)) {
         day.classList.add("lowest-balance");
+      }
+      // Highlight first crisis day (first day with balance ≤0)
+      if (currentDateString === firstCrisisDate) {
+        day.classList.add("first-crisis");
+      }
+      // Highlight all negative/zero balance days
+      if (negativeBalanceDates.includes(currentDateString)) {
+        day.classList.add("negative-balance");
       }
       const dateString = `${year}-${(month + 1).toString().padStart(2, "0")}-${i
         .toString()
@@ -269,7 +290,8 @@ class CalendarUI {
 
     if (showUnallocated) {
       const unallocated = this.calculationService.calculateUnallocated();
-      summaryHtml += ` | Unallocated: $${unallocated.toFixed(2)}`;
+      const unallocatedClass = unallocated <= 0 ? 'unallocated-negative' : '';
+      summaryHtml += ` | Unallocated: <span class="${unallocatedClass}">$${unallocated.toFixed(2)}</span>`;
     }
 
     // Add Notes link with star indicator if notes exist

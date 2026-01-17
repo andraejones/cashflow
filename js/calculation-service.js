@@ -284,6 +284,8 @@ class CalculationService {
 
     // Track minimum balance from today through next 30 days
     let minBalance = runningBalance;
+    // Track the first time balance hits zero or negative
+    let firstCrisis = null;
 
     // Now iterate through the next 30 days (starting from tomorrow)
     for (let i = 1; i <= 30; i++) {
@@ -307,11 +309,17 @@ class CalculationService {
         runningBalance += dailyTotals.income - dailyTotals.expense;
       }
 
+      // Capture the first time balance goes to zero or negative
+      if (firstCrisis === null && runningBalance <= 0) {
+        firstCrisis = runningBalance;
+      }
+
       if (runningBalance < minBalance) {
         minBalance = runningBalance;
       }
     }
 
-    return minBalance;
+    // Return first crisis if one occurred, otherwise return minimum balance
+    return firstCrisis !== null ? firstCrisis : minBalance;
   }
 }
