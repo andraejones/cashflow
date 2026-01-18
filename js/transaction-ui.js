@@ -7,6 +7,11 @@ class TransactionUI {
     this.recurringManager = recurringManager;
     this.onUpdate = onUpdate;
     this.cloudSync = cloudSync;
+
+    // Track event listeners for cleanup
+    this._boundEscapeHandler = null;
+    this._boundWindowClickHandler = null;
+
     this.daySpecificOptions = [
       { value: "1-0", label: "First Sunday" },
       { value: "1-1", label: "First Monday" },
@@ -55,18 +60,23 @@ class TransactionUI {
         this.closeModals();
       };
     });
-    window.onclick = (event) => {
+
+    // Store bound handlers for cleanup
+    this._boundWindowClickHandler = (event) => {
       const transactionModal = document.getElementById("transactionModal");
       const searchModal = document.getElementById("searchModal");
       if (event.target == transactionModal || event.target == searchModal) {
         this.closeModals();
       }
     };
-    document.addEventListener("keydown", (event) => {
+    window.addEventListener("click", this._boundWindowClickHandler);
+
+    this._boundEscapeHandler = (event) => {
       if (event.key === "Escape") {
         this.closeModals();
       }
-    });
+    };
+    document.addEventListener("keydown", this._boundEscapeHandler);
     const transactionType = document.getElementById("transactionType");
     const recurrenceSelect = document.getElementById("transactionRecurrence");
     const transactionDescription = document.getElementById("transactionDescription");
@@ -88,6 +98,20 @@ class TransactionUI {
       this.updateRecurrenceOptions();
     });
     this.setupFocusTrap("transactionModal");
+    this.setupFocusTrap("searchModal");
+  }
+
+
+  // Cleanup method to remove event listeners (call when destroying UI)
+  destroy() {
+    if (this._boundWindowClickHandler) {
+      window.removeEventListener("click", this._boundWindowClickHandler);
+      this._boundWindowClickHandler = null;
+    }
+    if (this._boundEscapeHandler) {
+      document.removeEventListener("keydown", this._boundEscapeHandler);
+      this._boundEscapeHandler = null;
+    }
   }
 
 

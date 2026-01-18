@@ -36,12 +36,14 @@ class RecurringTransactionManager {
   }
 
   
+  // Parse date string to Date object using noon to avoid DST issues
   parseDateString(dateString) {
     const [year, month, day] = dateString.split("-").map(Number);
-    return new Date(year, month - 1, day);
+    return new Date(year, month - 1, day, 12, 0, 0);
   }
 
   
+  // Calculate days between two dates consistently using UTC
   daysBetween(startDate, endDate) {
     const startUtc = Date.UTC(
       startDate.getFullYear(),
@@ -54,6 +56,17 @@ class RecurringTransactionManager {
       endDate.getDate()
     );
     return Math.floor((endUtc - startUtc) / (1000 * 60 * 60 * 24));
+  }
+
+  // Check if a year is a leap year
+  isLeapYear(year) {
+    return (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0);
+  }
+
+  // Adjust day for months with fewer days (handles Feb 29 in non-leap years, etc.)
+  adjustDayForMonth(year, month, preferredDay) {
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    return Math.min(preferredDay, daysInMonth);
   }
 
   
@@ -618,9 +631,10 @@ class RecurringTransactionManager {
     if (isLastDayOfMonth) {
       targetDay = endOfMonth.getDate();
     } else {
-      targetDay = Math.min(startDay, endOfMonth.getDate());
+      // Use adjustDayForMonth to handle leap years and short months
+      targetDay = this.adjustDayForMonth(year, month, startDay);
     }
-    let targetDate = new Date(year, month, targetDay);
+    let targetDate = new Date(year, month, targetDay, 12, 0, 0);
     let originalDateString = null;
     if (rt.businessDayAdjustment) {
       const { adjustedDate, originalDateString: origDate } = 
@@ -827,9 +841,9 @@ class RecurringTransactionManager {
       return;
     }
     const startDay = startDate.getDate();
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-    const targetDay = Math.min(startDay, daysInMonth);
-    let targetDate = new Date(year, month, targetDay);
+    // Use adjustDayForMonth to handle leap years and short months
+    const targetDay = this.adjustDayForMonth(year, month, startDay);
+    let targetDate = new Date(year, month, targetDay, 12, 0, 0);
     let originalDateString = null;
     if (rt.businessDayAdjustment) {
       const result = this.adjustForBusinessDay(
@@ -846,17 +860,17 @@ class RecurringTransactionManager {
       ) {
         const dateString = Utils.formatDateString(targetDate);
         this.addRecurringTransactionToDate(
-          rt, 
-          dateString, 
-          targetDate, 
-          startDate, 
+          rt,
+          dateString,
+          targetDate,
+          startDate,
           originalDateString
         );
       }
     }
   }
-  
-  
+
+
   applySemiAnnualRecurrence(
     rt,
     startDate,
@@ -878,9 +892,9 @@ class RecurringTransactionManager {
       return;
     }
     const startDay = startDate.getDate();
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-    const targetDay = Math.min(startDay, daysInMonth);
-    let targetDate = new Date(year, month, targetDay);
+    // Use adjustDayForMonth to handle leap years and short months
+    const targetDay = this.adjustDayForMonth(year, month, startDay);
+    let targetDate = new Date(year, month, targetDay, 12, 0, 0);
     let originalDateString = null;
     if (rt.businessDayAdjustment) {
       const result = this.adjustForBusinessDay(
@@ -1165,9 +1179,10 @@ class RecurringTransactionManager {
           }
           break;
       }
-      for (let i = 0; i < occurrences; i++) {
-        amount += amount * (rt.variablePercentage / 100);
-      }
+      // Use linear calculation (not compound) for variable amounts
+      // Linear: base + (base * percentage * occurrences)
+      const baseAmount = rt.amount;
+      amount = baseAmount + (baseAmount * (rt.variablePercentage / 100) * occurrences);
     }
 
     return amount;
@@ -1204,9 +1219,10 @@ class RecurringTransactionManager {
         break;
 
       case "semi-monthly":
-        count =
-          (beforeDate.getFullYear() - startDate.getFullYear()) * 24 +
-          (beforeDate.getMonth() - startDate.getMonth()) * 2;
+        // Calculate total months difference
+        const monthsDiff =
+          (beforeDate.getFullYear() - startDate.getFullYear()) * 12 +
+          (beforeDate.getMonth() - startDate.getMonth());
 
         const firstDay = rt.semiMonthlyDays ? rt.semiMonthlyDays[0] : 1;
         const secondDay = rt.semiMonthlyDays ? rt.semiMonthlyDays[1] : 15;
@@ -1215,16 +1231,22 @@ class RecurringTransactionManager {
             ? new Date(beforeDate.getFullYear(), beforeDate.getMonth() + 1, 0).getDate()
             : secondDay;
 
-        if (startDate.getDate() <= firstDay) {
-          if (beforeDate.getDate() < firstDay) {
-            count -= 2;
-          } else if (beforeDate.getDate() < effectiveSecondDay) {
-            count -= 1;
-          }
-        } else if (startDate.getDate() <= secondDay) {
-          if (beforeDate.getDate() < effectiveSecondDay) {
-            count -= 1;
-          }
+        // Count occurrences in completed months (2 per month)
+        count = monthsDiff * 2;
+
+        // Adjust for start month partial - subtract occurrences that happened before startDate
+        if (startDate.getDate() > firstDay) {
+          count -= 1; // First occurrence was before start
+        }
+        if (startDate.getDate() > secondDay) {
+          count -= 1; // Second occurrence was before start
+        }
+
+        // Adjust for current month partial - subtract occurrences that haven't happened yet
+        if (beforeDate.getDate() < firstDay) {
+          count -= 2; // Neither occurrence has happened this month
+        } else if (beforeDate.getDate() < effectiveSecondDay) {
+          count -= 1; // Second occurrence hasn't happened yet
         }
         break;
 

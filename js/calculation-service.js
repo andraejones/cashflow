@@ -17,6 +17,9 @@ class CalculationService {
 
 
   updateMonthlyBalances(viewedDate) {
+    // Invalidate cache at the START to ensure fresh calculations
+    this.invalidateCache();
+
     const transactions = this.store.getTransactions();
     const monthlyBalances = this.store.getMonthlyBalances();
     for (const key in monthlyBalances) {
@@ -47,7 +50,8 @@ class CalculationService {
     }
     if (!earliestDate) {
       const today = new Date();
-      const currentMonthKey = `${today.getFullYear()}-${today.getMonth() + 1}`;
+      // Use padded month format consistently: YYYY-MM
+      const currentMonthKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
 
       monthlyBalances[currentMonthKey] = {
         startingBalance: 0,
@@ -55,7 +59,7 @@ class CalculationService {
       };
 
       if (viewedDate) {
-        const viewedMonthKey = `${viewedDate.getFullYear()}-${viewedDate.getMonth() + 1}`;
+        const viewedMonthKey = `${viewedDate.getFullYear()}-${String(viewedDate.getMonth() + 1).padStart(2, "0")}`;
 
         if (viewedMonthKey !== currentMonthKey) {
           monthlyBalances[viewedMonthKey] = {
@@ -77,16 +81,17 @@ class CalculationService {
       const lastMonth = (year === endYear) ? endMonth : 12;
 
       for (let month = firstMonth; month <= lastMonth; month++) {
-        allMonths.push(`${year}-${month}`);
+        // Use padded month format consistently: YYYY-MM
+        allMonths.push(`${year}-${String(month).padStart(2, "0")}`);
       }
     }
     const lastMonthYear = endYear;
     const lastMonthMonth = endMonth;
 
     if (lastMonthMonth === 12) {
-      allMonths.push(`${lastMonthYear + 1}-1`);
+      allMonths.push(`${lastMonthYear + 1}-01`);
     } else {
-      allMonths.push(`${lastMonthYear}-${lastMonthMonth + 1}`);
+      allMonths.push(`${lastMonthYear}-${String(lastMonthMonth + 1).padStart(2, "0")}`);
     }
     allMonths.sort((a, b) => {
       const [yearA, monthA] = a.split('-').map(Number);
@@ -161,7 +166,7 @@ class CalculationService {
       }
       previousBalance = monthlyBalances[monthKey].endingBalance;
     });
-    this.invalidateCache();
+    // Save data (cache was already invalidated at start)
     this.store.saveData(false);
   }
 
@@ -216,7 +221,8 @@ class CalculationService {
 
 
   calculateMonthlySummary(year, month) {
-    const monthKey = `${year}-${month + 1}`;
+    // Use padded month format consistently: YYYY-MM
+    const monthKey = `${year}-${String(month + 1).padStart(2, "0")}`;
     if (this._cachedSummaries[monthKey]) {
       return this._cachedSummaries[monthKey];
     }

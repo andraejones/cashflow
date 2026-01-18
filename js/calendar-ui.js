@@ -15,6 +15,10 @@ class CalendarUI {
     this.transactionUI = transactionUI;
     this.debtSnowball = debtSnowball;
     this.currentDate = new Date();
+
+    // Track bound event handlers for cleanup
+    this._boundDayClickHandler = null;
+
     this.initEventListeners();
   }
 
@@ -42,7 +46,38 @@ class CalendarUI {
       });
     }
 
+    // Use event delegation for day clicks to avoid memory leaks
+    const calendarDays = document.getElementById("calendarDays");
+    if (calendarDays) {
+      this._boundDayClickHandler = (event) => {
+        const dayElement = event.target.closest('.day[data-date]');
+        if (dayElement && !dayElement.classList.contains('other-month')) {
+          const dateString = dayElement.getAttribute('data-date');
+          if (dateString) {
+            event.stopPropagation();
+            try {
+              this.transactionUI.showTransactionDetails(dateString);
+            } catch (error) {
+              console.error("Error showing transaction details:", error);
+              this.openTransactionModalFallback(dateString);
+            }
+          }
+        }
+      };
+      calendarDays.addEventListener("click", this._boundDayClickHandler);
+    }
+
     this.cleanUpHtmlArtifacts();
+  }
+
+
+  // Cleanup method to remove event listeners
+  destroy() {
+    const calendarDays = document.getElementById("calendarDays");
+    if (calendarDays && this._boundDayClickHandler) {
+      calendarDays.removeEventListener("click", this._boundDayClickHandler);
+      this._boundDayClickHandler = null;
+    }
   }
 
 
@@ -248,16 +283,7 @@ class CalendarUI {
         }
       `;
       day.setAttribute('data-date', dateString);
-      day.addEventListener("click", (event) => {
-        event.stopPropagation();
-        console.log('Day clicked:', dateString);
-        try {
-          this.transactionUI.showTransactionDetails(dateString);
-        } catch (error) {
-          console.error("Error showing transaction details:", error);
-          this.openTransactionModalFallback(dateString);
-        }
-      });
+      // Event listener is handled via delegation in initEventListeners()
 
       calendarDays.appendChild(day);
     }
