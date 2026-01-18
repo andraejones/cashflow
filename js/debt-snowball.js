@@ -94,6 +94,7 @@ class DebtSnowballUI {
     this.currentViewYear = null;
     this.currentViewMonth = null;
     this.editingCashInfusionId = null;
+    this.convertingFromRecurringId = null; // Track recurring transaction being converted to debt
 
     // Cash infusion DOM references
     this.cashInfusionList = document.getElementById("cashInfusionList");
@@ -243,10 +244,64 @@ class DebtSnowballUI {
     this.modal.setAttribute("aria-hidden", "true");
     this.hideDebtForm();
     this.hideCashInfusionForm();
+    this.convertingFromRecurringId = null;
     if (this.lastFocusedElement && document.contains(this.lastFocusedElement)) {
       this.lastFocusedElement.focus();
     }
     this.lastFocusedElement = null;
+  }
+
+  // Convert a recurring transaction to a debt - opens modal with pre-populated form
+  showDebtFormFromRecurring(recurringTransaction) {
+    if (!recurringTransaction) return;
+
+    // Track which recurring transaction we're converting
+    this.convertingFromRecurringId = recurringTransaction.id;
+
+    // Open the modal
+    this.showModal();
+
+    // Build a debt-like object from the recurring transaction
+    const debtFromRecurring = {
+      name: recurringTransaction.description || "",
+      balance: "", // User must fill this in
+      minPayment: recurringTransaction.amount || 0,
+      recurrence: recurringTransaction.recurrence || "monthly",
+      dueDay: this.extractDayFromDate(recurringTransaction.startDate) || 1,
+      dueStartDate: recurringTransaction.startDate || "",
+      dueDayPattern: recurringTransaction.daySpecific ? recurringTransaction.daySpecificData : "",
+      interestRate: "", // User must fill this in
+      businessDayAdjustment: recurringTransaction.businessDayAdjustment || "none",
+      semiMonthlyDays: recurringTransaction.semiMonthlyDays || null,
+      semiMonthlyLastDay: recurringTransaction.semiMonthlyLastDay || false,
+      customInterval: recurringTransaction.customInterval || null,
+      variableAmount: recurringTransaction.variableAmount || false,
+      variablePercentage: recurringTransaction.variablePercentage || 0,
+      endDate: recurringTransaction.endDate || "",
+      maxOccurrences: recurringTransaction.maxOccurrences || null,
+    };
+
+    // Show the form with pre-populated data
+    this.showDebtForm(debtFromRecurring);
+
+    // Update form title to indicate conversion
+    if (this.debtFormTitle) {
+      this.debtFormTitle.textContent = "Convert to Debt";
+    }
+
+    // Focus on balance input since that's what user needs to fill in
+    if (this.debtBalanceInput) {
+      this.debtBalanceInput.focus();
+    }
+  }
+
+  extractDayFromDate(dateString) {
+    if (!dateString) return 1;
+    const parts = dateString.split("-");
+    if (parts.length === 3) {
+      return parseInt(parts[2], 10) || 1;
+    }
+    return 1;
   }
 
   refresh() {
@@ -916,6 +971,7 @@ class DebtSnowballUI {
     if (!this.debtForm) return;
     this.debtForm.style.display = "none";
     this.editingDebtId = null;
+    this.convertingFromRecurringId = null; // Clear conversion tracking
     if (this.debtNameInput) this.debtNameInput.value = "";
     if (this.debtBalanceInput) this.debtBalanceInput.value = "";
     if (this.debtMinPaymentInput) this.debtMinPaymentInput.value = "";
@@ -1030,7 +1086,15 @@ class DebtSnowballUI {
       if (createdDebt) {
         this.ensureMinimumPaymentRecurring(createdDebt);
       }
-      Utils.showNotification("Debt added");
+
+      // If converting from a recurring transaction, delete it
+      if (this.convertingFromRecurringId) {
+        this.store.deleteRecurringTransaction(this.convertingFromRecurringId);
+        this.convertingFromRecurringId = null;
+        Utils.showNotification("Recurring transaction converted to debt");
+      } else {
+        Utils.showNotification("Debt added");
+      }
     }
     this.hideDebtForm();
     this.refresh();
@@ -1178,6 +1242,7 @@ class DebtSnowballUI {
     const dummyStore = {
       getTransactions: () => transactions,
       getRecurringTransactions: () => [recurringTransaction],
+      getSkippedTransactions: () => ({}),
       isTransactionSkipped: () => false,
       saveData: () => { },
     };
