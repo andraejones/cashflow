@@ -441,6 +441,29 @@ h4 {
   z-index: 999;
 }
 
+/* Cloud sync indicator */
+.cloud-sync-indicator {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  padding: 8px 16px;
+  background-color: var(--primary-color);
+  color: #fff;
+  border-radius: var(--radius-sm);
+  font-size: 0.875rem;
+  font-weight: 500;
+  opacity: 0;
+  transform: translateY(-10px);
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  z-index: 1100;
+  pointer-events: none;
+}
+
+.cloud-sync-indicator.syncing {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 body.app-locked .calendar-container,
 body.app-locked #calendarOptions {
   filter: blur(10px);

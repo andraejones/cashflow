@@ -4,10 +4,11 @@
 const ModalManager = {
   _baseZIndex: 1000,
   _openModals: [],
+  _zIndexCounter: 0,
 
   // Register a modal as opened and assign z-index
   openModal: function (modalElement) {
-    if (!modalElement) return;
+    if (!modalElement) return undefined;
 
     // Remove if already in stack (re-opening)
     this._openModals = this._openModals.filter(m => m !== modalElement);
@@ -15,9 +16,11 @@ const ModalManager = {
     // Add to stack
     this._openModals.push(modalElement);
 
-    // Assign z-index based on position in stack
-    const zIndex = this._baseZIndex + (this._openModals.length * 10);
+    // Increment counter and assign z-index
+    this._zIndexCounter++;
+    const zIndex = this._baseZIndex + (this._zIndexCounter * 10);
     modalElement.style.zIndex = zIndex;
+    return zIndex;
   },
 
   // Unregister a modal when closed
@@ -55,9 +58,10 @@ const ModalManager = {
     return this.closeModal(modalElement);
   },
 
-  // Get the next z-index value for a new modal
+  // Get the next z-index value for a new modal (always increasing)
   getNextZIndex: function () {
-    return this._baseZIndex + ((this._openModals.length + 1) * 10);
+    this._zIndexCounter++;
+    return this._baseZIndex + (this._zIndexCounter * 10);
   }
 };
 
