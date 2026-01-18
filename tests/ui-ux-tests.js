@@ -16,7 +16,7 @@
  *   4. The tests will run automatically and output results
  */
 
-(function() {
+(function () {
   'use strict';
 
   // Test utilities
@@ -179,7 +179,7 @@
 
       // Test 4.6: Test multiple modal stacking
       if (typeof window.ModalManager.register === 'function' &&
-          typeof window.ModalManager.unregister === 'function') {
+        typeof window.ModalManager.unregister === 'function') {
         const modal1 = createTestElement('div', { id: 'testModal4a', className: 'modal' });
         const modal2 = createTestElement('div', { id: 'testModal4b', className: 'modal' });
 
@@ -273,7 +273,7 @@
           // Test 5.5: Check overlay contains loading message or spinner
           const hasSpinner = overlay.querySelector('.loading-spinner') !== null;
           const hasMessage = overlay.textContent.includes('Test loading message') ||
-                            overlay.textContent.includes('Loading');
+            overlay.textContent.includes('Loading');
           TestRunner.assert(
             hasSpinner || hasMessage || overlay.children.length > 0,
             'Loading overlay contains spinner or message',
@@ -288,8 +288,8 @@
 
           const overlayAfterHide = document.querySelector('.loading-overlay');
           const isHidden = !overlayAfterHide ||
-                          window.getComputedStyle(overlayAfterHide).display === 'none' ||
-                          window.getComputedStyle(overlayAfterHide).visibility === 'hidden';
+            window.getComputedStyle(overlayAfterHide).display === 'none' ||
+            window.getComputedStyle(overlayAfterHide).visibility === 'hidden';
           TestRunner.assert(
             isHidden,
             'hideLoadingOverlay() removes or hides the overlay',
@@ -340,9 +340,9 @@
 
     // Test 6.2: Check for dedicated announcement region
     const announcementRegion = document.querySelector('[aria-live="polite"]') ||
-                               document.querySelector('[aria-live="assertive"]') ||
-                               document.getElementById('aria-announcements') ||
-                               document.getElementById('sr-announcements');
+      document.querySelector('[aria-live="assertive"]') ||
+      document.getElementById('aria-announcements') ||
+      document.getElementById('sr-announcements');
     TestRunner.assertExists(
       announcementRegion,
       'Dedicated aria-live announcement region exists'
@@ -391,7 +391,7 @@
     const searchResults = document.getElementById('searchResults');
     if (searchResults) {
       const hasAriaLive = searchResults.hasAttribute('aria-live') ||
-                          searchResults.closest('[aria-live]') !== null;
+        searchResults.closest('[aria-live]') !== null;
       TestRunner.assert(
         hasAriaLive,
         'Search results region has aria-live attribute',
@@ -415,8 +415,8 @@
         const toasts = document.querySelectorAll('.success-toast, .error-toast');
         toasts.forEach(toast => {
           if (toast.hasAttribute('role') ||
-              toast.hasAttribute('aria-live') ||
-              toast.closest('[aria-live]')) {
+            toast.hasAttribute('aria-live') ||
+            toast.closest('[aria-live]')) {
             notificationAnnounced = true;
           }
         });
@@ -443,7 +443,7 @@
     const calendarDays = document.getElementById('calendarDays');
     if (calendarDays) {
       const hasGridRole = calendarDays.getAttribute('role') === 'grid' ||
-                          calendarDays.getAttribute('role') === 'region';
+        calendarDays.getAttribute('role') === 'region';
       TestRunner.assert(
         hasGridRole,
         'Calendar days container has appropriate ARIA role',
@@ -461,7 +461,7 @@
     // Test 7.1: Check CSS variables for negative balance colors exist
     const rootStyles = getComputedStyle(document.documentElement);
     const errorColor = rootStyles.getPropertyValue('--error-color').trim() ||
-                       rootStyles.getPropertyValue('--negative-color').trim();
+      rootStyles.getPropertyValue('--negative-color').trim();
     TestRunner.assert(
       errorColor !== '',
       'CSS variable for error/negative color is defined',
@@ -481,11 +481,11 @@
             for (let rule of rules) {
               if (rule.selectorText) {
                 if (rule.selectorText.includes('.negative-balance') ||
-                    rule.selectorText.includes('.unallocated-negative')) {
+                  rule.selectorText.includes('.unallocated-negative')) {
                   hasNegativeBalanceClass = true;
                 }
                 if (rule.selectorText.includes('.negative-indicator') ||
-                    rule.selectorText.includes('.balance-warning')) {
+                  rule.selectorText.includes('.balance-warning')) {
                   hasNegativeIndicatorClass = true;
                 }
               }
@@ -496,11 +496,15 @@
         }
       }
     } catch (e) {
-      // Fallback: check if classes exist by creating test element
+      // Outer catch - continue to fallback
+    }
+
+    // Fallback: Always check with element-based detection if stylesheet scan didn't find it
+    if (!hasNegativeBalanceClass) {
       const testEl = createTestElement('div', { className: 'negative-balance' });
       const testStyle = window.getComputedStyle(testEl);
       hasNegativeBalanceClass = testStyle.backgroundColor !== 'rgba(0, 0, 0, 0)' ||
-                                testStyle.color !== 'rgb(0, 0, 0)';
+        testStyle.color !== 'rgb(0, 0, 0)';
       removeTestElement(testEl);
     }
 
@@ -519,10 +523,10 @@
       negativeBalanceElements.forEach(el => {
         // Check for icon elements
         if (el.querySelector('[class*="icon"]') ||
-            el.querySelector('svg') ||
-            el.querySelector('[aria-hidden="true"]') ||
-            el.textContent.includes('!') ||
-            el.textContent.includes('\u26A0')) { // Warning sign
+          el.querySelector('svg') ||
+          el.querySelector('[aria-hidden="true"]') ||
+          el.textContent.includes('!') ||
+          el.textContent.includes('\u26A0')) { // Warning sign
           hasVisualIndicator = true;
         }
 
@@ -534,7 +538,7 @@
 
         // Check for background pattern or different styling
         if (style.backgroundColor !== 'rgba(0, 0, 0, 0)' &&
-            style.backgroundColor !== 'transparent') {
+          style.backgroundColor !== 'transparent') {
           hasVisualIndicator = true;
         }
       });
@@ -553,7 +557,7 @@
 
       const testStyle = window.getComputedStyle(testDay);
       hasVisualIndicator = testStyle.borderWidth !== '0px' ||
-                          testStyle.backgroundColor !== 'rgba(0, 0, 0, 0)';
+        testStyle.backgroundColor !== 'rgba(0, 0, 0, 0)';
 
       TestRunner.assert(
         hasVisualIndicator,
@@ -566,7 +570,7 @@
 
     // Test 7.4: Check if Utils has method to add negative balance indicators
     const hasAddIndicator = typeof Utils.addNegativeIndicator === 'function' ||
-                            typeof Utils.formatBalanceWithIndicator === 'function';
+      typeof Utils.formatBalanceWithIndicator === 'function';
     TestRunner.assert(
       hasAddIndicator,
       'Utility function exists for adding negative balance indicators',
@@ -578,8 +582,8 @@
     const crisisStyle = window.getComputedStyle(firstCrisisTest);
 
     const hasCrisisIndicator = crisisStyle.borderStyle !== 'none' ||
-                               crisisStyle.backgroundColor !== 'rgba(0, 0, 0, 0)' ||
-                               crisisStyle.boxShadow !== 'none';
+      crisisStyle.backgroundColor !== 'rgba(0, 0, 0, 0)' ||
+      crisisStyle.boxShadow !== 'none';
 
     TestRunner.assert(
       hasCrisisIndicator,
@@ -601,7 +605,7 @@
 
       // Check it's not pure black or too similar to default text
       const isDistinctColor = computedColor !== 'rgb(0, 0, 0)' &&
-                              computedColor !== 'rgb(31, 43, 42)'; // ink-color
+        computedColor !== 'rgb(31, 43, 42)'; // ink-color
 
       TestRunner.assert(
         isDistinctColor,
@@ -621,13 +625,13 @@
           if (rules) {
             for (let rule of rules) {
               if (rule.selectorText &&
-                  (rule.selectorText.includes('warning') ||
-                   rule.selectorText.includes('negative') ||
-                   rule.selectorText.includes('crisis'))) {
+                (rule.selectorText.includes('warning') ||
+                  rule.selectorText.includes('negative') ||
+                  rule.selectorText.includes('crisis'))) {
                 const cssText = rule.cssText || '';
                 if (cssText.includes('content:') ||
-                    cssText.includes('::before') ||
-                    cssText.includes('::after')) {
+                  cssText.includes('::before') ||
+                  cssText.includes('::after')) {
                   hasWarningIcon = true;
                 }
               }
@@ -638,7 +642,7 @@
         }
       }
     } catch (e) {
-      // Fallback check
+      // Fallback check - continue below
     }
 
     // Also check if there's an icon mechanism in the DOM generation
@@ -647,13 +651,25 @@
       const daysWithIndicators = calendarDays.querySelectorAll('.negative-balance, .first-crisis');
       daysWithIndicators.forEach(day => {
         if (day.innerHTML.includes('!') ||
-            day.innerHTML.includes('icon') ||
-            day.innerHTML.includes('warning') ||
-            day.innerHTML.includes('\u26A0') ||
-            day.innerHTML.includes('&#x26A0;')) {
+          day.innerHTML.includes('icon') ||
+          day.innerHTML.includes('warning') ||
+          day.innerHTML.includes('\u26A0') ||
+          day.innerHTML.includes('&#x26A0;')) {
           hasWarningIcon = true;
         }
       });
+    }
+
+    // Fallback: Check pseudo-element content on a test element
+    if (!hasWarningIcon) {
+      const testDay = createTestElement('div', { className: 'negative-balance' });
+      const testBalance = createTestElement('div', { className: 'balance' }, testDay);
+      // Allow styles to apply
+      const beforeContent = window.getComputedStyle(testBalance, '::before').content;
+      if (beforeContent && beforeContent !== 'none' && beforeContent !== '""') {
+        hasWarningIcon = true;
+      }
+      removeTestElement(testDay);
     }
 
     TestRunner.assert(
