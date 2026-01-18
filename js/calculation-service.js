@@ -9,6 +9,11 @@ class CalculationService {
     this._cachedDailyTotals = {};
   }
 
+  // Round to cents to prevent floating-point drift in balance calculations
+  roundToCents(value) {
+    return Math.round((Number(value) || 0) * 100) / 100;
+  }
+
 
   invalidateCache() {
     this._cachedSummaries = {};
@@ -155,13 +160,13 @@ class CalculationService {
       }
       if (firstDayBalance !== null) {
         monthlyBalances[monthKey] = {
-          startingBalance: firstDayBalance,
-          endingBalance: runningBalance,
+          startingBalance: this.roundToCents(firstDayBalance),
+          endingBalance: this.roundToCents(runningBalance),
         };
       } else {
         monthlyBalances[monthKey] = {
-          startingBalance: isFirstMonth ? 0 : previousBalance,
-          endingBalance: runningBalance,
+          startingBalance: this.roundToCents(isFirstMonth ? 0 : previousBalance),
+          endingBalance: this.roundToCents(runningBalance),
         };
       }
       previousBalance = monthlyBalances[monthKey].endingBalance;
