@@ -10,6 +10,9 @@ class CashflowApp {
       this.store,
       this.recurringManager
     );
+    // Operation lock to prevent race conditions during cloud load/save
+    this._operationLock = false;
+    this._pendingUpdateUI = false;
     this.cloudSync = new CloudSync(this.store, () => this.updateUI());
     this.transactionUI = new TransactionUI(
       this.store,
@@ -46,7 +49,7 @@ class CashflowApp {
   async init() {
     try {
       this.cleanUpHtmlArtifacts();
-      await this.cloudSync.loadFromCloud();
+      await this.safeCloudLoad();
     } catch (error) {
       console.error("Error loading from cloud:", error);
     }
@@ -56,13 +59,34 @@ class CashflowApp {
     // Set up callback to refresh from cloud after PIN unlock (session resume)
     this.pinProtection.onUnlockCallback = async () => {
       try {
-        await this.cloudSync.loadFromCloud();
+        await this.safeCloudLoad();
         this.calculationService.invalidateCache();
         this.updateUI();
       } catch (error) {
         console.error("Error refreshing from cloud after unlock:", error);
       }
     };
+  }
+
+
+  // Safe cloud load with operation locking to prevent race conditions
+  async safeCloudLoad() {
+    if (this._operationLock) {
+      console.log("Operation in progress, skipping cloud load");
+      return false;
+    }
+    this._operationLock = true;
+    try {
+      await this.cloudSync.loadFromCloud();
+      return true;
+    } finally {
+      this._operationLock = false;
+      // If UI update was requested during lock, do it now
+      if (this._pendingUpdateUI) {
+        this._pendingUpdateUI = false;
+        this.updateUI();
+      }
+    }
   }
 
 
@@ -80,6 +104,11 @@ class CashflowApp {
 
 
   updateUI() {
+    // If operation is locked (e.g., cloud loading), defer UI update
+    if (this._operationLock) {
+      this._pendingUpdateUI = true;
+      return;
+    }
     this.calendarUI.generateCalendar();
   }
 
