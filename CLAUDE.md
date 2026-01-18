@@ -81,5 +81,5 @@ pin_hash, github_token_encrypted, gist_id, auto_sync_enabled
 
 ## Important Files
 
-- `saveformat.md` - Complete JSON export schema documentation
 - `styles.css` - CSS variables for theming (primary, accent, error colors)
+- `tests/` - Performance and UI/UX test suites

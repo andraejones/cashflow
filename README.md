@@ -8,7 +8,7 @@ Plan and monitor monthly cash movement and debts.
 
 ## Documentation status
 
-Updated for appVersion 2.0.0 on 2026-01-09 (source of truth: `js/transaction-store.js`).
+Updated for appVersion 2.0.0 on 2026-01-18 (source of truth: `js/transaction-store.js`).
 
 ## Features
 
@@ -34,7 +34,7 @@ Updated for appVersion 2.0.0 on 2026-01-09 (source of truth: `js/transaction-sto
 
 ## Data format
 
-The exported JSON schema is documented in `saveformat.md`.
+The exported JSON schema includes: `transactions`, `monthlyBalances`, `recurringTransactions`, `skippedTransactions`, `debts`, `cashInfusions`, `debtSnowballSettings`, `monthlyNotes`, and metadata fields. See `CLAUDE.md` for localStorage key details.
 
 ## Project structure
 
@@ -50,3 +50,4 @@ The exported JSON schema is documented in `saveformat.md`.
 - `js/debt-snowball.js`: debt snowball modeling.
 - `js/pin-protection.js`: PIN locking and encryption.
 - `js/utils.js`: date and ID helpers plus notifications.
+- `tests/`: performance and UI/UX test suites.
