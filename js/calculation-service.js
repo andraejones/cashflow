@@ -214,9 +214,9 @@ class CalculationService {
     }
 
     const result = {
-      income,
-      expense,
-      balance,
+      income: this.roundToCents(income),
+      expense: this.roundToCents(expense),
+      balance: balance !== null ? this.roundToCents(balance) : null,
       hasSkippedTransactions,
     };
     this._cachedDailyTotals[dateString] = result;
@@ -259,10 +259,10 @@ class CalculationService {
     }
 
     const result = {
-      startingBalance: startingBalance,
-      endingBalance: endingBalance,
-      income: monthIncome,
-      expense: monthExpense,
+      startingBalance: this.roundToCents(startingBalance),
+      endingBalance: this.roundToCents(endingBalance),
+      income: this.roundToCents(monthIncome),
+      expense: this.roundToCents(monthExpense),
     };
     this._cachedSummaries[monthKey] = result;
 
@@ -289,7 +289,7 @@ class CalculationService {
       if (dailyTotals.balance !== null) {
         runningBalance = dailyTotals.balance;
       } else {
-        runningBalance += dailyTotals.income - dailyTotals.expense;
+        runningBalance = this.roundToCents(runningBalance + dailyTotals.income - dailyTotals.expense);
       }
     }
 
@@ -317,7 +317,7 @@ class CalculationService {
       if (dailyTotals.balance !== null) {
         runningBalance = dailyTotals.balance;
       } else {
-        runningBalance += dailyTotals.income - dailyTotals.expense;
+        runningBalance = this.roundToCents(runningBalance + dailyTotals.income - dailyTotals.expense);
       }
 
       // Capture the first time balance goes to zero or negative

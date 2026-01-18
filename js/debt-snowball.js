@@ -1397,10 +1397,24 @@ class DebtSnowballUI {
     const currentMonth = today.getMonth();
     const viewIndex = this.getMonthIndex(viewYear, viewMonth);
     const currentIndex = this.getMonthIndex(currentYear, currentMonth);
-    const baseYear = viewIndex <= currentIndex ? viewYear : currentYear;
-    const baseMonth = viewIndex <= currentIndex ? viewMonth : currentMonth;
+    // Always use current month as the base for projections to ensure consistency.
+    // For past months, we still project from current month but capture the
+    // actual historical balances separately for display purposes.
+    const baseYear = currentYear;
+    const baseMonth = currentMonth;
     const baseDate = new Date(baseYear, baseMonth, 1);
     const baseSummaries = this.getDebtSummaries(baseDate);
+
+    // For past month views, get historical balances for display
+    let historicalViewBalances = null;
+    if (viewIndex < currentIndex) {
+      const viewDate = new Date(viewYear, viewMonth, 1);
+      const historicalSummaries = this.getDebtSummaries(viewDate);
+      historicalViewBalances = {};
+      historicalSummaries.forEach(({ debt, remaining }) => {
+        historicalViewBalances[debt.id] = Number(remaining) || 0;
+      });
+    }
     let balances = {};
     const debtById = {};
     const recurringTemplates = {};
@@ -1593,7 +1607,8 @@ class DebtSnowballUI {
     }
 
     if (viewBalances === null) {
-      viewBalances = { ...balances };
+      // For past months, use historical balances; otherwise use projected balances
+      viewBalances = historicalViewBalances || { ...balances };
     }
 
     return {

@@ -69,9 +69,26 @@ const ModalManager = {
 window.ModalManager = ModalManager;
 
 const Utils = {
+  // Counter to ensure uniqueness for IDs generated in the same millisecond
+  _idCounter: 0,
+  _lastIdTimestamp: 0,
 
   generateUniqueId: function () {
-    return Date.now().toString(36) + Math.random().toString(36).substring(2);
+    const now = Date.now();
+
+    // Reset counter if timestamp changed, otherwise increment
+    if (now !== this._lastIdTimestamp) {
+      this._lastIdTimestamp = now;
+      this._idCounter = 0;
+    } else {
+      this._idCounter++;
+    }
+
+    // Combine timestamp + counter + random for collision resistance
+    // - timestamp (base 36): ~8 chars, provides temporal uniqueness
+    // - counter (base 36): handles multiple IDs per millisecond
+    // - random (base 36): adds entropy, ~11 chars from substring(2)
+    return now.toString(36) + this._idCounter.toString(36) + Math.random().toString(36).substring(2);
   },
 
 
