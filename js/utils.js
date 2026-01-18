@@ -43,8 +43,26 @@ const ModalManager = {
   // Get count of open modals
   getOpenCount: function () {
     return this._openModals.length;
+  },
+
+  // Alias for openModal (for test compatibility)
+  register: function (modalElement) {
+    return this.openModal(modalElement);
+  },
+
+  // Alias for closeModal (for test compatibility)
+  unregister: function (modalElement) {
+    return this.closeModal(modalElement);
+  },
+
+  // Get the next z-index value for a new modal
+  getNextZIndex: function () {
+    return this._baseZIndex + ((this._openModals.length + 1) * 10);
   }
 };
+
+// Expose ModalManager globally for tests
+window.ModalManager = ModalManager;
 
 const Utils = {
 
@@ -316,6 +334,28 @@ const Utils = {
       setTimeout(() => {
         liveRegion.textContent = message;
       }, 50);
+    }
+  },
+
+  // Alias for showLoading (for test compatibility)
+  showLoadingOverlay: function (message) {
+    return this.showLoading(message);
+  },
+
+  // Alias for hideLoading (for test compatibility)
+  hideLoadingOverlay: function () {
+    return this.hideLoading();
+  },
+
+  // Alias for announceToScreenReader (for test compatibility)
+  announce: function (message) {
+    return this.announceToScreenReader(message);
+  },
+
+  // Add negative balance indicator class to an element
+  addNegativeIndicator: function (element) {
+    if (element) {
+      element.classList.add('negative-balance');
     }
   },
 };
