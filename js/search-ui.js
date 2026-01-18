@@ -7,7 +7,7 @@ class SearchUI {
     this.recurringManager = recurringManager;
     this.transactionUI = transactionUI;
     this.currentPage = 1;
-    this.resultsPerPage = 20;
+    this.resultsPerPage = 50;
     this.totalResults = 0;
     this.searchResults = [];
 

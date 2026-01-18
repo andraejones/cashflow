@@ -1,10 +1,25 @@
 /* Cashflow Calendar styles */
+
+/* Screen reader only - visually hidden but accessible */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 :root {
   --primary-color: #0f7a6c;
   --primary-strong: #0b5d53;
   --accent-color: #f6b042;
   --accent-strong: #d9902e;
   --error-color: #e4572e;
+  --error-color-contrast: #b4321e; /* WCAG AA compliant darker red for better contrast */
   --ink-color: #1f2b2a;
   --muted-color: #5f6f6a;
   --surface-color: #ffffff;
@@ -238,18 +253,25 @@ h4 {
 
 /* All days with negative or zero balance */
 .negative-balance {
-  background-color: rgba(228, 87, 46, 0.12);
+  background-color: rgba(180, 50, 30, 0.15);
 }
 
 /* First cash flow crisis day (first ≤0) */
 .first-crisis {
-  border: 2px solid var(--error-color);
-  box-shadow: 0 0 0 2px rgba(228, 87, 46, 0.25);
+  border: 2px solid var(--error-color-contrast);
+  box-shadow: 0 0 0 2px rgba(180, 50, 30, 0.3);
 }
 
 /* Red styling for negative unallocated value in summary */
 .unallocated-negative {
-  color: var(--error-color);
+  color: var(--error-color-contrast);
+  font-weight: 700;
+}
+
+/* Warning indicator for negative balance with icon */
+.negative-balance .balance::before {
+  content: "\26A0\FE0F "; /* Warning emoji */
+  font-size: 0.85em;
 }
 
 .day-content {
@@ -266,7 +288,7 @@ h4 {
 }
 
 .expense {
-  color: var(--error-color);
+  color: var(--error-color-contrast);
   font-weight: 600;
 }
 
@@ -1016,7 +1038,7 @@ body.app-locked #calendarOptions {
 }
 
 .search-result-amount.expense {
-  color: var(--error-color);
+  color: var(--error-color-contrast);
 }
 
 .search-result-description {
@@ -1172,6 +1194,45 @@ body.app-locked #calendarOptions {
 
   100% {
     opacity: 1;
+  }
+}
+
+/* Loading overlay for async operations */
+.loading-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background-color: rgba(12, 24, 22, 0.6);
+  backdrop-filter: blur(4px);
+  z-index: 9999;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
+}
+
+.loading-overlay.active {
+  display: flex;
+}
+
+.loading-spinner {
+  width: 48px;
+  height: 48px;
+  border: 4px solid rgba(255, 255, 255, 0.3);
+  border-top-color: var(--accent-color);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.loading-text {
+  color: #fff;
+  margin-top: 16px;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 

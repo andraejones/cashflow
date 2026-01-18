@@ -19,7 +19,44 @@ class TransactionStore {
     };
     this.onSaveCallbacks = [];
 
+    // Debounce settings for batching rapid saves
+    this._saveDebounceTimer = null;
+    this._saveDebounceDelay = 500; // 500ms debounce delay
+    this._pendingIsDataModified = false;
+
     this.loadData();
+  }
+
+  // Debounced save method - batches multiple rapid changes into a single save
+  debouncedSave(isDataModified = true) {
+    // Track if any pending save has data modification
+    if (isDataModified) {
+      this._pendingIsDataModified = true;
+    }
+
+    // Clear existing timer
+    if (this._saveDebounceTimer) {
+      clearTimeout(this._saveDebounceTimer);
+    }
+
+    // Set new timer
+    this._saveDebounceTimer = setTimeout(() => {
+      this._saveDebounceTimer = null;
+      const wasModified = this._pendingIsDataModified;
+      this._pendingIsDataModified = false;
+      this.saveData(wasModified);
+    }, this._saveDebounceDelay);
+  }
+
+  // Force immediate save (useful when app is closing or for critical operations)
+  flushPendingSave() {
+    if (this._saveDebounceTimer) {
+      clearTimeout(this._saveDebounceTimer);
+      this._saveDebounceTimer = null;
+      const wasModified = this._pendingIsDataModified;
+      this._pendingIsDataModified = false;
+      this.saveData(wasModified);
+    }
   }
 
 
@@ -386,7 +423,7 @@ class TransactionStore {
       // Remove empty notes
       delete this.monthlyNotes[monthKey];
     }
-    this.saveData();
+    this.debouncedSave();
     return true;
   }
 
@@ -532,7 +569,7 @@ class TransactionStore {
     }
 
     this.transactions[date].push(transaction);
-    this.saveData();
+    this.debouncedSave();
   }
 
 
@@ -547,7 +584,7 @@ class TransactionStore {
         ...this.transactions[date][index],
         ...updatedTransaction,
       };
-      this.saveData();
+      this.debouncedSave();
     }
   }
 
@@ -565,7 +602,7 @@ class TransactionStore {
         delete this.transactions[date];
       }
 
-      this.saveData();
+      this.debouncedSave();
     }
   }
 
@@ -673,7 +710,7 @@ class TransactionStore {
         }
       }
 
-      this.saveData(isDataModified);
+      this.debouncedSave(isDataModified);
       return true;
     } catch (error) {
       console.error("Error in setTransactionSkipped:", error);

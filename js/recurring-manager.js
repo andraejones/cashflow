@@ -1,9 +1,55 @@
 // Recurring transaction manager
 
 class RecurringTransactionManager {
-  
+
   constructor(store) {
     this.store = store;
+    // Cache for expanded recurring transactions per month
+    // Key format: "YYYY-MM" + hash of recurring transaction data
+    this.expansionCache = new Map();
+    this.lastRecurringHash = null;
+  }
+
+  // Generate a simple hash of recurring transactions to detect changes
+  _generateRecurringHash() {
+    const recurringData = this.store.getRecurringTransactions();
+    const skippedData = this.store.getSkippedTransactions();
+    // Create a string representation of the data for hashing
+    const dataStr = JSON.stringify({
+      recurring: recurringData,
+      skipped: skippedData
+    });
+    // Simple hash function
+    let hash = 0;
+    for (let i = 0; i < dataStr.length; i++) {
+      const char = dataStr.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32-bit integer
+    }
+    return hash.toString();
+  }
+
+  // Invalidate cache when recurring templates change
+  invalidateCache() {
+    this.expansionCache.clear();
+    this.lastRecurringHash = null;
+  }
+
+  // Check if cache is valid for current recurring transaction state
+  _isCacheValid() {
+    const currentHash = this._generateRecurringHash();
+    if (this.lastRecurringHash !== currentHash) {
+      this.expansionCache.clear();
+      this.lastRecurringHash = currentHash;
+      return false;
+    }
+    return true;
+  }
+
+  // Get cache key for a specific month
+  _getCacheKey(year, month) {
+    const monthStr = `${year}-${String(month + 1).padStart(2, '0')}`;
+    return monthStr;
   }
 
   
@@ -13,6 +59,7 @@ class RecurringTransactionManager {
 
   
   addRecurringTransaction(recurringTransaction) {
+    this.invalidateCache();
     return this.store.addRecurringTransaction(recurringTransaction);
   }
 
@@ -32,6 +79,7 @@ class RecurringTransactionManager {
     const isCurrentlySkipped = this.isTransactionSkipped(date, recurringId);
     const newStatus = !isCurrentlySkipped;
     this.store.setTransactionSkipped(date, recurringId, newStatus);
+    this.invalidateCache();
     return newStatus;
   }
 
@@ -207,12 +255,24 @@ class RecurringTransactionManager {
   
   
   applyRecurringTransactions(year, month) {
+    // Check cache validity and use cached result if available
+    const cacheKey = this._getCacheKey(year, month);
+    const cacheValid = this._isCacheValid();
+
+    if (cacheValid && this.expansionCache.has(cacheKey)) {
+      // Cache hit - apply cached expanded transactions
+      const cachedData = this.expansionCache.get(cacheKey);
+      this._applyCachedTransactions(year, month, cachedData);
+      return;
+    }
+
+    // Cache miss - perform full expansion
     const endOfMonth = new Date(year, month + 1, 0);
     const transactions = this.store.getTransactions();
     for (let day = 1; day <= endOfMonth.getDate(); day++) {
       const dateObj = new Date(year, month, day);
       const dateString = Utils.formatDateString(dateObj);
-      
+
       if (transactions[dateString]) {
         transactions[dateString] = transactions[dateString].filter(t => {
           if (!t.recurringId || t.modifiedInstance) {
@@ -220,12 +280,17 @@ class RecurringTransactionManager {
           }
           return false;
         });
-        
+
         if (transactions[dateString].length === 0) {
           delete transactions[dateString];
         }
       }
     }
+
+    // Track which transactions we add for caching
+    const addedTransactions = [];
+    this._currentAddedTransactions = addedTransactions;
+
     this.store.getRecurringTransactions().forEach((rt) => {
       const startDate = this.parseDateString(rt.startDate);
       const endDate = rt.endDate ? this.parseDateString(rt.endDate) : null;
@@ -383,10 +448,58 @@ class RecurringTransactionManager {
         }
       });
     });
+
+    // Store in cache for future use
+    this.expansionCache.set(cacheKey, addedTransactions);
+    this._currentAddedTransactions = null;
+
     this.store.saveData(false);
   }
 
-  
+  // Apply cached transactions to the store (used on cache hit)
+  _applyCachedTransactions(year, month, cachedData) {
+    const endOfMonth = new Date(year, month + 1, 0);
+    const transactions = this.store.getTransactions();
+
+    // First, clear existing recurring transactions for this month (same as full expansion)
+    for (let day = 1; day <= endOfMonth.getDate(); day++) {
+      const dateObj = new Date(year, month, day);
+      const dateString = Utils.formatDateString(dateObj);
+
+      if (transactions[dateString]) {
+        transactions[dateString] = transactions[dateString].filter(t => {
+          if (!t.recurringId || t.modifiedInstance) {
+            return true;
+          }
+          return false;
+        });
+
+        if (transactions[dateString].length === 0) {
+          delete transactions[dateString];
+        }
+      }
+    }
+
+    // Apply cached transactions
+    for (const item of cachedData) {
+      const { dateString, transaction } = item;
+      if (!transactions[dateString]) {
+        transactions[dateString] = [];
+      }
+      // Check if this transaction already exists (e.g., modified instance)
+      const existsAlready = transactions[dateString].some(t =>
+        t.recurringId === transaction.recurringId &&
+        (t.originalDate || dateString) === (transaction.originalDate || dateString)
+      );
+      if (!existsAlready) {
+        transactions[dateString].push({ ...transaction });
+      }
+    }
+
+    this.store.saveData(false);
+  }
+
+
   applyOnceRecurrence(
     rt,
     startDate,
@@ -1103,6 +1216,14 @@ class RecurringTransactionManager {
       }
 
       transactions[dateString].push(newTransaction);
+
+      // Track for caching if we're building the cache
+      if (this._currentAddedTransactions) {
+        this._currentAddedTransactions.push({
+          dateString,
+          transaction: { ...newTransaction }
+        });
+      }
     }
   }
 
@@ -1312,6 +1433,11 @@ class RecurringTransactionManager {
 
     const isRecurring = transaction.recurringId !== undefined;
 
+    // Invalidate cache when editing recurring transactions
+    if (isRecurring) {
+      this.invalidateCache();
+    }
+
     if (!isRecurring || editScope === "this") {
       this.store.updateTransaction(date, index, {
         ...updatedTransaction,
@@ -1454,6 +1580,8 @@ class RecurringTransactionManager {
     }
 
     if (transaction.recurringId) {
+      // Invalidate cache when deleting recurring transactions
+      this.invalidateCache();
       if (deleteFuture) {
         const recurringId = transaction.recurringId;
         const currentDate = this.parseDateString(date);
