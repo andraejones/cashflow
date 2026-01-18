@@ -26,9 +26,12 @@
       </button>
     </div>
 
-    <div id="monthSummary" role="region" aria-label="Monthly summary"></div>
+    <div id="monthSummary" role="region" aria-label="Monthly summary" aria-live="polite"></div>
 
     <div id="calendarDays" class="days" role="grid" aria-label="Calendar days"></div>
+
+    <!-- ARIA live region for screen reader announcements -->
+    <div id="ariaLiveRegion" class="sr-only" aria-live="polite" aria-atomic="true"></div>
 
     <div id="calendarOptions" role="toolbar" aria-label="Calendar options"></div>
   </div>
@@ -62,7 +65,7 @@
           Add Transaction
         </button>
       </div>
-      <div id="modalTransactions" role="region" aria-label="Transactions for selected date"></div>
+      <div id="modalTransactions" role="region" aria-label="Transactions for selected date" aria-live="polite"></div>
     </div>
   </div>
 
@@ -301,6 +304,12 @@
         </button>
       </div>
     </div>
+  </div>
+
+  <!-- Loading overlay for async operations -->
+  <div id="loadingOverlay" class="loading-overlay" aria-hidden="true" role="alert" aria-live="assertive">
+    <div class="loading-spinner"></div>
+    <span id="loadingText" class="loading-text">Loading...</span>
   </div>
 
   <script src="js/utils.js"></script>

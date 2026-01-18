@@ -334,13 +334,17 @@ class CloudSync {
   async saveToCloud() {
     const syncIndicator = document.querySelector(".cloud-sync-indicator");
     if (syncIndicator) syncIndicator.className = "cloud-sync-indicator syncing";
+    Utils.showLoading("Saving to cloud...");
 
     try {
       let { token, gistId } = this.getCloudCredentials();
 
       if (!token || !gistId) {
         try {
+          // Hide loading while prompting for credentials
+          Utils.hideLoading();
           const credentials = await this.promptForCredentials();
+          Utils.showLoading("Saving to cloud...");
           token = credentials.token;
           gistId = credentials.gistId;
           if (!gistId) {
@@ -348,17 +352,17 @@ class CloudSync {
               ...this.store.exportData(),
               lastUpdated: new Date().toISOString(),
             };
-            
+
             Utils.showNotification("Creating new Gist...");
             gistId = await this.createNewGist(token, data);
             Utils.showNotification(`New Gist created with ID: ${gistId}`);
             this.setCloudCredentials(token, gistId);
-            
+
             if (syncIndicator)
               syncIndicator.className = "cloud-sync-indicator synced";
             return;
           }
-          
+
           this.setCloudCredentials(token, gistId);
         } catch (error) {
           if (syncIndicator)
@@ -441,6 +445,8 @@ class CloudSync {
         error.message || "Failed to save to cloud. Data saved locally only.",
         "error"
       );
+    } finally {
+      Utils.hideLoading();
     }
   }
 
@@ -448,20 +454,24 @@ class CloudSync {
   async loadFromCloud() {
     const syncIndicator = document.querySelector(".cloud-sync-indicator");
     if (syncIndicator) syncIndicator.className = "cloud-sync-indicator syncing";
+    Utils.showLoading("Loading from cloud...");
 
     try {
       let { token, gistId } = this.getCloudCredentials();
 
       if (!token || !gistId) {
         try {
+          // Hide loading while prompting for credentials
+          Utils.hideLoading();
           const credentials = await this.promptForCredentials();
+          Utils.showLoading("Loading from cloud...");
           token = credentials.token;
           gistId = credentials.gistId;
-          
+
           if (!gistId) {
             throw new Error("A Gist ID is required to load data from the cloud");
           }
-          
+
           this.setCloudCredentials(token, gistId);
         } catch (error) {
           if (syncIndicator)
@@ -542,6 +552,8 @@ class CloudSync {
         error.message || "Failed to load from cloud. Using local data.",
         "error"
       );
+    } finally {
+      Utils.hideLoading();
     }
   }
 }

@@ -496,6 +496,8 @@ class TransactionUI {
 
     transactionModal.style.display = "none";
     searchModal.style.display = "none";
+    ModalManager.closeModal(transactionModal);
+    ModalManager.closeModal(searchModal);
     document.getElementById("transactionAmount").value = "";
     document.getElementById("transactionDescription").value = "";
     document.getElementById("transactionRecurrence").value = "once";
@@ -845,6 +847,7 @@ class TransactionUI {
       }
       modal.style.display = "block";
       modal.setAttribute("aria-hidden", "false");
+      ModalManager.openModal(modal);
       setTimeout(() => {
         const firstInput = modal.querySelector(
           'input:not([type="date"]), select, button'
@@ -891,6 +894,7 @@ class TransactionUI {
       }
       modal.style.display = "block";
       modal.setAttribute("aria-hidden", "false");
+      ModalManager.openModal(modal);
       const modalTransactions = document.getElementById("modalTransactions");
       if (modalTransactions) {
         const transactions = this.store.getTransactions();
@@ -1272,10 +1276,10 @@ class TransactionUI {
       if (advancedOptions) {
         advancedOptions.remove();
       }
-      document.getElementById("transactionModal").style.display = "none";
-      document
-        .getElementById("transactionModal")
-        .setAttribute("aria-hidden", "true");
+      const transactionModal = document.getElementById("transactionModal");
+      transactionModal.style.display = "none";
+      transactionModal.setAttribute("aria-hidden", "true");
+      ModalManager.closeModal(transactionModal);
       this.onUpdate();
       if (this.cloudSync) {
         this.cloudSync.scheduleCloudSave();

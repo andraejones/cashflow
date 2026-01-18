@@ -2,35 +2,9 @@
 
 This document tracks issues identified during the codebase review that require attention but were not fixed in the initial pass.
 
-## Critical Security Issues
-
-### 1. XOR Encryption is Not Secure
-**File:** `js/pin-protection.js`
-**Issue:** XOR cipher with PIN-based key provides minimal security. It's easily reversible if the PIN is known or guessed.
-**Recommendation:** Replace with Web Crypto API using AES-GCM encryption. Derive key from PIN using PBKDF2 with high iteration count and salt.
-**Priority:** CRITICAL
-
-### 2. PIN Hash Uses Weak Hashing
-**File:** `js/pin-protection.js`
-**Issue:** Custom hash function for PIN storage is not cryptographically secure.
-**Recommendation:** Use Web Crypto API with SHA-256 minimum, or better yet PBKDF2/Argon2 with salt stored separately.
-**Priority:** CRITICAL
-
-### 3. GitHub Token Stored in localStorage
-**File:** `js/cloud-sync.js`
-**Issue:** OAuth tokens stored unencrypted in localStorage are vulnerable to XSS attacks.
-**Recommendation:** Store tokens encrypted with user-derived key, or use httpOnly cookies for session management.
-**Priority:** CRITICAL
-
-### 4. No CSRF Protection for OAuth Flow
-**File:** `js/cloud-sync.js`
-**Issue:** OAuth state parameter is stored but not cryptographically secure.
-**Recommendation:** Generate cryptographically random state using `crypto.getRandomValues()`.
-**Priority:** HIGH
-
 ## Data Integrity Issues
 
-### 5. Debt Projection Base Date Logic
+### 1. Debt Projection Base Date Logic
 **File:** `js/debt-snowball.js` (lines 1400-1401)
 **Issue:** The logic for determining base year/month switches between view date and current date based on whether viewing past or future months. This can cause inconsistencies in debt projections.
 ```javascript
@@ -40,13 +14,13 @@ const baseMonth = viewIndex <= currentIndex ? viewMonth : currentMonth;
 **Recommendation:** Review and potentially simplify to always calculate from current month's actual balances, then adjust display logic accordingly. Needs comprehensive testing before changes.
 **Priority:** MEDIUM
 
-### 6. No Transaction ID Collision Handling
+### 2. No Transaction ID Collision Handling
 **File:** `js/transaction-store.js`
 **Issue:** UUID generation could theoretically collide. No validation that generated IDs are unique.
 **Recommendation:** Check for existing ID before assignment, or use timestamp + random combination.
 **Priority:** LOW
 
-### 7. Monthly Balance Calculation Drift
+### 3. Monthly Balance Calculation Drift
 **File:** `js/calculation-service.js`
 **Issue:** Floating-point arithmetic in balance calculations can accumulate small errors over many months.
 **Recommendation:** Use integer cents internally, divide by 100 only for display.
@@ -54,71 +28,33 @@ const baseMonth = viewIndex <= currentIndex ? viewMonth : currentMonth;
 
 ## UI/UX Issues
 
-### 8. Modal Z-Index Conflicts
-**File:** `js/utils.js`, `js/transaction-ui.js`
-**Issue:** Multiple modals can stack without proper z-index management.
-**Recommendation:** Implement modal manager that tracks open modals and assigns increasing z-indices.
-**Priority:** LOW
-
-### 9. No Loading States for Async Operations
-**File:** `js/cloud-sync.js`, `js/app.js`
-**Issue:** Cloud sync operations don't show loading indicators to users.
-**Recommendation:** Add loading spinner/overlay during cloud operations.
-**Priority:** LOW
-
-### 10. Accessibility: Missing ARIA Live Regions
-**File:** `js/calendar-ui.js`, `js/transaction-ui.js`
-**Issue:** Dynamic content updates don't announce to screen readers.
-**Recommendation:** Add `aria-live="polite"` regions for notifications and dynamic content.
-**Priority:** MEDIUM
-
-### 11. Accessibility: Color Contrast for Negative Balances
-**File:** `css/styles.css`
-**Issue:** Red text on some backgrounds may not meet WCAG AA contrast requirements.
-**Recommendation:** Verify contrast ratios and adjust colors or add secondary indicators (icons).
-**Priority:** MEDIUM
+*Issues 4-7 have been fixed - see "Issues Fixed in This Session" section below.*
 
 ## Performance Issues
 
-### 12. No Pagination for Transaction Lists
-**File:** `js/search-ui.js`
-**Issue:** Large transaction histories render all results at once, potentially causing lag.
-**Recommendation:** Implement virtual scrolling or pagination for search results.
-**Priority:** MEDIUM
-
-### 13. Recurring Transaction Expansion is Expensive
-**File:** `js/recurring-manager.js`
-**Issue:** Expanding recurring transactions for each month view recalculates even for unchanged templates.
-**Recommendation:** Cache expanded transactions per month and invalidate only when templates change.
-**Priority:** MEDIUM
-
-### 14. Full Store Save on Every Change
-**File:** `js/transaction-store.js`
-**Issue:** Each transaction modification saves the entire data object to localStorage.
-**Recommendation:** Consider debouncing saves or implementing incremental/differential saves.
-**Priority:** LOW
+*Issues 8-10 have been fixed - see "Performance Issues Fixed (January 2026)" section below.*
 
 ## Code Quality Issues
 
-### 15. Debt Snowball File Too Large
+### 11. Debt Snowball File Too Large
 **File:** `js/debt-snowball.js` (~2700 lines)
 **Issue:** Single file handles UI, calculations, projections, and charts. Difficult to maintain.
 **Recommendation:** Split into separate modules: debt calculations, projection engine, UI components, chart rendering.
 **Priority:** MEDIUM
 
-### 16. Inconsistent Error Handling
+### 12. Inconsistent Error Handling
 **Files:** Various
 **Issue:** Some functions use try/catch, others don't. Error messages are inconsistent.
 **Recommendation:** Establish error handling patterns. Create error types for different failure modes.
 **Priority:** LOW
 
-### 17. No Input Sanitization for Descriptions
+### 13. No Input Sanitization for Descriptions
 **File:** `js/transaction-ui.js`
 **Issue:** Transaction descriptions are inserted into DOM without sanitization.
 **Recommendation:** Use `textContent` instead of `innerHTML` or sanitize HTML entities.
 **Priority:** MEDIUM
 
-### 18. Magic Numbers in Calculations
+### 14. Magic Numbers in Calculations
 **File:** `js/debt-snowball.js`, `js/calculation-service.js`
 **Issue:** Numbers like 600 (max months), 30 (projection days) are hardcoded without explanation.
 **Recommendation:** Define named constants with documentation.
@@ -126,12 +62,12 @@ const baseMonth = viewIndex <= currentIndex ? viewMonth : currentMonth;
 
 ## Testing Gaps
 
-### 19. No Automated Tests
+### 15. No Automated Tests
 **Issue:** No unit tests, integration tests, or end-to-end tests exist.
 **Recommendation:** Add Jest for unit tests, particularly for calculation-service.js and recurring-manager.js.
 **Priority:** HIGH
 
-### 20. No Data Migration Tests
+### 16. No Data Migration Tests
 **File:** `js/transaction-store.js`
 **Issue:** Data migration logic (`migrateDataIfNeeded`) has no tests for version upgrades.
 **Recommendation:** Create test fixtures for each data version and verify migrations.
@@ -152,6 +88,34 @@ The following issues were addressed:
 7. ✅ Cache invalidation timing - Moved to start of `updateMonthlyBalances`
 8. ✅ Semi-monthly occurrence counting - Rewrote counting logic
 9. ✅ Variable amount calculation - Changed from compound to linear
+
+### UI/UX Issues Fixed (January 2026)
+
+10. ✅ **Issue 4: Modal Z-Index Conflicts** - Added `ModalManager` to `utils.js` that tracks open modals and assigns increasing z-indices. Updated `transaction-ui.js` to register/unregister modals when opened/closed.
+
+11. ✅ **Issue 5: No Loading States for Async Operations** - Added loading overlay with spinner to `index.html`, CSS styles in `styles.css`, and `showLoading()`/`hideLoading()` helpers in `utils.js`. Updated `cloud-sync.js` to show loading overlay during save/load operations.
+
+12. ✅ **Issue 6: Missing ARIA Live Regions** - Added `aria-live="polite"` to `#monthSummary` and `#modalTransactions`. Created dedicated `#ariaLiveRegion` for screen reader announcements. Added `announceToScreenReader()` helper to `Utils`. Updated notifications to also announce via ARIA live region.
+
+13. ✅ **Issue 7: Color Contrast for Negative Balances** - Added `--error-color-contrast: #b4321e` (WCAG AA compliant darker red). Updated `.expense`, `.unallocated-negative`, and `.search-result-amount.expense` to use the higher-contrast color. Added warning icon indicator for negative balance days using CSS `::before` pseudo-element.
+
+### Performance Issues Fixed (January 2026)
+
+14. ✅ **Issue 8: No Pagination for Transaction Lists** - Pagination was already implemented in `search-ui.js`. Updated `resultsPerPage` from 20 to 50 results per page for better performance with large transaction histories. The pagination UI includes "Previous" and "Next" buttons with page info display.
+
+15. ✅ **Issue 9: Recurring Transaction Expansion is Expensive** - Added caching system to `recurring-manager.js`:
+    - Added `expansionCache` Map to store expanded transactions per month
+    - Added `_generateRecurringHash()` to create a hash of recurring transaction data for cache invalidation
+    - Added `invalidateCache()` method called when recurring transactions are added, edited, deleted, or skipped
+    - Added `_isCacheValid()` to check if cache matches current recurring transaction state
+    - Added `_applyCachedTransactions()` to quickly apply cached results on cache hit
+    - Cache key format: "YYYY-MM" based on month being rendered
+
+16. ✅ **Issue 10: Full Store Save on Every Change** - Added debounced saves to `transaction-store.js`:
+    - Added `debouncedSave()` method with 500ms debounce delay
+    - Added `flushPendingSave()` method for forcing immediate save when needed (e.g., app closing)
+    - Updated `addTransaction()`, `updateTransaction()`, `deleteTransaction()`, `setTransactionSkipped()`, and `setMonthlyNotes()` to use debounced saves
+    - Multiple rapid changes within 500ms are now batched into a single localStorage write
 
 ---
 

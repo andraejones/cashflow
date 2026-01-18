@@ -129,6 +129,9 @@ class CalendarUI {
       currentMonthElement.onclick = () => this.returnToCurrentMonth();
       currentMonthElement.style.cursor = "pointer";
     }
+
+    // Announce month change to screen readers
+    Utils.announceToScreenReader(`Viewing ${monthNames[month]} ${year}`);
     if (pendingMessage) {
       currentMonthElement.appendChild(pendingMessage);
     }

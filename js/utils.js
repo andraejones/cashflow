@@ -1,5 +1,51 @@
 // Utility helpers
 
+// Modal Manager for tracking open modals and z-index management
+const ModalManager = {
+  _baseZIndex: 1000,
+  _openModals: [],
+
+  // Register a modal as opened and assign z-index
+  openModal: function (modalElement) {
+    if (!modalElement) return;
+
+    // Remove if already in stack (re-opening)
+    this._openModals = this._openModals.filter(m => m !== modalElement);
+
+    // Add to stack
+    this._openModals.push(modalElement);
+
+    // Assign z-index based on position in stack
+    const zIndex = this._baseZIndex + (this._openModals.length * 10);
+    modalElement.style.zIndex = zIndex;
+  },
+
+  // Unregister a modal when closed
+  closeModal: function (modalElement) {
+    if (!modalElement) return;
+
+    this._openModals = this._openModals.filter(m => m !== modalElement);
+
+    // Reset z-index to default
+    modalElement.style.zIndex = '';
+  },
+
+  // Get the topmost modal
+  getTopModal: function () {
+    return this._openModals.length > 0 ? this._openModals[this._openModals.length - 1] : null;
+  },
+
+  // Check if a modal is the topmost
+  isTopModal: function (modalElement) {
+    return this.getTopModal() === modalElement;
+  },
+
+  // Get count of open modals
+  getOpenCount: function () {
+    return this._openModals.length;
+  }
+};
+
 const Utils = {
 
   generateUniqueId: function () {
@@ -37,9 +83,15 @@ const Utils = {
     const toast = document.createElement("div");
     toast.className = type === "success" ? "success-toast" : "error-toast";
     toast.textContent = message;
+    // Add ARIA attributes for accessibility
+    toast.setAttribute("role", "status");
+    toast.setAttribute("aria-live", "polite");
 
     document.body.appendChild(toast);
     toast.style.display = "block";
+
+    // Also announce to the dedicated ARIA live region for broader screen reader support
+    this.announceToScreenReader(message);
 
     setTimeout(() => {
       toast.style.animation = "slideOut 0.3s ease-in forwards";
@@ -123,6 +175,7 @@ const Utils = {
 
     modal.style.display = "block";
     modal.setAttribute("aria-hidden", "false");
+    ModalManager.openModal(modal);
 
     const previousActiveElement = document.activeElement;
 
@@ -130,6 +183,7 @@ const Utils = {
       const closeModal = (result) => {
         modal.style.display = "none";
         modal.setAttribute("aria-hidden", "true");
+        ModalManager.closeModal(modal);
         confirmButton.removeEventListener("click", handleConfirm);
         cancelButton.removeEventListener("click", handleCancel);
         closeButton.removeEventListener("click", handleCancel);
@@ -228,5 +282,40 @@ const Utils = {
       cancelText: options.cancelText || "Cancel",
       mandatory: options.mandatory === true,
     });
+  },
+
+  // Show loading overlay with optional custom message
+  showLoading: function (message = "Loading...") {
+    const overlay = document.getElementById("loadingOverlay");
+    const textEl = document.getElementById("loadingText");
+    if (overlay) {
+      if (textEl) {
+        textEl.textContent = message;
+      }
+      overlay.classList.add("active");
+      overlay.setAttribute("aria-hidden", "false");
+    }
+  },
+
+  // Hide loading overlay
+  hideLoading: function () {
+    const overlay = document.getElementById("loadingOverlay");
+    if (overlay) {
+      overlay.classList.remove("active");
+      overlay.setAttribute("aria-hidden", "true");
+    }
+  },
+
+  // Announce message to screen readers via ARIA live region
+  announceToScreenReader: function (message) {
+    const liveRegion = document.getElementById("ariaLiveRegion");
+    if (liveRegion) {
+      // Clear and set message to trigger announcement
+      liveRegion.textContent = "";
+      // Use setTimeout to ensure the DOM update is processed
+      setTimeout(() => {
+        liveRegion.textContent = message;
+      }, 50);
+    }
   },
 };
