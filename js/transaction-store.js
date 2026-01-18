@@ -286,6 +286,13 @@ class TransactionStore {
 
 
   saveData(isDataModified = true) {
+    // Cancel any pending debounced save since we're saving now
+    if (this._saveDebounceTimer) {
+      clearTimeout(this._saveDebounceTimer);
+      this._saveDebounceTimer = null;
+      this._pendingIsDataModified = false;
+    }
+
     try {
       const encrypt = (val) => {
         if (
