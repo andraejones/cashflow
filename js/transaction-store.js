@@ -59,6 +59,35 @@ class TransactionStore {
     }
   }
 
+  // Alias for flushPendingSave
+  flushSave() {
+    this.flushPendingSave();
+  }
+
+  // Alias for flushPendingSave
+  saveImmediately() {
+    this.flushPendingSave();
+  }
+
+  // Cancel pending save without saving
+  cancelPendingSave() {
+    if (this._saveDebounceTimer) {
+      clearTimeout(this._saveDebounceTimer);
+      this._saveDebounceTimer = null;
+      this._pendingIsDataModified = false;
+    }
+  }
+
+  // Getter for debounce delay
+  get debounceDelay() {
+    return this._saveDebounceDelay;
+  }
+
+  // Getter to check if there's a pending save
+  get pendingSave() {
+    return !!this._saveDebounceTimer;
+  }
+
 
   registerSaveCallback(callback) {
     if (typeof callback === 'function') {

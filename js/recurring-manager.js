@@ -52,7 +52,27 @@ class RecurringTransactionManager {
     return monthStr;
   }
 
-  
+  // Public wrapper for _getCacheKey
+  getCacheKey(year, month) {
+    return this._getCacheKey(year, month);
+  }
+
+  // Public method to check if a month is cached
+  isCached(year, month) {
+    if (!this._isCacheValid()) {
+      return false;
+    }
+    const cacheKey = this._getCacheKey(year, month);
+    return this.expansionCache.has(cacheKey);
+  }
+
+  // Public method to get cached data for a month
+  getCached(year, month) {
+    const cacheKey = this._getCacheKey(year, month);
+    return this.expansionCache.get(cacheKey);
+  }
+
+
   getRecurringTransactions() {
     return this.store.getRecurringTransactions();
   }
