@@ -7,6 +7,7 @@ class TransactionUI {
     this.recurringManager = recurringManager;
     this.onUpdate = onUpdate;
     this.cloudSync = cloudSync;
+    this.debtSnowballUI = null; // Set via setDebtSnowballUI after construction
 
     // Track event listeners for cleanup
     this._boundEscapeHandler = null;
@@ -51,6 +52,10 @@ class TransactionUI {
     ];
 
     this.initEventListeners();
+  }
+
+  setDebtSnowballUI(debtSnowballUI) {
+    this.debtSnowballUI = debtSnowballUI;
   }
 
 
@@ -760,6 +765,18 @@ class TransactionUI {
           });
           editForm.appendChild(cancelButton);
 
+          // Add "Convert to Debt" button for recurring expense transactions
+          if (isRecurring && normalizedType === "expense") {
+            const convertToDebtButton = document.createElement("button");
+            convertToDebtButton.className = "convert-debt-btn";
+            convertToDebtButton.setAttribute("aria-label", "Convert to debt");
+            convertToDebtButton.textContent = "Convert to Debt";
+            convertToDebtButton.addEventListener("click", () => {
+              this.convertRecurringToDebt(t.recurringId);
+            });
+            editForm.appendChild(convertToDebtButton);
+          }
+
           transactionDiv.appendChild(editForm);
 
           editBtn.addEventListener("click", () =>
@@ -1085,6 +1102,32 @@ class TransactionUI {
     Utils.showNotification(
       `Transaction ${newStatus ? "skipped" : "unskipped"} successfully`
     );
+  }
+
+
+  convertRecurringToDebt(recurringId) {
+    // Get the recurring transaction
+    const recurringTransaction = this.recurringManager.getRecurringTransactionById(recurringId);
+    if (!recurringTransaction) {
+      Utils.showNotification("Recurring transaction not found", "error");
+      return;
+    }
+
+    // Check if it's an expense
+    if (recurringTransaction.type !== "expense") {
+      Utils.showNotification("Only expense transactions can be converted to debts", "error");
+      return;
+    }
+
+    // Close the transaction modal
+    this.closeModals();
+
+    // Open the debt snowball panel with pre-populated form
+    if (this.debtSnowballUI) {
+      this.debtSnowballUI.showDebtFormFromRecurring(recurringTransaction);
+    } else {
+      Utils.showNotification("Debt snowball not available", "error");
+    }
   }
 
 

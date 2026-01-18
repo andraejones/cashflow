@@ -35,6 +35,9 @@ class CashflowApp {
       () => this.updateUI()
     );
 
+    // Wire up transactionUI to debtSnowball for "Convert to Debt" feature
+    this.transactionUI.setDebtSnowballUI(this.debtSnowball);
+
     this.calendarUI = new CalendarUI(
       this.store,
       this.recurringManager,

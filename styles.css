@@ -799,6 +799,21 @@ body.app-locked #calendarOptions {
   color: var(--primary-color);
 }
 
+.convert-debt-btn {
+  margin-left: 5px;
+  cursor: pointer;
+  background-color: var(--accent-color);
+  color: white;
+  border: none;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+}
+
+.convert-debt-btn:hover {
+  background-color: #e09a2b;
+}
+
 .move-btn {
   margin-left: 8px;
   cursor: pointer;
@@ -1596,6 +1611,11 @@ body.app-locked #calendarOptions {
     display: inline-flex;
     justify-content: center;
     align-items: center;
+  }
+
+  .convert-debt-btn {
+    width: 100%;
+    margin-top: 8px;
   }
 
 
