@@ -102,13 +102,12 @@ const Utils = {
 
   formatDisplayDate: function (dateString) {
     const [year, month, day] = dateString.split("-").map(Number);
-    const dateObj = new Date(Date.UTC(year, month - 1, day));
+    const dateObj = new Date(year, month - 1, day);
 
     return dateObj.toLocaleString("default", {
       month: "long",
       day: "numeric",
       year: "numeric",
-      timeZone: "UTC",
     });
   },
 
