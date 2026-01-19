@@ -132,26 +132,28 @@ class CalculationService {
           if (day === 1 && balanceSet) {
             firstDayBalance = dailyBalance;
           }
-          transactions[dateString].forEach((t) => {
-            const isSkipped =
-              t.recurringId &&
-              this.recurringManager.isTransactionSkipped(
-                dateString,
-                t.recurringId
-              );
+          // Only apply income/expense if no balance transaction was set
+          // "Ending Balance" means that IS the final balance for the day
+          if (!balanceSet) {
+            transactions[dateString].forEach((t) => {
+              const isSkipped =
+                t.recurringId &&
+                this.recurringManager.isTransactionSkipped(
+                  dateString,
+                  t.recurringId
+                );
 
-            if (!isSkipped) {
-              if (t.type === "income") {
-                monthIncome += t.amount;
-                // Always apply income to dailyBalance (after any balance transaction sets the base)
-                dailyBalance += t.amount;
-              } else if (t.type === "expense") {
-                monthExpense += t.amount;
-                // Always apply expense to dailyBalance (after any balance transaction sets the base)
-                dailyBalance -= t.amount;
+              if (!isSkipped) {
+                if (t.type === "income") {
+                  monthIncome += t.amount;
+                  dailyBalance += t.amount;
+                } else if (t.type === "expense") {
+                  monthExpense += t.amount;
+                  dailyBalance -= t.amount;
+                }
               }
-            }
-          });
+            });
+          }
 
           runningBalance = dailyBalance;
         }
@@ -288,11 +290,11 @@ class CalculationService {
       const dateString = `${todayYear}-${String(todayMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
       const dailyTotals = this.calculateDailyTotals(dateString);
 
-      // If there's a balance transaction, use it as the base, then apply income/expense
       if (dailyTotals.balance !== null) {
         runningBalance = dailyTotals.balance;
+      } else {
+        runningBalance = this.roundToCents(runningBalance + dailyTotals.income - dailyTotals.expense);
       }
-      runningBalance = this.roundToCents(runningBalance + dailyTotals.income - dailyTotals.expense);
     }
 
     // Track minimum balance from today through next 30 days
@@ -316,11 +318,11 @@ class CalculationService {
 
       const dailyTotals = this.calculateDailyTotals(dateString);
 
-      // If there's a balance transaction, use it as the base, then apply income/expense
       if (dailyTotals.balance !== null) {
         runningBalance = dailyTotals.balance;
+      } else {
+        runningBalance = this.roundToCents(runningBalance + dailyTotals.income - dailyTotals.expense);
       }
-      runningBalance = this.roundToCents(runningBalance + dailyTotals.income - dailyTotals.expense);
 
       // Capture the first time balance goes to zero or negative
       if (firstCrisis === null && runningBalance <= 0) {
