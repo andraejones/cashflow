@@ -17,6 +17,13 @@ class TransactionStore {
       extraPayment: 0,
       autoGenerate: false,
     };
+    // Track deleted item IDs for merge conflict resolution
+    this._deletedItems = {
+      transactions: [],
+      recurringTransactions: [],
+      debts: [],
+      cashInfusions: []
+    };
     this.onSaveCallbacks = [];
 
     // Debounce settings for batching rapid saves
@@ -141,9 +148,29 @@ class TransactionStore {
       const storedMovedTransactions = decrypt(
         this.storage.getItem("movedTransactions")
       );
+      const storedDeletedItems = decrypt(
+        this.storage.getItem("deletedItems")
+      );
 
       if (storedTransactions) {
         this.transactions = JSON.parse(storedTransactions);
+        // Migration: assign IDs and timestamps to transactions without them
+        let needsMigration = false;
+        Object.keys(this.transactions).forEach((date) => {
+          this.transactions[date].forEach((t) => {
+            if (!t.id) {
+              t.id = Utils.generateUniqueId();
+              needsMigration = true;
+            }
+            if (!t._lastModified) {
+              t._lastModified = new Date().toISOString();
+              needsMigration = true;
+            }
+          });
+        });
+        if (needsMigration) {
+          console.log("Migrated transactions to include IDs and timestamps");
+        }
       }
 
       if (storedMonthlyBalances) {
@@ -155,6 +182,9 @@ class TransactionStore {
         this.recurringTransactions.forEach((rt) => {
           if (!rt.id) {
             rt.id = Utils.generateUniqueId();
+          }
+          if (!rt._lastModified) {
+            rt._lastModified = new Date().toISOString();
           }
           if (rt.recurrence === "biweekly") {
             rt.recurrence = "bi-weekly";
@@ -175,6 +205,7 @@ class TransactionStore {
         this.debts = parsedDebts.map((debt) => ({
           ...debt,
           id: debt.id || Utils.generateUniqueId(),
+          _lastModified: debt._lastModified || new Date().toISOString(),
           balance: Number(debt.balance) || 0,
           minPayment: Number(debt.minPayment) || 0,
           dueDay: Number(debt.dueDay) || 1,
@@ -218,6 +249,7 @@ class TransactionStore {
         this.cashInfusions = parsedInfusions.map((infusion) => ({
           ...infusion,
           id: infusion.id || Utils.generateUniqueId(),
+          _lastModified: infusion._lastModified || new Date().toISOString(),
           name: typeof infusion.name === "string" ? infusion.name : "",
           amount: Number(infusion.amount) || 0,
           date: typeof infusion.date === "string" ? infusion.date : "",
@@ -259,6 +291,12 @@ class TransactionStore {
           );
         }
       }
+
+      // Load deleted items tracking for merge conflict resolution
+      if (storedDeletedItems) {
+        this._deletedItems = JSON.parse(storedDeletedItems);
+      }
+
       if (this.debts.length > 0 && this.recurringTransactions.length > 0) {
         const recurringIds = new Set(
           this.recurringTransactions.map((rt) => rt.id)
@@ -337,6 +375,10 @@ class TransactionStore {
         "movedTransactions",
         encrypt(JSON.stringify(this.movedTransactions))
       );
+      this.storage.setItem(
+        "deletedItems",
+        encrypt(JSON.stringify(this._deletedItems))
+      );
       this.triggerSaveCallbacks(isDataModified);
     } catch (error) {
       console.error("Error saving data to storage:", error);
@@ -356,6 +398,12 @@ class TransactionStore {
     this.debtSnowballSettings = {
       extraPayment: 0,
       autoGenerate: false,
+    };
+    this._deletedItems = {
+      transactions: [],
+      recurringTransactions: [],
+      debts: [],
+      cashInfusions: []
     };
     this.saveData();
     return true;
@@ -405,6 +453,7 @@ class TransactionStore {
     if (!infusion.id) {
       infusion.id = Utils.generateUniqueId();
     }
+    infusion._lastModified = new Date().toISOString();
     this.cashInfusions.push(infusion);
     this.saveData();
     return infusion.id;
@@ -423,6 +472,7 @@ class TransactionStore {
     this.cashInfusions[index] = {
       ...this.cashInfusions[index],
       ...updates,
+      _lastModified: new Date().toISOString(),
     };
     this.saveData();
     return true;
@@ -438,6 +488,8 @@ class TransactionStore {
     if (index === -1) {
       return false;
     }
+    // Track deleted ID for merge conflict resolution
+    this._deletedItems.cashInfusions.push(id);
     this.cashInfusions.splice(index, 1);
     this.saveData();
     return true;
@@ -445,7 +497,10 @@ class TransactionStore {
 
 
   getMonthlyNotes(monthKey) {
-    return this.monthlyNotes[monthKey] || "";
+    const note = this.monthlyNotes[monthKey];
+    if (!note) return "";
+    // Handle both old format (string) and new format (object with text)
+    return typeof note === "string" ? note : (note.text || "");
   }
 
   setMonthlyNotes(monthKey, notes) {
@@ -454,7 +509,10 @@ class TransactionStore {
       return false;
     }
     if (notes && notes.trim()) {
-      this.monthlyNotes[monthKey] = notes.trim();
+      this.monthlyNotes[monthKey] = {
+        text: notes.trim(),
+        _lastModified: new Date().toISOString(),
+      };
     } else {
       // Remove empty notes
       delete this.monthlyNotes[monthKey];
@@ -464,7 +522,11 @@ class TransactionStore {
   }
 
   hasMonthlyNotes(monthKey) {
-    return !!(this.monthlyNotes[monthKey] && this.monthlyNotes[monthKey].trim());
+    const note = this.monthlyNotes[monthKey];
+    if (!note) return false;
+    // Handle both old format (string) and new format (object with text)
+    const text = typeof note === "string" ? note : (note.text || "");
+    return !!(text && text.trim());
   }
 
 
@@ -540,6 +602,7 @@ class TransactionStore {
     if (!debt.id) {
       debt.id = Utils.generateUniqueId();
     }
+    debt._lastModified = new Date().toISOString();
     this.debts.push(debt);
     this.saveData();
     return debt.id;
@@ -558,6 +621,7 @@ class TransactionStore {
     this.debts[index] = {
       ...this.debts[index],
       ...updates,
+      _lastModified: new Date().toISOString(),
     };
     this.saveData();
     return true;
@@ -573,6 +637,8 @@ class TransactionStore {
     if (index === -1) {
       return false;
     }
+    // Track deleted ID for merge conflict resolution
+    this._deletedItems.debts.push(id);
     this.debts.splice(index, 1);
     this.saveData();
     return true;
@@ -597,41 +663,60 @@ class TransactionStore {
   addTransaction(date, transaction) {
     if (!date || !transaction) {
       console.error("Invalid date or transaction data");
-      return;
+      return null;
     }
 
     if (!this.transactions[date]) {
       this.transactions[date] = [];
     }
 
+    // Assign ID and timestamp if not present
+    if (!transaction.id) {
+      transaction.id = Utils.generateUniqueId();
+    }
+    transaction._lastModified = new Date().toISOString();
+
     this.transactions[date].push(transaction);
     this.debouncedSave();
+    return transaction.id;
   }
 
 
   updateTransaction(date, index, updatedTransaction) {
     if (!date || index === undefined || !updatedTransaction) {
       console.error("Invalid parameters for updateTransaction");
-      return;
+      return false;
     }
 
     if (this.transactions[date] && this.transactions[date][index]) {
+      // Preserve existing ID, update timestamp
+      const existingId = this.transactions[date][index].id;
       this.transactions[date][index] = {
         ...this.transactions[date][index],
         ...updatedTransaction,
+        id: existingId || Utils.generateUniqueId(),
+        _lastModified: new Date().toISOString(),
       };
       this.debouncedSave();
+      return true;
     }
+    return false;
   }
 
 
   deleteTransaction(date, index) {
     if (!date || index === undefined) {
       console.error("Invalid parameters for deleteTransaction");
-      return;
+      return false;
     }
 
     if (this.transactions[date] && this.transactions[date][index]) {
+      // Track deleted ID for merge conflict resolution
+      const deletedTxn = this.transactions[date][index];
+      if (deletedTxn.id) {
+        this._deletedItems.transactions.push(deletedTxn.id);
+      }
+
       this.transactions[date].splice(index, 1);
 
       if (this.transactions[date].length === 0) {
@@ -639,7 +724,9 @@ class TransactionStore {
       }
 
       this.debouncedSave();
+      return true;
     }
+    return false;
   }
 
 
@@ -651,6 +738,7 @@ class TransactionStore {
     if (!recurringTransaction.id) {
       recurringTransaction.id = Utils.generateUniqueId();
     }
+    recurringTransaction._lastModified = new Date().toISOString();
 
     this.recurringTransactions.push(recurringTransaction);
     this.saveData();
@@ -671,6 +759,7 @@ class TransactionStore {
       this.recurringTransactions[index] = {
         ...this.recurringTransactions[index],
         ...updates,
+        _lastModified: new Date().toISOString(),
       };
       this.saveData();
       return true;
@@ -691,6 +780,10 @@ class TransactionStore {
     if (index === -1) {
       return false;
     }
+
+    // Track deleted ID for merge conflict resolution
+    this._deletedItems.recurringTransactions.push(id);
+
     this.recurringTransactions.splice(index, 1);
     for (const dateKey in this.transactions) {
       this.transactions[dateKey] = this.transactions[dateKey].filter(
@@ -778,6 +871,7 @@ class TransactionStore {
       cashInfusions: this.cashInfusions,
       monthlyNotes: this.monthlyNotes,
       debtSnowballSettings: this.debtSnowballSettings,
+      _deletedItems: this._deletedItems,
       lastExported: new Date().toISOString(),
       appVersion: "2.0.0"
     };
@@ -858,6 +952,14 @@ class TransactionStore {
       this.monthlyNotes = data.monthlyNotes || {};
       this.movedTransactions = data.movedTransactions || {};
 
+      // Import deleted items tracking for merge conflict resolution
+      this._deletedItems = data._deletedItems || {
+        transactions: [],
+        recurringTransactions: [],
+        debts: [],
+        cashInfusions: []
+      };
+
       // Clean up stale movedTransactions entries where fromDate equals toDate
       Object.keys(this.movedTransactions).forEach(key => {
         const move = this.movedTransactions[key];
@@ -865,9 +967,25 @@ class TransactionStore {
           delete this.movedTransactions[key];
         }
       });
+
+      // Migration: ensure all transactions have IDs and timestamps
+      Object.keys(this.transactions).forEach((date) => {
+        this.transactions[date].forEach((t) => {
+          if (!t.id) {
+            t.id = Utils.generateUniqueId();
+          }
+          if (!t._lastModified) {
+            t._lastModified = new Date().toISOString();
+          }
+        });
+      });
+
       this.recurringTransactions.forEach((rt) => {
         if (!rt.id) {
           rt.id = Utils.generateUniqueId();
+        }
+        if (!rt._lastModified) {
+          rt._lastModified = new Date().toISOString();
         }
         if (rt.recurrence === "biweekly") {
           rt.recurrence = "bi-weekly";
@@ -877,6 +995,21 @@ class TransactionStore {
           rt.recurrence = "semi-annual";
         }
       });
+
+      // Ensure debts have _lastModified
+      this.debts.forEach((debt) => {
+        if (!debt._lastModified) {
+          debt._lastModified = new Date().toISOString();
+        }
+      });
+
+      // Ensure cashInfusions have _lastModified
+      this.cashInfusions.forEach((infusion) => {
+        if (!infusion._lastModified) {
+          infusion._lastModified = new Date().toISOString();
+        }
+      });
+
       const recurringIds = new Set(
         this.recurringTransactions.map((rt) => rt.id)
       );
@@ -903,6 +1036,8 @@ class TransactionStore {
                 description: t.description,
                 recurringId: matchingRt.id,
                 modifiedInstance: t.modifiedRecurring || false,
+                id: t.id || Utils.generateUniqueId(),
+                _lastModified: t._lastModified || new Date().toISOString(),
               };
               if (t.skipped) {
                 this.setTransactionSkipped(date, matchingRt.id, true, false);
