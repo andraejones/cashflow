@@ -157,6 +157,8 @@ class PinProtection {
 
       modal.style.display = "block";
       modal.setAttribute("aria-hidden", "false");
+      // Ensure unlock dialog is above the lock overlay
+      modal.style.zIndex = "10000";
 
       const cleanup = () => {
         confirmButton.removeEventListener("click", handleConfirm);
@@ -165,6 +167,8 @@ class PinProtection {
         resetButton.style.display = "none";
         modal.style.display = "none";
         modal.setAttribute("aria-hidden", "true");
+        // Reset z-index to allow ModalManager to manage it normally
+        modal.style.zIndex = "";
       };
 
       const handleConfirm = () => {
@@ -298,8 +302,44 @@ class PinProtection {
 
     this.isLocked = true;
     this.stopInactivityMonitoring();
+
+    // Close any existing open modals before showing lock screen
+    this.closeAllModals();
+
     this.showLockOverlay();
     this.promptUnlock();
+  }
+
+  closeAllModals() {
+    // Close appModal if it's open
+    const appModal = document.getElementById("appModal");
+    if (appModal && appModal.style.display === "block") {
+      appModal.style.display = "none";
+      appModal.setAttribute("aria-hidden", "true");
+      if (window.ModalManager) {
+        window.ModalManager.closeModal(appModal);
+      }
+    }
+
+    // Close debtSnowballModal if it's open
+    const debtModal = document.getElementById("debtSnowballModal");
+    if (debtModal && debtModal.style.display === "block") {
+      debtModal.style.display = "none";
+      debtModal.setAttribute("aria-hidden", "true");
+      if (window.ModalManager) {
+        window.ModalManager.closeModal(debtModal);
+      }
+    }
+
+    // Close any other common modals
+    const otherModals = document.querySelectorAll('.modal[style*="display: block"], .modal[style*="display:block"]');
+    otherModals.forEach(modal => {
+      modal.style.display = "none";
+      modal.setAttribute("aria-hidden", "true");
+      if (window.ModalManager) {
+        window.ModalManager.closeModal(modal);
+      }
+    });
   }
 
   showLockOverlay() {
@@ -312,6 +352,8 @@ class PinProtection {
       document.body.appendChild(overlay);
     }
     overlay.style.display = 'block';
+    // Ensure lock overlay is above all other modals
+    overlay.style.zIndex = '9999';
     document.body.classList.add('app-locked');
   }
 
