@@ -11,7 +11,7 @@ class CloudSync {
     this._lastSyncTime = null;
     this._heartbeatInterval = null;
     this._updateAvailable = false;
-    this._skipNextHeartbeat = false;
+    this._lastSaveTime = null;
 
     if (typeof this.store.registerSaveCallback === 'function') {
       this.store.registerSaveCallback((isDataModified) => {
@@ -632,6 +632,13 @@ class CloudSync {
 
   // Lightweight check if remote Gist has changed (returns true/false/null)
   async checkForRemoteChanges() {
+    // Skip heartbeat check if we just saved (grace period of 90 seconds)
+    // This avoids false positives from GitHub ETag inconsistencies between PATCH and GET
+    const SAVE_GRACE_PERIOD = 90000;
+    if (this._lastSaveTime && (Date.now() - this._lastSaveTime) < SAVE_GRACE_PERIOD) {
+      return false; // Assume no changes since we just saved
+    }
+
     const { token, gistId } = this.getCloudCredentials();
     if (!token || !gistId || !this._lastKnownETag) {
       return null; // Can't check - no credentials or no prior ETag
@@ -670,11 +677,6 @@ class CloudSync {
     }
 
     this._heartbeatInterval = setInterval(async () => {
-      // Skip the first heartbeat after a save to avoid false "remote changes" detection
-      if (this._skipNextHeartbeat) {
-        this._skipNextHeartbeat = false;
-        return;
-      }
       const hasChanges = await this.checkForRemoteChanges();
       if (hasChanges === true) {
         this._showUpdateAvailable();
@@ -741,8 +743,8 @@ class CloudSync {
             Utils.showNotification(`New Gist created with ID: ${gistId}`);
             this.setCloudCredentials(token, gistId);
             this._storeSyncTime();
-            // Skip the next heartbeat to avoid false "remote changes" detection
-            this._skipNextHeartbeat = true;
+            // Record save time for grace period (avoids false "remote changes" detection)
+            this._lastSaveTime = Date.now();
 
             if (syncIndicator)
               syncIndicator.className = "cloud-sync-indicator synced";
@@ -878,8 +880,8 @@ class CloudSync {
       const newETag = response.headers.get("ETag");
       this._storeETag(newETag);
       this._storeSyncTime();
-      // Skip the next heartbeat to avoid false "remote changes" detection
-      this._skipNextHeartbeat = true;
+      // Record save time for grace period (avoids false "remote changes" detection)
+      this._lastSaveTime = Date.now();
 
       if (syncIndicator)
         syncIndicator.className = "cloud-sync-indicator synced";
@@ -1009,8 +1011,8 @@ class CloudSync {
         // Store the ETag for future conflict detection
         this._storeETag(etag);
         this._storeSyncTime();
-        // Skip the next heartbeat to avoid false "remote changes" detection
-        this._skipNextHeartbeat = true;
+        // Record sync time for grace period (avoids false "remote changes" detection)
+        this._lastSaveTime = Date.now();
 
         // If we merged local changes, save back to cloud
         if (needsResync && this.autoSyncEnabled) {
