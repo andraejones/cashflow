@@ -11,6 +11,7 @@ class CloudSync {
     this._lastSyncTime = null;
     this._heartbeatInterval = null;
     this._updateAvailable = false;
+    this._skipNextHeartbeat = false;
 
     if (typeof this.store.registerSaveCallback === 'function') {
       this.store.registerSaveCallback((isDataModified) => {
@@ -67,7 +68,7 @@ class CloudSync {
     }
   }
 
-  
+
   toggleAutoSync() {
     this.autoSyncEnabled = !this.autoSyncEnabled;
     try {
@@ -75,25 +76,25 @@ class CloudSync {
     } catch (e) {
       console.warn('Could not save auto-sync setting', e);
     }
-    
+
     if (!this.autoSyncEnabled) {
       this.cancelPendingCloudSave();
     }
-    
+
     return this.autoSyncEnabled;
   }
 
-  
+
   isAutoSyncEnabled() {
     return this.autoSyncEnabled;
   }
 
-  
+
   encryptValue(value) {
     return btoa(value.split("").reverse().join(""));
   }
 
-  
+
   decryptValue(encryptedValue) {
     try {
       return atob(encryptedValue).split("").reverse().join("");
@@ -103,7 +104,7 @@ class CloudSync {
     }
   }
 
-  
+
   getCloudCredentials() {
     const encryptedToken = localStorage.getItem("github_token_encrypted");
     const token = encryptedToken ? this.decryptValue(encryptedToken) : null;
@@ -111,7 +112,7 @@ class CloudSync {
     return { token, gistId };
   }
 
-  
+
   setCloudCredentials(token, gistId) {
     if (token) {
       const encryptedToken = this.encryptValue(token);
@@ -120,7 +121,7 @@ class CloudSync {
     localStorage.setItem("gist_id", gistId);
   }
 
-  
+
   clearCloudCredentials() {
     localStorage.removeItem("github_token_encrypted");
     localStorage.removeItem("github_token");
@@ -128,7 +129,7 @@ class CloudSync {
     this._clearSyncMetadata();
   }
 
-  
+
   async promptForCredentials() {
     const credentials = this.getCloudCredentials();
     if (credentials.token && credentials.gistId) {
@@ -213,27 +214,27 @@ class CloudSync {
     modalContent.appendChild(gistDiv);
     const autoSyncDiv = document.createElement("div");
     autoSyncDiv.style.margin = "15px 0";
-    
+
     const autoSyncCheck = document.createElement("input");
     autoSyncCheck.type = "checkbox";
     autoSyncCheck.id = "auto-sync-check";
     autoSyncCheck.checked = this.autoSyncEnabled;
-    
+
     const autoSyncLabel = document.createElement("label");
     autoSyncLabel.setAttribute("for", "auto-sync-check");
     autoSyncLabel.textContent = "Enable automatic cloud sync";
     autoSyncLabel.style.marginLeft = "8px";
-    
+
     autoSyncDiv.appendChild(autoSyncCheck);
     autoSyncDiv.appendChild(autoSyncLabel);
-    
+
     const autoSyncHelp = document.createElement("div");
     autoSyncHelp.style.fontSize = "12px";
     autoSyncHelp.style.color = "#666";
     autoSyncHelp.style.marginLeft = "24px";
     autoSyncHelp.textContent = "Automatically save changes to the cloud after 10 seconds of inactivity";
     autoSyncDiv.appendChild(autoSyncHelp);
-    
+
     modalContent.appendChild(autoSyncDiv);
     const saveBtn = document.createElement("button");
     saveBtn.id = "save-credentials";
@@ -287,7 +288,7 @@ class CloudSync {
     });
   }
 
-  
+
   scheduleCloudSave() {
     if (!this.autoSyncEnabled) {
       return;
@@ -296,7 +297,7 @@ class CloudSync {
     if (!token || !gistId) {
       return;
     }
-    
+
     clearTimeout(this.saveTimeout);
     this.showPendingMessage();
 
@@ -307,13 +308,13 @@ class CloudSync {
     }, 10000);
   }
 
-  
+
   cancelPendingCloudSave() {
     clearTimeout(this.saveTimeout);
     this.clearPendingMessage();
   }
 
-  
+
   showPendingMessage() {
     const currentMonth = document.getElementById("currentMonth");
     let pendingSpan = document.getElementById("pendingMessage");
@@ -331,7 +332,7 @@ class CloudSync {
     pendingSpan.title = "Cloud sync pending";
   }
 
-  
+
   clearPendingMessage() {
     const pendingSpan = document.getElementById("pendingMessage");
     if (pendingSpan) {
@@ -339,7 +340,7 @@ class CloudSync {
     }
   }
 
-  
+
   async createNewGist(token, data) {
     try {
       const response = await fetch("https://api.github.com/gists", {
@@ -669,6 +670,11 @@ class CloudSync {
     }
 
     this._heartbeatInterval = setInterval(async () => {
+      // Skip the first heartbeat after a save to avoid false "remote changes" detection
+      if (this._skipNextHeartbeat) {
+        this._skipNextHeartbeat = false;
+        return;
+      }
       const hasChanges = await this.checkForRemoteChanges();
       if (hasChanges === true) {
         this._showUpdateAvailable();
@@ -870,6 +876,8 @@ class CloudSync {
       const newETag = response.headers.get("ETag");
       this._storeETag(newETag);
       this._storeSyncTime();
+      // Skip the next heartbeat to avoid false "remote changes" detection
+      this._skipNextHeartbeat = true;
 
       if (syncIndicator)
         syncIndicator.className = "cloud-sync-indicator synced";
@@ -886,7 +894,7 @@ class CloudSync {
     }
   }
 
-  
+
   async loadFromCloud() {
     const syncIndicator = document.querySelector(".cloud-sync-indicator");
     if (syncIndicator) syncIndicator.className = "cloud-sync-indicator syncing";
@@ -972,9 +980,9 @@ class CloudSync {
 
           // Only resync if merge actually produced different data than remote
           const mergedJson = JSON.stringify(mergedData.transactions) +
-                            JSON.stringify(mergedData.recurringTransactions);
+            JSON.stringify(mergedData.recurringTransactions);
           const remoteJson = JSON.stringify(remoteData.transactions) +
-                            JSON.stringify(remoteData.recurringTransactions);
+            JSON.stringify(remoteData.recurringTransactions);
 
           if (mergedJson !== remoteJson) {
             dataToImport = mergedData;
