@@ -968,9 +968,21 @@ class CloudSync {
         if (hasLocalChanges) {
           // Merge local and remote data
           Utils.showLoading("Merging changes...");
-          dataToImport = this._mergeData(localData, remoteData);
-          needsResync = true;
-          console.log("Merged local changes with remote data during load");
+          const mergedData = this._mergeData(localData, remoteData);
+
+          // Only resync if merge actually produced different data than remote
+          const mergedJson = JSON.stringify(mergedData.transactions) +
+                            JSON.stringify(mergedData.recurringTransactions);
+          const remoteJson = JSON.stringify(remoteData.transactions) +
+                            JSON.stringify(remoteData.recurringTransactions);
+
+          if (mergedJson !== remoteJson) {
+            dataToImport = mergedData;
+            needsResync = true;
+            console.log("Merged local changes with remote data during load");
+          } else {
+            console.log("Local changes already present in remote, no resync needed");
+          }
         }
 
         const success = this.store.importData(dataToImport);
