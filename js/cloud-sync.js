@@ -741,6 +741,8 @@ class CloudSync {
             Utils.showNotification(`New Gist created with ID: ${gistId}`);
             this.setCloudCredentials(token, gistId);
             this._storeSyncTime();
+            // Skip the next heartbeat to avoid false "remote changes" detection
+            this._skipNextHeartbeat = true;
 
             if (syncIndicator)
               syncIndicator.className = "cloud-sync-indicator synced";
@@ -1007,6 +1009,8 @@ class CloudSync {
         // Store the ETag for future conflict detection
         this._storeETag(etag);
         this._storeSyncTime();
+        // Skip the next heartbeat to avoid false "remote changes" detection
+        this._skipNextHeartbeat = true;
 
         // If we merged local changes, save back to cloud
         if (needsResync && this.autoSyncEnabled) {
