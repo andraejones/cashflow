@@ -1,12 +1,15 @@
 // Cloud sync
 
 class CloudSync {
-  
+
   constructor(store, onUpdate) {
     this.store = store;
     this.onUpdate = onUpdate;
     this.saveTimeout = null;
     this.autoSyncEnabled = true;
+    this._lastKnownETag = null;
+    this._lastSyncTime = null;
+
     if (typeof this.store.registerSaveCallback === 'function') {
       this.store.registerSaveCallback((isDataModified) => {
         if (this.autoSyncEnabled && isDataModified) {
@@ -19,8 +22,46 @@ class CloudSync {
       if (savedSetting !== null) {
         this.autoSyncEnabled = savedSetting === 'true';
       }
+      // Load stored ETag and sync time
+      this._lastKnownETag = localStorage.getItem('gist_etag');
+      const syncTime = localStorage.getItem('local_last_sync');
+      this._lastSyncTime = syncTime ? new Date(syncTime) : null;
     } catch (e) {
       console.warn('Could not load auto-sync setting', e);
+    }
+  }
+
+  // Store ETag after successful fetch/save
+  _storeETag(etag) {
+    this._lastKnownETag = etag;
+    if (etag) {
+      try {
+        localStorage.setItem('gist_etag', etag);
+      } catch (e) {
+        console.warn('Could not save ETag', e);
+      }
+    }
+  }
+
+  // Store last sync time
+  _storeSyncTime() {
+    this._lastSyncTime = new Date();
+    try {
+      localStorage.setItem('local_last_sync', this._lastSyncTime.toISOString());
+    } catch (e) {
+      console.warn('Could not save sync time', e);
+    }
+  }
+
+  // Clear sync metadata (used when credentials are cleared)
+  _clearSyncMetadata() {
+    this._lastKnownETag = null;
+    this._lastSyncTime = null;
+    try {
+      localStorage.removeItem('gist_etag');
+      localStorage.removeItem('local_last_sync');
+    } catch (e) {
+      console.warn('Could not clear sync metadata', e);
     }
   }
 
@@ -82,6 +123,7 @@ class CloudSync {
     localStorage.removeItem("github_token_encrypted");
     localStorage.removeItem("github_token");
     localStorage.removeItem("gist_id");
+    this._clearSyncMetadata();
   }
 
   
@@ -330,7 +372,262 @@ class CloudSync {
     }
   }
 
-  
+  // =============================================
+  // MERGE FUNCTIONS FOR CONFLICT RESOLUTION
+  // =============================================
+
+  // Merge arrays of items by ID, keeping newer version on conflict
+  _mergeById(localItems, remoteItems, deletedIds = []) {
+    const merged = new Map();
+    const deletedSet = new Set(deletedIds);
+
+    // Add remote items first
+    remoteItems.forEach(item => {
+      if (item.id && !deletedSet.has(item.id)) {
+        merged.set(item.id, item);
+      }
+    });
+
+    // Add/update with local items (newer wins)
+    localItems.forEach(item => {
+      if (!item.id) return;
+      if (deletedSet.has(item.id)) return;
+
+      const existing = merged.get(item.id);
+      if (!existing) {
+        merged.set(item.id, item);
+      } else {
+        // Compare timestamps - keep newer
+        const localTime = new Date(item._lastModified || 0).getTime();
+        const remoteTime = new Date(existing._lastModified || 0).getTime();
+        if (localTime >= remoteTime) {
+          merged.set(item.id, item);
+        }
+      }
+    });
+
+    return Array.from(merged.values());
+  }
+
+  // Merge transactions (organized by date, each with arrays of transactions)
+  _mergeTransactions(localTxns, remoteTxns, deletedIds = []) {
+    const merged = {};
+    const deletedSet = new Set(deletedIds);
+    const allDates = new Set([
+      ...Object.keys(localTxns || {}),
+      ...Object.keys(remoteTxns || {})
+    ]);
+
+    allDates.forEach(date => {
+      const localList = localTxns[date] || [];
+      const remoteList = remoteTxns[date] || [];
+      const mergedList = this._mergeById(localList, remoteList, deletedIds);
+
+      if (mergedList.length > 0) {
+        merged[date] = mergedList;
+      }
+    });
+
+    return merged;
+  }
+
+  // Merge skipped transactions (date -> array of recurring IDs)
+  _mergeSkippedTransactions(local, remote) {
+    const merged = {};
+    const allDates = new Set([
+      ...Object.keys(local || {}),
+      ...Object.keys(remote || {})
+    ]);
+
+    allDates.forEach(date => {
+      const localSkips = local[date] || [];
+      const remoteSkips = remote[date] || [];
+      // Union of skipped IDs
+      const mergedSkips = [...new Set([...localSkips, ...remoteSkips])];
+      if (mergedSkips.length > 0) {
+        merged[date] = mergedSkips;
+      }
+    });
+
+    return merged;
+  }
+
+  // Merge moved transactions (key -> move info)
+  _mergeMovedTransactions(local, remote) {
+    const merged = { ...remote };
+
+    Object.keys(local || {}).forEach(key => {
+      const localMove = local[key];
+      const remoteMove = remote[key];
+
+      if (!remoteMove) {
+        merged[key] = localMove;
+      } else {
+        // Keep the more recent move
+        const localTime = new Date(localMove.movedAt || 0).getTime();
+        const remoteTime = new Date(remoteMove.movedAt || 0).getTime();
+        if (localTime >= remoteTime) {
+          merged[key] = localMove;
+        }
+      }
+    });
+
+    return merged;
+  }
+
+  // Merge monthly notes with conflict markers when both edited
+  _mergeMonthlyNotes(local, remote) {
+    const merged = {};
+    const allMonths = new Set([
+      ...Object.keys(local || {}),
+      ...Object.keys(remote || {})
+    ]);
+
+    allMonths.forEach(monthKey => {
+      const localNote = local[monthKey];
+      const remoteNote = remote[monthKey];
+
+      // Extract text (handle both old string format and new object format)
+      const getTextAndTime = (note) => {
+        if (!note) return { text: '', time: 0 };
+        if (typeof note === 'string') return { text: note, time: 0 };
+        return {
+          text: note.text || '',
+          time: new Date(note._lastModified || 0).getTime()
+        };
+      };
+
+      const localData = getTextAndTime(localNote);
+      const remoteData = getTextAndTime(remoteNote);
+
+      if (!localData.text && !remoteData.text) return;
+
+      if (!remoteData.text) {
+        merged[monthKey] = localNote;
+      } else if (!localData.text) {
+        merged[monthKey] = remoteNote;
+      } else if (localData.text === remoteData.text) {
+        // Same content, keep whichever has timestamp
+        merged[monthKey] = localData.time >= remoteData.time ? localNote : remoteNote;
+      } else {
+        // Both have different content - concatenate with conflict marker
+        const conflictText = `${remoteData.text}\n\n--- SYNC CONFLICT (${new Date().toLocaleString()}) ---\n\n${localData.text}`;
+        merged[monthKey] = {
+          text: conflictText,
+          _lastModified: new Date().toISOString()
+        };
+      }
+    });
+
+    return merged;
+  }
+
+  // Merge debt snowball settings (keep more recently synced)
+  _mergeDebtSnowballSettings(local, remote, localSyncTime, remoteSyncTime) {
+    const localTime = localSyncTime ? new Date(localSyncTime).getTime() : 0;
+    const remoteTime = remoteSyncTime ? new Date(remoteSyncTime).getTime() : 0;
+    return localTime >= remoteTime ? local : remote;
+  }
+
+  // Main merge function - combines local and remote data
+  _mergeData(localData, remoteData) {
+    // Get deleted items lists
+    const localDeleted = localData._deletedItems || {};
+    const remoteDeleted = remoteData._deletedItems || {};
+
+    // Combine deleted IDs
+    const deletedItems = {
+      transactions: [...new Set([
+        ...(localDeleted.transactions || []),
+        ...(remoteDeleted.transactions || [])
+      ])],
+      recurringTransactions: [...new Set([
+        ...(localDeleted.recurringTransactions || []),
+        ...(remoteDeleted.recurringTransactions || [])
+      ])],
+      debts: [...new Set([
+        ...(localDeleted.debts || []),
+        ...(remoteDeleted.debts || [])
+      ])],
+      cashInfusions: [...new Set([
+        ...(localDeleted.cashInfusions || []),
+        ...(remoteDeleted.cashInfusions || [])
+      ])]
+    };
+
+    const merged = {
+      transactions: this._mergeTransactions(
+        localData.transactions,
+        remoteData.transactions,
+        deletedItems.transactions
+      ),
+      recurringTransactions: this._mergeById(
+        localData.recurringTransactions || [],
+        remoteData.recurringTransactions || [],
+        deletedItems.recurringTransactions
+      ),
+      skippedTransactions: this._mergeSkippedTransactions(
+        localData.skippedTransactions,
+        remoteData.skippedTransactions
+      ),
+      movedTransactions: this._mergeMovedTransactions(
+        localData.movedTransactions,
+        remoteData.movedTransactions
+      ),
+      debts: this._mergeById(
+        localData.debts || [],
+        remoteData.debts || [],
+        deletedItems.debts
+      ),
+      cashInfusions: this._mergeById(
+        localData.cashInfusions || [],
+        remoteData.cashInfusions || [],
+        deletedItems.cashInfusions
+      ),
+      monthlyNotes: this._mergeMonthlyNotes(
+        localData.monthlyNotes,
+        remoteData.monthlyNotes
+      ),
+      debtSnowballSettings: this._mergeDebtSnowballSettings(
+        localData.debtSnowballSettings || { extraPayment: 0, autoGenerate: false },
+        remoteData.debtSnowballSettings || { extraPayment: 0, autoGenerate: false },
+        localData.lastUpdated,
+        remoteData.lastUpdated
+      ),
+      // monthlyBalances are derived data - will be recalculated
+      monthlyBalances: {},
+      // Track deletions for future merges
+      _deletedItems: deletedItems,
+      lastUpdated: new Date().toISOString(),
+      appVersion: "2.0.0"
+    };
+
+    return merged;
+  }
+
+  // Fetch remote Gist with optional ETag check
+  async _fetchGist(token, gistId, etag = null) {
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github.v3+json",
+    };
+
+    if (etag) {
+      headers["If-None-Match"] = etag;
+    }
+
+    const response = await fetch(`https://api.github.com/gists/${gistId}`, {
+      headers
+    });
+
+    return {
+      response,
+      etag: response.headers.get("ETag"),
+      notModified: response.status === 304
+    };
+  }
+
+
   async saveToCloud() {
     const syncIndicator = document.querySelector(".cloud-sync-indicator");
     if (syncIndicator) syncIndicator.className = "cloud-sync-indicator syncing";
@@ -357,6 +654,7 @@ class CloudSync {
             gistId = await this.createNewGist(token, data);
             Utils.showNotification(`New Gist created with ID: ${gistId}`);
             this.setCloudCredentials(token, gistId);
+            this._storeSyncTime();
 
             if (syncIndicator)
               syncIndicator.className = "cloud-sync-indicator synced";
@@ -375,11 +673,63 @@ class CloudSync {
         }
       }
 
-      const data = {
+      // Step 1: Check if remote has changed using ETag
+      let dataToSave = {
         ...this.store.exportData(),
         lastUpdated: new Date().toISOString(),
         autoSyncEnabled: this.autoSyncEnabled,
       };
+
+      if (this._lastKnownETag) {
+        // Fetch with If-None-Match header to check for changes
+        const { response: checkResponse, etag: newETag, notModified } =
+          await this._fetchGist(token, gistId, this._lastKnownETag);
+
+        if (!notModified && checkResponse.ok) {
+          // Remote has changed - need to merge
+          Utils.showLoading("Merging changes...");
+          const gist = await checkResponse.json();
+
+          if (gist.files && gist.files["cashflow_data.json"]) {
+            try {
+              const remoteData = JSON.parse(gist.files["cashflow_data.json"].content);
+              const localData = dataToSave;
+
+              // Merge local and remote data
+              const mergedData = this._mergeData(localData, remoteData);
+              mergedData.autoSyncEnabled = this.autoSyncEnabled;
+
+              // Import merged data into local store (silently, without triggering another save)
+              this.store.importData(mergedData);
+
+              // Update dataToSave with merged result
+              dataToSave = {
+                ...mergedData,
+                lastUpdated: new Date().toISOString(),
+                autoSyncEnabled: this.autoSyncEnabled,
+              };
+
+              console.log("Merged local and remote data due to conflict");
+            } catch (parseError) {
+              console.warn("Could not parse remote data for merge, proceeding with local data");
+            }
+          }
+        } else if (!notModified && !checkResponse.ok) {
+          // Handle non-304, non-2xx responses during ETag check
+          if (checkResponse.status === 401) {
+            this.clearCloudCredentials();
+            throw new Error("Invalid GitHub token or missing gist permissions");
+          }
+          if (checkResponse.status === 404) {
+            // Gist was deleted, will be handled below
+            this._lastKnownETag = null;
+          }
+        }
+        // If 304 (notModified), no merge needed, proceed with local data
+      }
+
+      // Step 2: Save the data (original or merged)
+      Utils.showLoading("Saving to cloud...");
       const response = await fetch(`https://api.github.com/gists/${gistId}`, {
         method: "PATCH",
         headers: {
@@ -390,7 +740,7 @@ class CloudSync {
           description: "Cashflow App Data",
           files: {
             "cashflow_data.json": {
-              content: JSON.stringify(data, null, 2),
+              content: JSON.stringify(dataToSave, null, 2),
             },
           },
         }),
@@ -409,9 +759,10 @@ class CloudSync {
           );
           if (createNew) {
             Utils.showNotification("Creating new Gist...");
-            const newGistId = await this.createNewGist(token, data);
+            const newGistId = await this.createNewGist(token, dataToSave);
             Utils.showNotification(`New Gist created with ID: ${newGistId}`);
             this.setCloudCredentials(token, newGistId);
+            this._storeSyncTime();
             if (syncIndicator)
               syncIndicator.className = "cloud-sync-indicator synced";
             return;
@@ -434,6 +785,11 @@ class CloudSync {
         }
         throw new Error(`HTTP error! status: ${response.status}`);
       }
+
+      // Step 3: Store the new ETag and sync time
+      const newETag = response.headers.get("ETag");
+      this._storeETag(newETag);
+      this._storeSyncTime();
 
       if (syncIndicator)
         syncIndicator.className = "cloud-sync-indicator synced";
@@ -484,12 +840,8 @@ class CloudSync {
         }
       }
 
-      const response = await fetch(`https://api.github.com/gists/${gistId}`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: "application/vnd.github.v3+json",
-        },
-      });
+      // Fetch the Gist
+      const { response, etag } = await this._fetchGist(token, gistId);
 
       if (!response.ok) {
         if (response.status === 401) {
@@ -524,20 +876,53 @@ class CloudSync {
       const content = gist.files["cashflow_data.json"].content;
 
       try {
-        const data = JSON.parse(content);
-        const success = this.store.importData(data);
+        const remoteData = JSON.parse(content);
+
+        // Check if local has changes since last sync
+        const localData = this.store.exportData();
+        const hasLocalChanges = this._hasLocalChangesSinceSync(localData);
+
+        let dataToImport = remoteData;
+        let needsResync = false;
+
+        if (hasLocalChanges) {
+          // Merge local and remote data
+          Utils.showLoading("Merging changes...");
+          dataToImport = this._mergeData(localData, remoteData);
+          needsResync = true;
+          console.log("Merged local changes with remote data during load");
+        }
+
+        const success = this.store.importData(dataToImport);
 
         if (!success) {
           throw new Error("Invalid data format in cloud storage");
         }
-        if (data.autoSyncEnabled !== undefined) {
-          this.autoSyncEnabled = data.autoSyncEnabled;
+
+        if (remoteData.autoSyncEnabled !== undefined) {
+          this.autoSyncEnabled = remoteData.autoSyncEnabled;
           localStorage.setItem('auto_sync_enabled', this.autoSyncEnabled.toString());
+        }
+
+        // Store the ETag for future conflict detection
+        this._storeETag(etag);
+        this._storeSyncTime();
+
+        // If we merged local changes, save back to cloud
+        if (needsResync && this.autoSyncEnabled) {
+          // Schedule a save to push merged data back
+          setTimeout(() => {
+            this.saveToCloud();
+          }, 500);
         }
 
         if (syncIndicator)
           syncIndicator.className = "cloud-sync-indicator synced";
-        Utils.showNotification("Data loaded from cloud successfully!");
+        Utils.showNotification(
+          hasLocalChanges
+            ? "Data merged with cloud successfully!"
+            : "Data loaded from cloud successfully!"
+        );
 
         this.onUpdate();
       } catch (parseError) {
@@ -555,5 +940,55 @@ class CloudSync {
     } finally {
       Utils.hideLoading();
     }
+  }
+
+  // Check if local data has changes since last sync
+  _hasLocalChangesSinceSync(localData) {
+    if (!this._lastSyncTime) {
+      // Never synced before, assume no local changes need merging
+      return false;
+    }
+
+    const lastSyncTime = this._lastSyncTime.getTime();
+
+    // Check transactions for modifications after last sync
+    const checkTimestamp = (item) => {
+      if (item._lastModified) {
+        return new Date(item._lastModified).getTime() > lastSyncTime;
+      }
+      return false;
+    };
+
+    // Check regular transactions
+    for (const date of Object.keys(localData.transactions || {})) {
+      for (const txn of localData.transactions[date]) {
+        if (checkTimestamp(txn)) return true;
+      }
+    }
+
+    // Check recurring transactions
+    for (const rt of localData.recurringTransactions || []) {
+      if (checkTimestamp(rt)) return true;
+    }
+
+    // Check debts
+    for (const debt of localData.debts || []) {
+      if (checkTimestamp(debt)) return true;
+    }
+
+    // Check cash infusions
+    for (const infusion of localData.cashInfusions || []) {
+      if (checkTimestamp(infusion)) return true;
+    }
+
+    // Check monthly notes
+    for (const monthKey of Object.keys(localData.monthlyNotes || {})) {
+      const note = localData.monthlyNotes[monthKey];
+      if (note && typeof note === 'object' && note._lastModified) {
+        if (new Date(note._lastModified).getTime() > lastSyncTime) return true;
+      }
+    }
+
+    return false;
   }
 }
