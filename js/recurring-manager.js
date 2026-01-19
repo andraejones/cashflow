@@ -111,19 +111,19 @@ class RecurringTransactionManager {
   }
 
   
-  // Calculate days between two dates consistently using UTC
+  // Calculate days between two dates using local timezone
   daysBetween(startDate, endDate) {
-    const startUtc = Date.UTC(
+    const startLocal = new Date(
       startDate.getFullYear(),
       startDate.getMonth(),
       startDate.getDate()
     );
-    const endUtc = Date.UTC(
+    const endLocal = new Date(
       endDate.getFullYear(),
       endDate.getMonth(),
       endDate.getDate()
     );
-    return Math.floor((endUtc - startUtc) / (1000 * 60 * 60 * 24));
+    return Math.floor((endLocal.getTime() - startLocal.getTime()) / (1000 * 60 * 60 * 24));
   }
 
   // Check if a year is a leap year
