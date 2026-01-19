@@ -9,6 +9,8 @@ class CloudSync {
     this.autoSyncEnabled = true;
     this._lastKnownETag = null;
     this._lastSyncTime = null;
+    this._heartbeatInterval = null;
+    this._updateAvailable = false;
 
     if (typeof this.store.registerSaveCallback === 'function') {
       this.store.registerSaveCallback((isDataModified) => {
@@ -627,6 +629,84 @@ class CloudSync {
     };
   }
 
+  // Lightweight check if remote Gist has changed (returns true/false/null)
+  async checkForRemoteChanges() {
+    const { token, gistId } = this.getCloudCredentials();
+    if (!token || !gistId || !this._lastKnownETag) {
+      return null; // Can't check - no credentials or no prior ETag
+    }
+
+    try {
+      const { response, notModified } = await this._fetchGist(
+        token, gistId, this._lastKnownETag
+      );
+
+      if (notModified) {
+        return false; // 304 - unchanged (~200 bytes transferred)
+      }
+      if (response.ok) {
+        // Changed - don't consume body, just note there are changes
+        return true;
+      }
+      if (response.status === 404) {
+        // Gist was deleted
+        console.warn('Gist not found during heartbeat check');
+        return null;
+      }
+      return null; // Error state
+    } catch (error) {
+      console.warn('Heartbeat check failed:', error);
+      return null;
+    }
+  }
+
+  // Start periodic heartbeat to check for remote changes
+  startHeartbeat(intervalMs = 60000) {
+    this.stopHeartbeat();
+    const { token, gistId } = this.getCloudCredentials();
+    if (!token || !gistId) {
+      return; // No credentials, don't start heartbeat
+    }
+
+    this._heartbeatInterval = setInterval(async () => {
+      const hasChanges = await this.checkForRemoteChanges();
+      if (hasChanges === true) {
+        this._showUpdateAvailable();
+      }
+    }, intervalMs);
+  }
+
+  // Stop the heartbeat polling
+  stopHeartbeat() {
+    if (this._heartbeatInterval) {
+      clearInterval(this._heartbeatInterval);
+      this._heartbeatInterval = null;
+    }
+  }
+
+  // Show visual indicator that remote updates are available
+  _showUpdateAvailable() {
+    if (this._updateAvailable) return; // Already showing
+    this._updateAvailable = true;
+
+    const syncIndicator = document.querySelector('.cloud-sync-indicator');
+    if (syncIndicator) {
+      syncIndicator.className = 'cloud-sync-indicator update-available';
+      syncIndicator.title = 'Remote changes available - click Cloud Sync to update';
+    }
+
+    Utils.showNotification('Remote changes detected. Use Cloud Sync to update.', 'info');
+  }
+
+  // Clear the update available indicator
+  _clearUpdateAvailable() {
+    this._updateAvailable = false;
+    const syncIndicator = document.querySelector('.cloud-sync-indicator');
+    if (syncIndicator && syncIndicator.classList.contains('update-available')) {
+      syncIndicator.className = 'cloud-sync-indicator synced';
+      syncIndicator.title = '';
+    }
+  }
 
   async saveToCloud() {
     const syncIndicator = document.querySelector(".cloud-sync-indicator");
@@ -918,6 +998,8 @@ class CloudSync {
 
         if (syncIndicator)
           syncIndicator.className = "cloud-sync-indicator synced";
+        // Clear any update-available indicator since we just loaded
+        this._clearUpdateAvailable();
         Utils.showNotification(
           hasLocalChanges
             ? "Data merged with cloud successfully!"
