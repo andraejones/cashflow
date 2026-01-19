@@ -1090,6 +1090,7 @@ class DebtSnowballUI {
       // If converting from a recurring transaction, delete it
       if (this.convertingFromRecurringId) {
         this.store.deleteRecurringTransaction(this.convertingFromRecurringId);
+        this.recurringManager.invalidateCache();
         this.convertingFromRecurringId = null;
         Utils.showNotification("Recurring transaction converted to debt");
       } else {
@@ -1126,6 +1127,7 @@ class DebtSnowballUI {
     }
     if (debt.minRecurringId) {
       this.store.deleteRecurringTransaction(debt.minRecurringId);
+      this.recurringManager.invalidateCache();
     }
     this.store.deleteDebt(debtId);
     Utils.showNotification("Debt deleted");
@@ -1142,6 +1144,7 @@ class DebtSnowballUI {
         recurringUpdates
       );
       if (updated) {
+        this.recurringManager.invalidateCache();
         return;
       }
     }
@@ -1151,6 +1154,7 @@ class DebtSnowballUI {
     };
     const recurringId = this.store.addRecurringTransaction(recurringTransaction);
     this.store.updateDebt(debt.id, { minRecurringId: recurringId });
+    this.recurringManager.invalidateCache();
   }
 
   buildDebtRecurringTransaction(debt) {

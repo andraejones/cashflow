@@ -1303,6 +1303,7 @@ class TransactionUI {
         const recurringId = this.store.addRecurringTransaction(
           newRecurringTransaction
         );
+        this.recurringManager.invalidateCache();
         const firstInstance = {
           amount: amount,
           type: type,
