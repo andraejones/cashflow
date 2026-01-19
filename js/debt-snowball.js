@@ -1981,7 +1981,7 @@ class DebtSnowballUI {
         typeof debt.interestRate === "number" && debt.interestRate > 0
           ? ` • ${debt.interestRate.toFixed(2)}%`
           : "";
-      meta.textContent = `Balance $${debt.balance.toFixed(
+      meta.textContent = `Starting $${debt.balance.toFixed(
         2
       )} • Remaining $${remaining.toFixed(2)} • Min $${minPayment.toFixed(
         2
@@ -2062,7 +2062,7 @@ class DebtSnowballUI {
     summaryText.className = "debt-plan-summary";
     const viewLabel = this.formatMonthYear(viewYear, viewMonth);
     summaryText.textContent = `Current target${viewLabel ? ` (${viewLabel})` : ""}: ${target.debt.name
-      } (Remaining $${target.remaining.toFixed(2)})`;
+      } (Projected $${target.remaining.toFixed(2)})`;
     this.planSummary.appendChild(summaryText);
 
     const extraText = document.createElement("div");
@@ -2115,7 +2115,7 @@ class DebtSnowballUI {
       const payoffLabel = payoff
         ? this.formatMonthYear(payoff.year, payoff.month)
         : "No payoff scheduled";
-      item.textContent = `${index + 1}. ${summary.debt.name} — Remaining $${summary.remaining.toFixed(
+      item.textContent = `${index + 1}. ${summary.debt.name} — Projected $${summary.remaining.toFixed(
         2
       )} — Paid off by ${payoffLabel}`;
       this.planList.appendChild(item);
