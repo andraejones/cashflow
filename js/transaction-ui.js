@@ -1062,8 +1062,10 @@ class TransactionUI {
 
       this.recurringManager.deleteTransaction(date, index, confirmDelete);
     } else {
+      const sign = transaction.type === "balance" ? "=" : transaction.type === "income" ? "+" : "-";
+      const descPart = transaction.description ? `${transaction.description} – ` : "";
       const shouldDelete = await Utils.showModalConfirm(
-        "Are you sure you want to delete this transaction?",
+        `Are you sure you want to delete this transaction?\n\n${descPart}${sign}$${transaction.amount.toFixed(2)}`,
         "Delete Transaction",
         { confirmText: "Delete", cancelText: "Cancel" }
       );

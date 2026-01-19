@@ -318,6 +318,22 @@ h4 {
   font-size: 12px;
 }
 
+.ending-balance-indicator {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  color: var(--accent-strong);
+  font-size: 12px;
+}
+
+.move-indicator {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  color: #8b5cf6;
+  font-size: 12px;
+}
+
 #transactionForm {
   background-color: var(--surface-muted);
   padding: 12px;

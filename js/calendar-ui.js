@@ -280,9 +280,13 @@ class CalendarUI {
           ? `<div class="transaction-count">(${transactionCount})</div>`
           : ""
         }
-        ${dailyTotals.hasSkippedTransactions || hasMoveAnomaly
-          ? '<div class="skip-indicator">★</div>'
-          : ""
+        ${dailyTotals.balance !== null
+          ? '<div class="ending-balance-indicator">★</div>'
+          : (hasMoveAnomaly
+            ? '<div class="move-indicator">★</div>'
+            : (dailyTotals.hasSkippedTransactions
+              ? '<div class="skip-indicator">★</div>'
+              : ""))
         }
       `;
       day.setAttribute('data-date', dateString);
