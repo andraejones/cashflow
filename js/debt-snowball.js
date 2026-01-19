@@ -1953,7 +1953,11 @@ class DebtSnowballUI {
   renderDebts() {
     if (!this.debtList) return;
     this.debtList.innerHTML = "";
-    const summaries = this.getDebtSummaries();
+    // Use tomorrow as cutoff to exclude future transactions from paid calculation
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(0, 0, 0, 0);
+    const summaries = this.getDebtSummaries(tomorrow);
     if (summaries.length === 0) {
       const empty = document.createElement("div");
       empty.className = "debt-empty";
