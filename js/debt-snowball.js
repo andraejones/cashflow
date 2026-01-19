@@ -1943,7 +1943,8 @@ class DebtSnowballUI {
     }
 
     if (changed && !snowballAdded) {
-      this.store.saveData();
+      // Use saveData(false) for automatic maintenance - saves locally but doesn't trigger cloud sync
+      this.store.saveData(false);
     }
 
     return { changed, snowballAdded };
@@ -2686,7 +2687,8 @@ class DebtSnowballUI {
         snowballAdded = true;
       }
       if (changed && !snowballAdded && !syncResult.changed) {
-        this.store.saveData();
+        // Use saveData(false) for automatic maintenance - saves locally but doesn't trigger cloud sync
+        this.store.saveData(false);
       }
     }
 
