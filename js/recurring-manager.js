@@ -1072,13 +1072,8 @@ class RecurringTransactionManager {
     if (maxOccurrences && yearsSinceStart >= maxOccurrences) {
       return;
     }
-    let targetDay = startDate.getDate();
-    if (month === 1 && targetDay === 29) {
-      const isLeapYear = new Date(year, 1, 29).getMonth() === 1;
-      if (!isLeapYear) {
-        targetDay = 28;
-      }
-    }
+    // Use adjustDayForMonth to handle leap years and short months consistently
+    const targetDay = this.adjustDayForMonth(year, month, startDate.getDate());
     let targetDate = new Date(year, month, targetDay);
     let originalDateString = null;
     if (rt.businessDayAdjustment) {

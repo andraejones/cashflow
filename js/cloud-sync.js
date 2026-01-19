@@ -640,12 +640,14 @@ class CloudSync {
     }
 
     const { token, gistId } = this.getCloudCredentials();
-    if (!token || !gistId || !this._lastKnownETag) {
-      return null; // Can't check - no credentials or no prior ETag
+    if (!token || !gistId) {
+      return null; // Can't check - no credentials
     }
 
     try {
-      const { response, notModified } = await this._fetchGist(
+      // If no ETag yet (first check before any sync), fetch without If-None-Match
+      // This will return 200 OK if the gist exists, allowing us to detect remote data
+      const { response, etag, notModified } = await this._fetchGist(
         token, gistId, this._lastKnownETag
       );
 
@@ -653,7 +655,11 @@ class CloudSync {
         return false; // 304 - unchanged (~200 bytes transferred)
       }
       if (response.ok) {
-        // Changed - don't consume body, just note there are changes
+        // If we had no ETag before, store it now for future checks
+        if (!this._lastKnownETag && etag) {
+          this._storeETag(etag);
+        }
+        // Changed (or first check with existing remote data)
         return true;
       }
       if (response.status === 404) {
@@ -764,6 +770,9 @@ class CloudSync {
       }
 
       // Step 1: Check if remote has changed using ETag
+      // Flush any pending debounced saves to ensure we export the latest data
+      this.store.flushPendingSave();
+
       let dataToSave = {
         ...this.store.exportData(),
         lastUpdated: new Date().toISOString(),
@@ -785,9 +794,19 @@ class CloudSync {
               const remoteData = JSON.parse(gist.files["cashflow_data.json"].content);
               const localData = dataToSave;
 
+              // Create shadow copy of local data before merge for recovery
+              try {
+                localStorage.setItem('_backup_before_merge', JSON.stringify(localData));
+              } catch (backupError) {
+                console.warn("Could not create backup before merge:", backupError);
+              }
+
               // Merge local and remote data
               const mergedData = this._mergeData(localData, remoteData);
               mergedData.autoSyncEnabled = this.autoSyncEnabled;
+
+              // Cancel any pending debounced saves before import to prevent race condition
+              this.store.cancelPendingSave();
 
               // Import merged data into local store (silently, without triggering another save)
               this.store.importData(mergedData);
@@ -970,6 +989,9 @@ class CloudSync {
       try {
         const remoteData = JSON.parse(content);
 
+        // Flush any pending debounced saves to ensure we have the latest local data
+        this.store.flushPendingSave();
+
         // Check if local has changes since last sync
         const localData = this.store.exportData();
         const hasLocalChanges = this._hasLocalChangesSinceSync(localData);
@@ -978,6 +1000,13 @@ class CloudSync {
         let needsResync = false;
 
         if (hasLocalChanges) {
+          // Create shadow copy of local data before merge for recovery
+          try {
+            localStorage.setItem('_backup_before_merge', JSON.stringify(localData));
+          } catch (backupError) {
+            console.warn("Could not create backup before merge:", backupError);
+          }
+
           // Merge local and remote data
           Utils.showLoading("Merging changes...");
           const mergedData = this._mergeData(localData, remoteData);
@@ -996,6 +1025,10 @@ class CloudSync {
             console.log("Local changes already present in remote, no resync needed");
           }
         }
+
+        // Cancel any pending debounced saves to prevent race condition
+        // where stale local data overwrites the imported/merged data
+        this.store.cancelPendingSave();
 
         const success = this.store.importData(dataToImport);
 

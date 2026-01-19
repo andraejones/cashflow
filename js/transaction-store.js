@@ -455,7 +455,7 @@ class TransactionStore {
     }
     infusion._lastModified = new Date().toISOString();
     this.cashInfusions.push(infusion);
-    this.saveData();
+    this.debouncedSave();
     return infusion.id;
   }
 
@@ -474,7 +474,7 @@ class TransactionStore {
       ...updates,
       _lastModified: new Date().toISOString(),
     };
-    this.saveData();
+    this.debouncedSave();
     return true;
   }
 
@@ -491,7 +491,7 @@ class TransactionStore {
     // Track deleted ID for merge conflict resolution
     this._deletedItems.cashInfusions.push(id);
     this.cashInfusions.splice(index, 1);
-    this.saveData();
+    this.debouncedSave();
     return true;
   }
 
@@ -550,7 +550,7 @@ class TransactionStore {
       movedAt: new Date().toISOString()
     };
 
-    this.saveData();
+    this.debouncedSave();
     return true;
   }
 
@@ -576,7 +576,7 @@ class TransactionStore {
     const key = `${recurringId}-${fromDate}`;
     if (this.movedTransactions[key]) {
       delete this.movedTransactions[key];
-      this.saveData();
+      this.debouncedSave();
       return true;
     }
     return false;
@@ -604,7 +604,7 @@ class TransactionStore {
     }
     debt._lastModified = new Date().toISOString();
     this.debts.push(debt);
-    this.saveData();
+    this.debouncedSave();
     return debt.id;
   }
 
@@ -623,7 +623,7 @@ class TransactionStore {
       ...updates,
       _lastModified: new Date().toISOString(),
     };
-    this.saveData();
+    this.debouncedSave();
     return true;
   }
 
@@ -640,7 +640,7 @@ class TransactionStore {
     // Track deleted ID for merge conflict resolution
     this._deletedItems.debts.push(id);
     this.debts.splice(index, 1);
-    this.saveData();
+    this.debouncedSave();
     return true;
   }
 
@@ -655,7 +655,7 @@ class TransactionStore {
       extraPayment: Number(settings.extraPayment) || 0,
       autoGenerate: settings.autoGenerate === true,
     };
-    this.saveData();
+    this.debouncedSave();
     return true;
   }
 
@@ -741,7 +741,7 @@ class TransactionStore {
     recurringTransaction._lastModified = new Date().toISOString();
 
     this.recurringTransactions.push(recurringTransaction);
-    this.saveData();
+    this.debouncedSave();
 
     return recurringTransaction.id;
   }
@@ -761,7 +761,7 @@ class TransactionStore {
         ...updates,
         _lastModified: new Date().toISOString(),
       };
-      this.saveData();
+      this.debouncedSave();
       return true;
     }
 
@@ -805,7 +805,7 @@ class TransactionStore {
       }
     }
 
-    this.saveData();
+    this.debouncedSave();
     return true;
   }
 

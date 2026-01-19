@@ -143,14 +143,12 @@ class CalculationService {
             if (!isSkipped) {
               if (t.type === "income") {
                 monthIncome += t.amount;
-                if (!balanceSet) {
-                  dailyBalance += t.amount;
-                }
+                // Always apply income to dailyBalance (after any balance transaction sets the base)
+                dailyBalance += t.amount;
               } else if (t.type === "expense") {
                 monthExpense += t.amount;
-                if (!balanceSet) {
-                  dailyBalance -= t.amount;
-                }
+                // Always apply expense to dailyBalance (after any balance transaction sets the base)
+                dailyBalance -= t.amount;
               }
             }
           });
