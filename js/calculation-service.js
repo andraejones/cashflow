@@ -270,6 +270,10 @@ class CalculationService {
   calculateUnallocated() {
     // Calculate the minimum running balance from today through the next 30 days
     // This should match how the calendar displays running balances
+
+    // Clear cached daily totals to ensure fresh calculations after applying recurring transactions
+    this._cachedDailyTotals = {};
+
     const today = new Date();
     const todayYear = today.getFullYear();
     const todayMonth = today.getMonth();
@@ -284,11 +288,11 @@ class CalculationService {
       const dateString = `${todayYear}-${String(todayMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
       const dailyTotals = this.calculateDailyTotals(dateString);
 
+      // If there's a balance transaction, use it as the base, then apply income/expense
       if (dailyTotals.balance !== null) {
         runningBalance = dailyTotals.balance;
-      } else {
-        runningBalance = this.roundToCents(runningBalance + dailyTotals.income - dailyTotals.expense);
       }
+      runningBalance = this.roundToCents(runningBalance + dailyTotals.income - dailyTotals.expense);
     }
 
     // Track minimum balance from today through next 30 days
@@ -312,11 +316,11 @@ class CalculationService {
 
       const dailyTotals = this.calculateDailyTotals(dateString);
 
+      // If there's a balance transaction, use it as the base, then apply income/expense
       if (dailyTotals.balance !== null) {
         runningBalance = dailyTotals.balance;
-      } else {
-        runningBalance = this.roundToCents(runningBalance + dailyTotals.income - dailyTotals.expense);
       }
+      runningBalance = this.roundToCents(runningBalance + dailyTotals.income - dailyTotals.expense);
 
       // Capture the first time balance goes to zero or negative
       if (firstCrisis === null && runningBalance <= 0) {
