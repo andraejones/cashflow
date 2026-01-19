@@ -7,6 +7,7 @@ class PinProtection {
     this.activityEvents = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'click'];
     this.boundResetTimer = this.resetInactivityTimer.bind(this);
     this.onUnlockCallback = null;
+    this.onLockCallback = null;
   }
 
   encodeBase64(value) {
@@ -302,6 +303,11 @@ class PinProtection {
 
     this.isLocked = true;
     this.stopInactivityMonitoring();
+
+    // Call lock callback if set (for stopping heartbeat, etc.)
+    if (this.onLockCallback) {
+      this.onLockCallback();
+    }
 
     // Close any existing open modals before showing lock screen
     this.closeAllModals();

@@ -1227,6 +1227,12 @@ body.app-locked #calendarOptions {
   background-color: var(--error-color);
 }
 
+.cloud-sync-indicator.update-available {
+  background-color: var(--primary-color);
+  animation: pulse 2s infinite;
+  cursor: pointer;
+}
+
 @keyframes pulse {
   0% {
     opacity: 1;

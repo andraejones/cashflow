@@ -59,20 +59,31 @@ class CashflowApp {
     this.updateUI();
     window.addTransaction = () => this.transactionUI.addTransaction();
 
+    // Start heartbeat polling for remote changes (1 minute interval)
+    this.cloudSync.startHeartbeat(60000);
+
     // Set up callback to refresh from cloud after PIN unlock (session resume)
     this.pinProtection.onUnlockCallback = async () => {
       try {
         await this.safeCloudLoad();
         this.calculationService.invalidateCache();
         this.updateUI();
+        // Restart heartbeat after unlock
+        this.cloudSync.startHeartbeat(60000);
       } catch (error) {
         console.error("Error refreshing from cloud after unlock:", error);
       }
+    };
+
+    // Set up callback to stop heartbeat when app locks
+    this.pinProtection.onLockCallback = () => {
+      this.cloudSync.stopHeartbeat();
     };
   }
 
 
   // Safe cloud load with operation locking to prevent race conditions
+  // Uses heartbeat check to avoid unnecessary full loads when data hasn't changed
   async safeCloudLoad() {
     if (this._operationLock) {
       console.log("Operation in progress, skipping cloud load");
@@ -80,6 +91,17 @@ class CashflowApp {
     }
     this._operationLock = true;
     try {
+      // Check if remote has changed before doing full load
+      const hasChanges = await this.cloudSync.checkForRemoteChanges();
+
+      if (hasChanges === false) {
+        // No changes detected (304 response) - skip full load
+        console.log("No remote changes detected, skipping full load");
+        Utils.showNotification("Cloud data up to date");
+        return true;
+      }
+
+      // hasChanges is true or null (can't determine) - do full load
       await this.cloudSync.loadFromCloud();
       return true;
     } finally {
