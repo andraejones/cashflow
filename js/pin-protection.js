@@ -78,8 +78,9 @@ class PinProtection {
 
   clearPin() {
     localStorage.removeItem("pin_hash");
-    // Also clear WebAuthn credential when PIN is cleared
+    // Also clear WebAuthn credential and stored PIN when PIN is cleared
     localStorage.removeItem("webauthn_credential_id");
+    this.clearBiometricPin();
     this.credentialId = null;
     this.webAuthnEnabled = false;
     this.currentPin = "";
@@ -205,6 +206,28 @@ class PinProtection {
     }
   }
 
+  // Store PIN for biometric unlock (obfuscated in localStorage)
+  storePinForBiometrics(pin) {
+    const obfuscated = this.encodeBase64(pin.split('').reverse().join(''));
+    localStorage.setItem("biometric_pin", obfuscated);
+  }
+
+  // Retrieve PIN after biometric authentication
+  retrievePinForBiometrics() {
+    const obfuscated = localStorage.getItem("biometric_pin");
+    if (!obfuscated) return null;
+    try {
+      return this.decodeBase64(obfuscated).split('').reverse().join('');
+    } catch {
+      return null;
+    }
+  }
+
+  // Clear stored biometric PIN
+  clearBiometricPin() {
+    localStorage.removeItem("biometric_pin");
+  }
+
   // Enable biometric authentication
   async enableBiometrics() {
     if (!this.isPinSet()) {
@@ -217,9 +240,25 @@ class PinProtection {
       return false;
     }
 
+    // Need current PIN to store for biometric unlock
+    if (!this.currentPin) {
+      const pin = await Utils.showModalPrompt("Enter your PIN to enable biometrics:", "Enable Biometrics", {
+        inputLabel: "PIN",
+        inputType: "password",
+        confirmText: "Continue",
+      });
+      if (!pin || !this.verifyPin(pin)) {
+        await Utils.showModalAlert("Incorrect PIN.", "Error");
+        return false;
+      }
+      this.currentPin = pin;
+    }
+
     try {
       await this.registerWebAuthn();
-      await Utils.showModalAlert("Biometric authentication enabled successfully!", "Success");
+      // Store PIN for future biometric unlocks
+      this.storePinForBiometrics(this.currentPin);
+      await Utils.showModalAlert("FaceID/TouchID enabled successfully!", "Success");
       return true;
     } catch (error) {
       if (error.name === "NotAllowedError") {
@@ -234,9 +273,10 @@ class PinProtection {
   // Disable biometric authentication
   async disableBiometrics() {
     localStorage.removeItem("webauthn_credential_id");
+    this.clearBiometricPin();
     this.credentialId = null;
     this.webAuthnEnabled = false;
-    await Utils.showModalAlert("Biometric authentication disabled.", "Disabled");
+    await Utils.showModalAlert("FaceID/TouchID disabled.", "Disabled");
   }
 
   async promptUnlock() {
@@ -252,12 +292,10 @@ class PinProtection {
       try {
         const biometricResult = await this.authenticateWebAuthn();
         if (biometricResult) {
-          // Biometric success - we need to get PIN from secure storage
-          // For now, prompt for PIN silently to enable encryption features
-          // Note: PIN is still needed for encryption, so we show a brief PIN dialog
-          const pinResult = await this.showUnlockDialog(true); // true = biometric succeeded
-          if (pinResult && pinResult !== "reset" && this.verifyPin(pinResult)) {
-            this.currentPin = pinResult;
+          // Biometric success - retrieve stored PIN
+          const storedPin = this.retrievePinForBiometrics();
+          if (storedPin && this.verifyPin(storedPin)) {
+            this.currentPin = storedPin;
             this.isLocked = false;
             this.hideLockOverlay();
             this.startInactivityMonitoring();
@@ -266,7 +304,8 @@ class PinProtection {
             }
             return true;
           }
-          // If PIN verification failed after biometric, fall through to normal flow
+          // Stored PIN invalid/missing, fall through to PIN dialog
+          console.log("Stored PIN invalid, falling back to PIN entry");
         }
       } catch (error) {
         // Biometric failed or was cancelled, fall through to PIN dialog
@@ -319,7 +358,7 @@ class PinProtection {
     return this.promptUnlock();
   }
 
-  showUnlockDialog(biometricSucceeded = false) {
+  showUnlockDialog() {
     return new Promise((resolve) => {
       const modal = document.getElementById("appModal");
       if (!modal) {
@@ -337,13 +376,8 @@ class PinProtection {
       const closeButton = document.getElementById("appModalClose");
 
       // Set up the dialog
-      if (biometricSucceeded) {
-        titleEl.textContent = "Enter PIN";
-        messageEl.textContent = "Biometric verified. Enter PIN for encryption:";
-      } else {
-        titleEl.textContent = "Unlock";
-        messageEl.textContent = "Enter PIN to unlock:";
-      }
+      titleEl.textContent = "Unlock";
+      messageEl.textContent = "Enter PIN to unlock:";
       inputWrapper.classList.add("is-visible");
       input.type = "password";
       input.value = "";
@@ -462,6 +496,10 @@ class PinProtection {
       return;
     }
     this.setPin(newPin);
+    // Update stored biometric PIN if biometrics is enabled
+    if (this.isWebAuthnEnabled()) {
+      this.storePinForBiometrics(newPin);
+    }
     store.saveData(false);
     await Utils.showModalAlert("PIN updated", "Change PIN");
   }
