@@ -383,10 +383,6 @@ class RecurringTransactionManager {
       }
     }
 
-    // Track which transactions we add for caching
-    const addedTransactions = [];
-    this._currentAddedTransactions = addedTransactions;
-
     this.store.getRecurringTransactions().forEach((rt) => {
       const startDate = this.parseDateString(rt.startDate);
       const endDate = rt.endDate ? this.parseDateString(rt.endDate) : null;
@@ -545,9 +541,26 @@ class RecurringTransactionManager {
       });
     });
 
-    // Store in cache for future use
-    this.expansionCache.set(cacheKey, addedTransactions);
-    this._currentAddedTransactions = null;
+    // Store in cache for future use - capture ALL recurring transactions for this month
+    // not just newly added ones, to ensure cache restore works correctly
+    const allRecurringForMonth = [];
+    const transactions = this.store.getTransactions();
+    const endOfMonthForCache = new Date(year, month + 1, 0);
+    for (let day = 1; day <= endOfMonthForCache.getDate(); day++) {
+      const dateObj = new Date(year, month, day);
+      const dateString = Utils.formatDateString(dateObj);
+      if (transactions[dateString]) {
+        transactions[dateString].forEach(t => {
+          if (t.recurringId && !t.modifiedInstance) {
+            allRecurringForMonth.push({
+              dateString,
+              transaction: { ...t }
+            });
+          }
+        });
+      }
+    }
+    this.expansionCache.set(cacheKey, allRecurringForMonth);
 
     this.store.saveData(false);
   }
@@ -1307,14 +1320,6 @@ class RecurringTransactionManager {
       }
 
       transactions[dateString].push(newTransaction);
-
-      // Track for caching if we're building the cache
-      if (this._currentAddedTransactions) {
-        this._currentAddedTransactions.push({
-          dateString,
-          transaction: { ...newTransaction }
-        });
-      }
     }
   }
 
