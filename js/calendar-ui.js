@@ -335,6 +335,21 @@ class CalendarUI {
 
     document.getElementById("monthSummary").innerHTML = summaryHtml;
     const pinLabel = window.pinProtection && pinProtection.isPinSet() ? "Change PIN" : "Set PIN";
+
+    // Biometrics button - only show if available and PIN is set
+    let biometricsButton = '';
+    if (window.pinProtection && pinProtection.isPinSet() && pinProtection.isWebAuthnAvailable()) {
+      const biometricsLabel = pinProtection.isWebAuthnEnabled() ? "Disable FaceID/TouchID" : "Enable FaceID/TouchID";
+      biometricsButton = `
+      <button
+        type="button"
+        class="calendar-option"
+        onclick="app.calendarUI.toggleBiometrics()"
+      >
+        ${biometricsLabel}
+      </button>`;
+    }
+
     document.getElementById("calendarOptions").innerHTML = `
       <button
         type="button"
@@ -381,6 +396,7 @@ class CalendarUI {
       >
         ${pinLabel}
       </button>
+      ${biometricsButton}
       <button type="button" class="calendar-option" onclick="app.resetData()">
         Reset
       </button>
@@ -502,5 +518,23 @@ class CalendarUI {
     this.hideNotesModal();
     this.generateCalendar(); // Refresh to update star indicator
     Utils.showNotification("Notes saved");
+  }
+
+  async toggleBiometrics() {
+    if (!window.pinProtection) return;
+
+    // Ensure WebAuthn initialization is complete
+    await pinProtection.ensureWebAuthnInit();
+
+    if (pinProtection.isWebAuthnEnabled()) {
+      // Disable biometrics
+      await pinProtection.disableBiometrics();
+    } else {
+      // Enable biometrics
+      await pinProtection.enableBiometrics();
+    }
+
+    // Refresh calendar to update button label
+    this.generateCalendar();
   }
 }

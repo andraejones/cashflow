@@ -8,6 +8,45 @@ class PinProtection {
     this.boundResetTimer = this.resetInactivityTimer.bind(this);
     this.onUnlockCallback = null;
     this.onLockCallback = null;
+
+    // WebAuthn state
+    this.webAuthnAvailable = false;
+    this.webAuthnEnabled = false;
+    this.credentialId = null;
+    this.webAuthnInitPromise = null;
+
+    // Initialize WebAuthn support check
+    this.webAuthnInitPromise = this.initWebAuthn();
+  }
+
+  async initWebAuthn() {
+    this.webAuthnAvailable = await this.checkWebAuthnSupport();
+    this.credentialId = localStorage.getItem("webauthn_credential_id");
+    this.webAuthnEnabled = this.webAuthnAvailable && this.credentialId !== null;
+  }
+
+  // Wait for WebAuthn initialization to complete
+  async ensureWebAuthnInit() {
+    if (this.webAuthnInitPromise) {
+      await this.webAuthnInitPromise;
+    }
+  }
+
+  async checkWebAuthnSupport() {
+    if (!window.PublicKeyCredential) return false;
+    try {
+      return await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+    } catch {
+      return false;
+    }
+  }
+
+  isWebAuthnEnabled() {
+    return this.webAuthnEnabled && this.credentialId !== null;
+  }
+
+  isWebAuthnAvailable() {
+    return this.webAuthnAvailable;
   }
 
   encodeBase64(value) {
@@ -39,6 +78,10 @@ class PinProtection {
 
   clearPin() {
     localStorage.removeItem("pin_hash");
+    // Also clear WebAuthn credential when PIN is cleared
+    localStorage.removeItem("webauthn_credential_id");
+    this.credentialId = null;
+    this.webAuthnEnabled = false;
     this.currentPin = "";
     this.stopInactivityMonitoring();
   }
@@ -65,12 +108,173 @@ class PinProtection {
     }
   }
 
+  // WebAuthn helper: convert ArrayBuffer to base64 string
+  arrayBufferToBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+  }
+
+  // WebAuthn helper: convert base64 string to ArrayBuffer
+  base64ToArrayBuffer(base64) {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes.buffer;
+  }
+
+  // Register a new WebAuthn credential (FaceID/TouchID)
+  async registerWebAuthn() {
+    if (!this.webAuthnAvailable) {
+      throw new Error("WebAuthn not available on this device");
+    }
+
+    try {
+      const challenge = crypto.getRandomValues(new Uint8Array(32));
+      const userId = crypto.getRandomValues(new Uint8Array(16));
+
+      const credential = await navigator.credentials.create({
+        publicKey: {
+          challenge: challenge,
+          rp: {
+            name: "CashFlow Calendar"
+          },
+          user: {
+            id: userId,
+            name: "cashflow-user",
+            displayName: "CashFlow User"
+          },
+          pubKeyCredParams: [
+            { alg: -7, type: "public-key" },   // ES256
+            { alg: -257, type: "public-key" }  // RS256
+          ],
+          authenticatorSelection: {
+            authenticatorAttachment: "platform",
+            userVerification: "required",
+            residentKey: "discouraged"
+          },
+          timeout: 60000
+        }
+      });
+
+      // Store credential ID for future authentication
+      const credentialId = this.arrayBufferToBase64(credential.rawId);
+      localStorage.setItem("webauthn_credential_id", credentialId);
+      this.credentialId = credentialId;
+      this.webAuthnEnabled = true;
+
+      return true;
+    } catch (error) {
+      console.error("WebAuthn registration failed:", error);
+      throw error;
+    }
+  }
+
+  // Authenticate using WebAuthn (FaceID/TouchID)
+  async authenticateWebAuthn() {
+    if (!this.webAuthnEnabled || !this.credentialId) {
+      throw new Error("WebAuthn not enabled");
+    }
+
+    try {
+      const challenge = crypto.getRandomValues(new Uint8Array(32));
+      const credentialIdBuffer = this.base64ToArrayBuffer(this.credentialId);
+
+      const assertion = await navigator.credentials.get({
+        publicKey: {
+          challenge: challenge,
+          allowCredentials: [{
+            id: credentialIdBuffer,
+            type: "public-key"
+          }],
+          userVerification: "required",
+          timeout: 60000
+        }
+      });
+
+      // If we get here, authentication succeeded
+      return true;
+    } catch (error) {
+      console.error("WebAuthn authentication failed:", error);
+      throw error;
+    }
+  }
+
+  // Enable biometric authentication
+  async enableBiometrics() {
+    if (!this.isPinSet()) {
+      await Utils.showModalAlert("Please set a PIN first before enabling biometrics.", "PIN Required");
+      return false;
+    }
+
+    if (!this.webAuthnAvailable) {
+      await Utils.showModalAlert("Biometric authentication is not available on this device or browser.", "Not Available");
+      return false;
+    }
+
+    try {
+      await this.registerWebAuthn();
+      await Utils.showModalAlert("Biometric authentication enabled successfully!", "Success");
+      return true;
+    } catch (error) {
+      if (error.name === "NotAllowedError") {
+        await Utils.showModalAlert("Biometric setup was cancelled.", "Cancelled");
+      } else {
+        await Utils.showModalAlert("Failed to enable biometric authentication. Please try again.", "Error");
+      }
+      return false;
+    }
+  }
+
+  // Disable biometric authentication
+  async disableBiometrics() {
+    localStorage.removeItem("webauthn_credential_id");
+    this.credentialId = null;
+    this.webAuthnEnabled = false;
+    await Utils.showModalAlert("Biometric authentication disabled.", "Disabled");
+  }
+
   async promptUnlock() {
     if (!this.isPinSet()) {
       return true;
     }
 
-    const result = await this.showUnlockDialog();
+    // Ensure WebAuthn initialization is complete before checking
+    await this.ensureWebAuthnInit();
+
+    // Try biometric authentication first if enabled
+    if (this.isWebAuthnEnabled()) {
+      try {
+        const biometricResult = await this.authenticateWebAuthn();
+        if (biometricResult) {
+          // Biometric success - we need to get PIN from secure storage
+          // For now, prompt for PIN silently to enable encryption features
+          // Note: PIN is still needed for encryption, so we show a brief PIN dialog
+          const pinResult = await this.showUnlockDialog(true); // true = biometric succeeded
+          if (pinResult && pinResult !== "reset" && this.verifyPin(pinResult)) {
+            this.currentPin = pinResult;
+            this.isLocked = false;
+            this.hideLockOverlay();
+            this.startInactivityMonitoring();
+            if (this.onUnlockCallback) {
+              this.onUnlockCallback();
+            }
+            return true;
+          }
+          // If PIN verification failed after biometric, fall through to normal flow
+        }
+      } catch (error) {
+        // Biometric failed or was cancelled, fall through to PIN dialog
+        console.log("Biometric auth failed, falling back to PIN:", error.name);
+      }
+    }
+
+    const result = await this.showUnlockDialog(false);
 
     if (result === "reset") {
       // User chose to reset - confirm with DELETE
@@ -115,7 +319,7 @@ class PinProtection {
     return this.promptUnlock();
   }
 
-  showUnlockDialog() {
+  showUnlockDialog(biometricSucceeded = false) {
     return new Promise((resolve) => {
       const modal = document.getElementById("appModal");
       if (!modal) {
@@ -133,8 +337,13 @@ class PinProtection {
       const closeButton = document.getElementById("appModalClose");
 
       // Set up the dialog
-      titleEl.textContent = "Unlock";
-      messageEl.textContent = "Enter PIN to unlock:";
+      if (biometricSucceeded) {
+        titleEl.textContent = "Enter PIN";
+        messageEl.textContent = "Biometric verified. Enter PIN for encryption:";
+      } else {
+        titleEl.textContent = "Unlock";
+        messageEl.textContent = "Enter PIN to unlock:";
+      }
       inputWrapper.classList.add("is-visible");
       input.type = "password";
       input.value = "";
