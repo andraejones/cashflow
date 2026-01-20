@@ -8,6 +8,8 @@ class RecurringTransactionManager {
     // Key format: "YYYY-MM" + hash of recurring transaction data
     this.expansionCache = new Map();
     this.lastRecurringHash = null;
+    // Cache for US banking holidays per year
+    this._holidayCache = new Map();
   }
 
   // Generate a simple hash of recurring transactions to detect changes
@@ -137,10 +139,84 @@ class RecurringTransactionManager {
     return Math.min(preferredDay, daysInMonth);
   }
 
-  
+  // Get observed date for a fixed holiday (handles weekend shifts)
+  _getObservedHoliday(year, month, day) {
+    const holiday = new Date(year, month, day, 12, 0, 0);
+    const dayOfWeek = holiday.getDay();
+    if (dayOfWeek === 6) {
+      // Saturday -> observed Friday
+      return new Date(year, month, day - 1, 12, 0, 0);
+    } else if (dayOfWeek === 0) {
+      // Sunday -> observed Monday
+      return new Date(year, month, day + 1, 12, 0, 0);
+    }
+    return holiday;
+  }
+
+  // Get all US federal banking holidays for a given year
+  getUSBankingHolidays(year) {
+    if (this._holidayCache.has(year)) {
+      return this._holidayCache.get(year);
+    }
+
+    const holidays = [];
+
+    // New Year's Day (Jan 1, observed)
+    holidays.push(this._getObservedHoliday(year, 0, 1));
+
+    // MLK Day (3rd Monday of January)
+    holidays.push(this.getNthDayOfMonth(year, 0, 1, 3));
+
+    // Presidents' Day (3rd Monday of February)
+    holidays.push(this.getNthDayOfMonth(year, 1, 1, 3));
+
+    // Memorial Day (Last Monday of May)
+    holidays.push(this.getNthDayOfMonth(year, 4, 1, -1));
+
+    // Juneteenth (June 19, observed)
+    holidays.push(this._getObservedHoliday(year, 5, 19));
+
+    // Independence Day (July 4, observed)
+    holidays.push(this._getObservedHoliday(year, 6, 4));
+
+    // Labor Day (1st Monday of September)
+    holidays.push(this.getNthDayOfMonth(year, 8, 1, 1));
+
+    // Columbus Day (2nd Monday of October)
+    holidays.push(this.getNthDayOfMonth(year, 9, 1, 2));
+
+    // Veterans Day (Nov 11, observed)
+    holidays.push(this._getObservedHoliday(year, 10, 11));
+
+    // Thanksgiving (4th Thursday of November)
+    holidays.push(this.getNthDayOfMonth(year, 10, 4, 4));
+
+    // Christmas Day (Dec 25, observed)
+    holidays.push(this._getObservedHoliday(year, 11, 25));
+
+    // Filter out any nulls and store in cache
+    const validHolidays = holidays.filter(h => h !== null);
+    this._holidayCache.set(year, validHolidays);
+    return validHolidays;
+  }
+
+  // Check if a date is a US banking holiday
+  isUSBankingHoliday(date) {
+    const year = date.getFullYear();
+    const holidays = this.getUSBankingHolidays(year);
+
+    return holidays.some(holiday =>
+      holiday.getFullYear() === date.getFullYear() &&
+      holiday.getMonth() === date.getMonth() &&
+      holiday.getDate() === date.getDate()
+    );
+  }
+
+
   isBusinessDay(date) {
     const day = date.getDay();
-    return day !== 0 && day !== 6;
+    if (day === 0 || day === 6) return false;
+    return !this.isUSBankingHoliday(date);
   }
 
   
