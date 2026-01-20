@@ -19,6 +19,18 @@ Updated for appVersion 2.0.0 on 2026-01-18 (source of truth: `js/transaction-sto
 - Full data import and export (JSON).
 - Optional PIN lock and GitHub Gist cloud sync.
 
+## Calendar star indicators
+
+Color-coded stars (★) appear in the top-right corner of calendar days to indicate special states:
+
+| Color | Meaning |
+|-------|---------|
+| Orange | Day has an explicit ending balance set (overrides calculated balance) |
+| Purple | Day has moved transactions (recurring transaction rescheduled from or to this date) |
+| Teal/Green | Day has skipped recurring transactions |
+
+A star also appears next to the "Notes" link in the monthly summary when notes exist for the current month.
+
 ## Quick start
 
 1. Open `index.html` in a modern browser.
