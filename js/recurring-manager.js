@@ -79,24 +79,24 @@ class RecurringTransactionManager {
     return this.store.getRecurringTransactions();
   }
 
-  
+
   addRecurringTransaction(recurringTransaction) {
     this.invalidateCache();
     return this.store.addRecurringTransaction(recurringTransaction);
   }
 
-  
+
   getRecurringTransactionById(id) {
     const rt = this.store.getRecurringTransactions().find((rt) => rt.id === id);
     return rt || null;
   }
 
-  
+
   isTransactionSkipped(date, recurringId) {
     return this.store.isTransactionSkipped(date, recurringId) === true;
   }
 
-  
+
   toggleSkipTransaction(date, recurringId) {
     const isCurrentlySkipped = this.isTransactionSkipped(date, recurringId);
     const newStatus = !isCurrentlySkipped;
@@ -105,14 +105,14 @@ class RecurringTransactionManager {
     return newStatus;
   }
 
-  
+
   // Parse date string to Date object using noon to avoid DST issues
   parseDateString(dateString) {
     const [year, month, day] = dateString.split("-").map(Number);
     return new Date(year, month - 1, day, 12, 0, 0);
   }
 
-  
+
   // Calculate days between two dates using local timezone
   daysBetween(startDate, endDate) {
     const startLocal = new Date(
@@ -219,7 +219,7 @@ class RecurringTransactionManager {
     return !this.isUSBankingHoliday(date);
   }
 
-  
+
   adjustForBusinessDay(date, adjustment) {
     if (!adjustment || adjustment === "none" || this.isBusinessDay(date)) {
       return { adjustedDate: date, originalDateString: null };
@@ -261,7 +261,7 @@ class RecurringTransactionManager {
     return { adjustedDate: newDate, originalDateString };
   }
 
-  
+
   getNthDayOfMonth(year, month, dayOfWeek, occurrence) {
     if (occurrence > 0) {
       let date = new Date(year, month, 1);
@@ -294,7 +294,7 @@ class RecurringTransactionManager {
     return null;
   }
 
-  
+
   parseDaySpecificData(daySpecificData) {
     if (!daySpecificData || typeof daySpecificData !== "string") {
       return null;
@@ -302,7 +302,7 @@ class RecurringTransactionManager {
     const parts = daySpecificData.split("-");
     let occurrence;
     let dayOfWeek;
-    
+
     if (parts.length === 2) {
       occurrence = parseInt(parts[0], 10);
       dayOfWeek = parseInt(parts[1], 10);
@@ -312,15 +312,15 @@ class RecurringTransactionManager {
     } else {
       return null;
     }
-    
+
     if (isNaN(occurrence) || isNaN(dayOfWeek)) {
       return null;
     }
-    
+
     return { occurrence, dayOfWeek };
   }
 
-  
+
   matchesDaySpecificRecurrence(rt, targetDate) {
     if (!rt.daySpecific) return false;
 
@@ -348,8 +348,8 @@ class RecurringTransactionManager {
       return false;
     }
   }
-  
-  
+
+
   applyRecurringTransactions(year, month) {
     // Check cache validity and use cached result if available
     const cacheKey = this._getCacheKey(year, month);
@@ -644,7 +644,7 @@ class RecurringTransactionManager {
     }
   }
 
-  
+
   applyDailyRecurrence(
     rt,
     startDate,
@@ -675,7 +675,7 @@ class RecurringTransactionManager {
       let targetDate = currentDate;
       let originalDateString = null;
       if (rt.businessDayAdjustment) {
-        const { adjustedDate, originalDateString: origDate } = 
+        const { adjustedDate, originalDateString: origDate } =
           this.adjustForBusinessDay(targetDate, rt.businessDayAdjustment);
         targetDate = adjustedDate;
         originalDateString = origDate;
@@ -700,7 +700,7 @@ class RecurringTransactionManager {
     }
   }
 
-  
+
   applyWeeklyRecurrence(
     rt,
     startDate,
@@ -727,7 +727,7 @@ class RecurringTransactionManager {
       let targetDate = currentDate;
       let originalDateString = null;
       if (rt.businessDayAdjustment) {
-        const { adjustedDate, originalDateString: origDate } = 
+        const { adjustedDate, originalDateString: origDate } =
           this.adjustForBusinessDay(targetDate, rt.businessDayAdjustment);
         targetDate = adjustedDate;
         originalDateString = origDate;
@@ -752,7 +752,7 @@ class RecurringTransactionManager {
     }
   }
 
-  
+
   applyBiWeeklyRecurrence(
     rt,
     startDate,
@@ -779,7 +779,7 @@ class RecurringTransactionManager {
       let targetDate = currentDate;
       let originalDateString = null;
       if (rt.businessDayAdjustment) {
-        const { adjustedDate, originalDateString: origDate } = 
+        const { adjustedDate, originalDateString: origDate } =
           this.adjustForBusinessDay(targetDate, rt.businessDayAdjustment);
         targetDate = adjustedDate;
         originalDateString = origDate;
@@ -804,7 +804,7 @@ class RecurringTransactionManager {
     }
   }
 
-  
+
   applyMonthlyRecurrence(
     rt,
     startDate,
@@ -858,7 +858,7 @@ class RecurringTransactionManager {
     let targetDate = new Date(year, month, targetDay, 12, 0, 0);
     let originalDateString = null;
     if (rt.businessDayAdjustment) {
-      const { adjustedDate, originalDateString: origDate } = 
+      const { adjustedDate, originalDateString: origDate } =
         this.adjustForBusinessDay(targetDate, rt.businessDayAdjustment);
       targetDate = adjustedDate;
       originalDateString = origDate;
@@ -870,17 +870,17 @@ class RecurringTransactionManager {
       ) {
         const dateString = Utils.formatDateString(targetDate);
         this.addRecurringTransactionToDate(
-          rt, 
-          dateString, 
-          targetDate, 
-          startDate, 
+          rt,
+          dateString,
+          targetDate,
+          startDate,
           originalDateString
         );
       }
     }
   }
 
-  
+
   applyDaySpecificMonthlyRecurrence(
     rt,
     startDate,
@@ -918,7 +918,7 @@ class RecurringTransactionManager {
     }
     let adjustedDate = targetDate;
     let originalDateString = null;
-    
+
     if (rt.businessDayAdjustment) {
       const result = this.adjustForBusinessDay(targetDate, rt.businessDayAdjustment);
       adjustedDate = result.adjustedDate;
@@ -941,7 +941,7 @@ class RecurringTransactionManager {
     }
   }
 
-  
+
   applySemiMonthlyRecurrence(
     rt,
     startDate,
@@ -1040,7 +1040,7 @@ class RecurringTransactionManager {
     }
   }
 
-  
+
   applyQuarterlyRecurrence(
     rt,
     startDate,
@@ -1132,17 +1132,17 @@ class RecurringTransactionManager {
       ) {
         const dateString = Utils.formatDateString(targetDate);
         this.addRecurringTransactionToDate(
-          rt, 
-          dateString, 
-          targetDate, 
-          startDate, 
+          rt,
+          dateString,
+          targetDate,
+          startDate,
           originalDateString
         );
       }
     }
   }
 
-  
+
   applyYearlyRecurrence(
     rt,
     startDate,
@@ -1162,7 +1162,7 @@ class RecurringTransactionManager {
     }
     // Use adjustDayForMonth to handle leap years and short months consistently
     const targetDay = this.adjustDayForMonth(year, month, startDate.getDate());
-    let targetDate = new Date(year, month, targetDay);
+    let targetDate = new Date(year, month, targetDay, 12, 0, 0);
     let originalDateString = null;
     if (rt.businessDayAdjustment) {
       const result = this.adjustForBusinessDay(
@@ -1179,17 +1179,17 @@ class RecurringTransactionManager {
       ) {
         const dateString = Utils.formatDateString(targetDate);
         this.addRecurringTransactionToDate(
-          rt, 
-          dateString, 
-          targetDate, 
-          startDate, 
+          rt,
+          dateString,
+          targetDate,
+          startDate,
           originalDateString
         );
       }
     }
   }
-  
-  
+
+
   applyCustomRecurrence(
     rt,
     startDate,
@@ -1224,7 +1224,7 @@ class RecurringTransactionManager {
     ) {
       let targetDate = currentDate;
       let originalDateString = null;
-      
+
       if (rt.businessDayAdjustment) {
         const result = this.adjustForBusinessDay(
           targetDate,
@@ -1257,7 +1257,7 @@ class RecurringTransactionManager {
     }
   }
 
-  
+
   getCustomIntervalDate(startDate, customInterval, occurrenceCount) {
     const result = new Date(startDate);
 
@@ -1276,7 +1276,7 @@ class RecurringTransactionManager {
     return result;
   }
 
-  
+
   addRecurringTransactionToDate(rt, dateString, currentDate, startDate, originalDateString = null) {
     const transactions = this.store.getTransactions();
 
@@ -1322,7 +1322,7 @@ class RecurringTransactionManager {
     }
   }
 
-  
+
   calculateVariableAmount(rt, currentDate, startDate) {
     if (!rt.variableAmount) {
       return rt.amount;
@@ -1360,7 +1360,7 @@ class RecurringTransactionManager {
             ((currentDate.getFullYear() - startDate.getFullYear()) * 12 +
               currentDate.getMonth() -
               startDate.getMonth()) /
-              3
+            3
           );
           break;
         case "semi-annual":
@@ -1368,7 +1368,7 @@ class RecurringTransactionManager {
             ((currentDate.getFullYear() - startDate.getFullYear()) * 12 +
               currentDate.getMonth() -
               startDate.getMonth()) /
-              6
+            6
           );
           break;
         case "yearly":
@@ -1403,8 +1403,8 @@ class RecurringTransactionManager {
 
     return amount;
   }
-  
-  
+
+
   countOccurrencesBefore(rt, beforeDate) {
     const startDate = this.parseDateString(rt.startDate);
     let count = 0;
@@ -1470,7 +1470,7 @@ class RecurringTransactionManager {
         count = Math.floor(
           ((beforeDate.getFullYear() - startDate.getFullYear()) * 12 +
             (beforeDate.getMonth() - startDate.getMonth())) /
-            3
+          3
         );
         break;
 
@@ -1478,7 +1478,7 @@ class RecurringTransactionManager {
         count = Math.floor(
           ((beforeDate.getFullYear() - startDate.getFullYear()) * 12 +
             (beforeDate.getMonth() - startDate.getMonth())) /
-            6
+          6
         );
         break;
 
@@ -1502,7 +1502,7 @@ class RecurringTransactionManager {
           } else if (rt.customInterval.unit === "weeks") {
             count = Math.floor(
               this.daysBetween(startDate, beforeDate) /
-                (rt.customInterval.value * 7)
+              (rt.customInterval.value * 7)
             );
           } else if (rt.customInterval.unit === "months") {
             const monthsDiff =
@@ -1517,7 +1517,7 @@ class RecurringTransactionManager {
     return Math.max(0, count);
   }
 
-  
+
   editTransaction(date, index, updatedTransaction, editScope) {
     const transactions = this.store.getTransactions();
     const transaction = transactions[date][index];
@@ -1665,7 +1665,7 @@ class RecurringTransactionManager {
     return false;
   }
 
-  
+
   deleteTransaction(date, index, deleteFuture) {
     const transactions = this.store.getTransactions();
     const transaction = transactions[date][index];
