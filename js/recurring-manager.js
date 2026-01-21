@@ -544,7 +544,6 @@ class RecurringTransactionManager {
     // Store in cache for future use - capture ALL recurring transactions for this month
     // not just newly added ones, to ensure cache restore works correctly
     const allRecurringForMonth = [];
-    const transactions = this.store.getTransactions();
     const endOfMonthForCache = new Date(year, month + 1, 0);
     for (let day = 1; day <= endOfMonthForCache.getDate(); day++) {
       const dateObj = new Date(year, month, day);
