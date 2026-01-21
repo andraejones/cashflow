@@ -968,6 +968,31 @@ class TransactionStore {
         }
       });
 
+      // Clean up expanded recurring transactions that will be re-generated
+      // Only keep: manual transactions (no recurringId) and modified instances
+      Object.keys(this.transactions).forEach((date) => {
+        this.transactions[date] = this.transactions[date].filter((t) => {
+          // Keep if no recurringId (manual transaction)
+          if (!t.recurringId) {
+            return true;
+          }
+          // Keep if it's a modified instance
+          if (t.modifiedInstance) {
+            return true;
+          }
+          // Keep if it was moved (has movedFrom property)
+          if (t.movedFrom !== undefined) {
+            return true;
+          }
+          // Otherwise, it's an expanded recurring transaction - remove it
+          return false;
+        });
+        // Remove empty date entries
+        if (this.transactions[date].length === 0) {
+          delete this.transactions[date];
+        }
+      });
+
       // Migration: ensure all transactions have IDs and timestamps
       Object.keys(this.transactions).forEach((date) => {
         this.transactions[date].forEach((t) => {
