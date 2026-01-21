@@ -66,6 +66,7 @@ class CashflowApp {
     this.pinProtection.onUnlockCallback = async () => {
       try {
         await this.safeCloudLoad();
+        this.recurringManager.invalidateCache();
         this.calculationService.invalidateCache();
         this.updateUI();
         // Restart heartbeat after unlock
@@ -103,6 +104,8 @@ class CashflowApp {
 
       // hasChanges is true or null (can't determine) - do full load
       await this.cloudSync.loadFromCloud();
+      this.recurringManager.invalidateCache();
+      this.calculationService.invalidateCache();
       return true;
     } finally {
       this._operationLock = false;
@@ -202,6 +205,7 @@ class CashflowApp {
             const success = this.store.importData(content);
 
             if (success) {
+              this.recurringManager.invalidateCache();
               this.calculationService.invalidateCache();
               this.updateUI();
 
@@ -249,6 +253,7 @@ class CashflowApp {
 
       this.store.resetData();
       this.cloudSync.clearCloudCredentials();
+      this.recurringManager.invalidateCache();
       this.calculationService.invalidateCache();
       this.updateUI();
 
