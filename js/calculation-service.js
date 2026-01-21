@@ -49,6 +49,12 @@ class CalculationService {
         latestDate = viewedMonthStart;
       }
 
+      // Always calculate at least 6 months ahead to ensure future month balances propagate correctly
+      const futureMonthCap = new Date(viewedDate.getFullYear(), viewedDate.getMonth() + 6, 1);
+      if (futureMonthCap > latestDate) {
+        latestDate = futureMonthCap;
+      }
+
       if (!earliestDate) {
         earliestDate = viewedMonthStart;
       }
