@@ -976,10 +976,10 @@ class RecurringTransactionManager {
     }
     if (
       (!maxOccurrences || occurrenceCount < maxOccurrences) &&
-      (!endDate || new Date(year, month, firstDate) <= endDate) &&
-      startDate <= new Date(year, month, firstDate)
+      (!endDate || new Date(year, month, firstDate, 12, 0, 0) <= endDate) &&
+      startDate <= new Date(year, month, firstDate, 12, 0, 0)
     ) {
-      let firstDateObj = new Date(year, month, firstDate);
+      let firstDateObj = new Date(year, month, firstDate, 12, 0, 0);
       let originalDateString = null;
       if (rt.businessDayAdjustment) {
         const result = this.adjustForBusinessDay(
@@ -1009,10 +1009,10 @@ class RecurringTransactionManager {
     }
     if (
       (!maxOccurrences || occurrenceCount < maxOccurrences) &&
-      (!endDate || new Date(year, month, secondDate) <= endDate) &&
-      startDate <= new Date(year, month, secondDate)
+      (!endDate || new Date(year, month, secondDate, 12, 0, 0) <= endDate) &&
+      startDate <= new Date(year, month, secondDate, 12, 0, 0)
     ) {
-      let secondDateObj = new Date(year, month, secondDate);
+      let secondDateObj = new Date(year, month, secondDate, 12, 0, 0);
       let originalDateString = null;
       if (rt.businessDayAdjustment) {
         const result = this.adjustForBusinessDay(
