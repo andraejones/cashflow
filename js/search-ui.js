@@ -104,6 +104,10 @@ class SearchUI {
 
   
   changePage(delta) {
+    // Guard against division by zero
+    if (this.resultsPerPage <= 0) {
+      return;
+    }
     const newPage = this.currentPage + delta;
     if (
       newPage < 1 ||

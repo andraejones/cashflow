@@ -231,11 +231,13 @@ class RecurringTransactionManager {
     const originalDateString = Utils.formatDateString(date);
 
     if (adjustment === "previous") {
-      while (!this.isBusinessDay(newDate)) {
+      let maxIterations = 10; // Prevent infinite loop in edge cases
+      while (!this.isBusinessDay(newDate) && maxIterations-- > 0) {
         newDate.setDate(newDate.getDate() - 1);
       }
     } else if (adjustment === "next") {
-      while (!this.isBusinessDay(newDate)) {
+      let maxIterations = 10; // Prevent infinite loop in edge cases
+      while (!this.isBusinessDay(newDate) && maxIterations-- > 0) {
         newDate.setDate(newDate.getDate() + 1);
       }
     } else if (adjustment === "nearest") {

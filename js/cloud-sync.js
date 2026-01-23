@@ -302,9 +302,11 @@ class CloudSync {
     this.showPendingMessage();
 
     this.saveTimeout = setTimeout(() => {
-      this.saveToCloud().finally(() => {
-        this.clearPendingMessage();
-      });
+      this.saveToCloud()
+        .catch(err => console.error("Cloud save failed:", err))
+        .finally(() => {
+          this.clearPendingMessage();
+        });
     }, 10000);
   }
 

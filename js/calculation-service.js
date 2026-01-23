@@ -151,11 +151,11 @@ class CalculationService {
 
               if (!isSkipped) {
                 if (t.type === "income") {
-                  monthIncome += t.amount;
-                  dailyBalance += t.amount;
+                  monthIncome = this.roundToCents(monthIncome + t.amount);
+                  dailyBalance = this.roundToCents(dailyBalance + t.amount);
                 } else if (t.type === "expense") {
-                  monthExpense += t.amount;
-                  dailyBalance -= t.amount;
+                  monthExpense = this.roundToCents(monthExpense + t.amount);
+                  dailyBalance = this.roundToCents(dailyBalance - t.amount);
                 }
               }
             });
@@ -211,9 +211,9 @@ class CalculationService {
           if (t.type === "balance") {
             balance = t.amount;
           } else if (t.type === "income") {
-            income += t.amount;
+            income = this.roundToCents(income + t.amount);
           } else if (t.type === "expense") {
-            expense += t.amount;
+            expense = this.roundToCents(expense + t.amount);
           }
         }
       });
@@ -244,8 +244,8 @@ class CalculationService {
     for (let day = 1; day <= daysInMonth; day++) {
       const dateString = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
       const dailyTotals = this.calculateDailyTotals(dateString);
-      monthIncome += dailyTotals.income;
-      monthExpense += dailyTotals.expense;
+      monthIncome = this.roundToCents(monthIncome + dailyTotals.income);
+      monthExpense = this.roundToCents(monthExpense + dailyTotals.expense);
     }
 
     let monthlyBalances = this.store.getMonthlyBalances();
