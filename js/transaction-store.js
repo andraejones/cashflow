@@ -206,8 +206,8 @@ class TransactionStore {
           ...debt,
           id: debt.id || Utils.generateUniqueId(),
           _lastModified: debt._lastModified || new Date().toISOString(),
-          balance: Number(debt.balance) || 0,
-          minPayment: Number(debt.minPayment) || 0,
+          balance: Math.round((Number(debt.balance) || 0) * 100) / 100,
+          minPayment: Math.round((Number(debt.minPayment) || 0) * 100) / 100,
           dueDay: Number(debt.dueDay) || 1,
           dueDayPattern:
             typeof debt.dueDayPattern === "string" ? debt.dueDayPattern : "",
@@ -901,8 +901,8 @@ class TransactionStore {
       this.debts = (data.debts || []).map((debt) => ({
         ...debt,
         id: debt.id || Utils.generateUniqueId(),
-        balance: Number(debt.balance) || 0,
-        minPayment: Number(debt.minPayment) || 0,
+        balance: Math.round((Number(debt.balance) || 0) * 100) / 100,
+        minPayment: Math.round((Number(debt.minPayment) || 0) * 100) / 100,
         dueDay: Number(debt.dueDay) || 1,
         dueDayPattern:
           typeof debt.dueDayPattern === "string" ? debt.dueDayPattern : "",
