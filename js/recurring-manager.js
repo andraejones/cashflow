@@ -1381,20 +1381,21 @@ class RecurringTransactionManager {
         case "custom":
           if (rt.customInterval) {
             const custom = rt.customInterval;
+            const intervalValue = custom.value || 1;
             if (custom.unit === "days") {
               occurrences = Math.floor(
-                this.daysBetween(startDate, currentDate) / custom.value
+                this.daysBetween(startDate, currentDate) / intervalValue
               );
             } else if (custom.unit === "weeks") {
               occurrences = Math.floor(
-                this.daysBetween(startDate, currentDate) / (custom.value * 7)
+                this.daysBetween(startDate, currentDate) / (intervalValue * 7)
               );
             } else if (custom.unit === "months") {
               const monthsDiff =
                 (currentDate.getFullYear() - startDate.getFullYear()) * 12 +
                 currentDate.getMonth() -
                 startDate.getMonth();
-              occurrences = Math.floor(monthsDiff / custom.value);
+              occurrences = Math.floor(monthsDiff / intervalValue);
             }
           }
           break;
@@ -1499,20 +1500,21 @@ class RecurringTransactionManager {
 
       case "custom":
         if (rt.customInterval) {
+          const intervalValue = rt.customInterval.value || 1;
           if (rt.customInterval.unit === "days") {
             count = Math.floor(
-              this.daysBetween(startDate, beforeDate) / rt.customInterval.value
+              this.daysBetween(startDate, beforeDate) / intervalValue
             );
           } else if (rt.customInterval.unit === "weeks") {
             count = Math.floor(
               this.daysBetween(startDate, beforeDate) /
-              (rt.customInterval.value * 7)
+              (intervalValue * 7)
             );
           } else if (rt.customInterval.unit === "months") {
             const monthsDiff =
               (beforeDate.getFullYear() - startDate.getFullYear()) * 12 +
               (beforeDate.getMonth() - startDate.getMonth());
-            count = Math.floor(monthsDiff / rt.customInterval.value);
+            count = Math.floor(monthsDiff / intervalValue);
           }
         }
         break;
@@ -1524,11 +1526,10 @@ class RecurringTransactionManager {
 
   editTransaction(date, index, updatedTransaction, editScope) {
     const transactions = this.store.getTransactions();
-    const transaction = transactions[date][index];
-
-    if (!transaction) {
+    if (!transactions[date] || !transactions[date][index]) {
       return false;
     }
+    const transaction = transactions[date][index];
 
     const isRecurring = transaction.recurringId !== undefined;
 
@@ -1672,11 +1673,10 @@ class RecurringTransactionManager {
 
   deleteTransaction(date, index, deleteFuture) {
     const transactions = this.store.getTransactions();
-    const transaction = transactions[date][index];
-
-    if (!transaction) {
+    if (!transactions[date] || !transactions[date][index]) {
       return false;
     }
+    const transaction = transactions[date][index];
 
     if (transaction.recurringId) {
       // Invalidate cache when deleting recurring transactions
