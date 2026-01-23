@@ -1051,7 +1051,7 @@ class TransactionStore {
                 rt.amount === (t.originalAmount || t.amount) &&
                 rt.type === (t.originalType || t.type) &&
                 rt.description === (t.originalDescription || t.description) &&
-                new Date(rt.startDate) <= new Date(date)
+                Utils.parseDateString(rt.startDate) <= Utils.parseDateString(date)
             );
 
             if (matchingRt) {

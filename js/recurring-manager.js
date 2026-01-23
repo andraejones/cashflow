@@ -113,17 +113,19 @@ class RecurringTransactionManager {
   }
 
 
-  // Calculate days between two dates using local timezone
+  // Calculate days between two dates using local timezone with noon to avoid DST issues
   daysBetween(startDate, endDate) {
     const startLocal = new Date(
       startDate.getFullYear(),
       startDate.getMonth(),
-      startDate.getDate()
+      startDate.getDate(),
+      12, 0, 0
     );
     const endLocal = new Date(
       endDate.getFullYear(),
       endDate.getMonth(),
-      endDate.getDate()
+      endDate.getDate(),
+      12, 0, 0
     );
     return Math.floor((endLocal.getTime() - startLocal.getTime()) / (1000 * 60 * 60 * 24));
   }
@@ -395,8 +397,8 @@ class RecurringTransactionManager {
         const targetDate = new Date(year, month + offset, 1);
         const targetYear = targetDate.getFullYear();
         const targetMonth = targetDate.getMonth();
-        const targetStartOfMonth = new Date(targetYear, targetMonth, 1);
-        const targetEndOfMonth = new Date(targetYear, targetMonth + 1, 0);
+        const targetStartOfMonth = new Date(targetYear, targetMonth, 1, 12, 0, 0);
+        const targetEndOfMonth = new Date(targetYear, targetMonth + 1, 0, 12, 0, 0);
 
         if (
           startDate <= targetEndOfMonth &&
@@ -655,8 +657,8 @@ class RecurringTransactionManager {
     filterYear = year,
     filterMonth = month
   ) {
-    const startOfMonth = new Date(year, month, 1);
-    const endOfMonth = new Date(year, month + 1, 0);
+    const startOfMonth = new Date(year, month, 1, 12, 0, 0);
+    const endOfMonth = new Date(year, month + 1, 0, 12, 0, 0);
 
     let currentDate = new Date(
       Math.max(startDate.getTime(), startOfMonth.getTime())
@@ -711,8 +713,8 @@ class RecurringTransactionManager {
     filterYear = year,
     filterMonth = month
   ) {
-    const startOfMonth = new Date(year, month, 1);
-    const endOfMonth = new Date(year, month + 1, 0);
+    const startOfMonth = new Date(year, month, 1, 12, 0, 0);
+    const endOfMonth = new Date(year, month + 1, 0, 12, 0, 0);
     let currentDate = new Date(startDate);
     let occurrenceCount = 0;
     while (currentDate < startOfMonth) {
@@ -763,8 +765,8 @@ class RecurringTransactionManager {
     filterYear = year,
     filterMonth = month
   ) {
-    const startOfMonth = new Date(year, month, 1);
-    const endOfMonth = new Date(year, month + 1, 0);
+    const startOfMonth = new Date(year, month, 1, 12, 0, 0);
+    const endOfMonth = new Date(year, month + 1, 0, 12, 0, 0);
     let currentDate = new Date(startDate);
     let occurrenceCount = 0;
     while (currentDate < startOfMonth) {
@@ -828,8 +830,8 @@ class RecurringTransactionManager {
       );
       return;
     }
-    const startOfMonth = new Date(year, month, 1);
-    const endOfMonth = new Date(year, month + 1, 0);
+    const startOfMonth = new Date(year, month, 1, 12, 0, 0);
+    const endOfMonth = new Date(year, month + 1, 0, 12, 0, 0);
 
     if ((endDate && endDate < startOfMonth) || startDate > endOfMonth) {
       return;
@@ -891,8 +893,8 @@ class RecurringTransactionManager {
     filterYear = year,
     filterMonth = month
   ) {
-    const startOfMonth = new Date(year, month, 1);
-    const endOfMonth = new Date(year, month + 1, 0);
+    const startOfMonth = new Date(year, month, 1, 12, 0, 0);
+    const endOfMonth = new Date(year, month + 1, 0, 12, 0, 0);
 
     if ((endDate && endDate < startOfMonth) || startDate > endOfMonth) {
       return;
@@ -952,8 +954,8 @@ class RecurringTransactionManager {
     filterYear = year,
     filterMonth = month
   ) {
-    const startOfMonth = new Date(year, month, 1);
-    const endOfMonth = new Date(year, month + 1, 0);
+    const startOfMonth = new Date(year, month, 1, 12, 0, 0);
+    const endOfMonth = new Date(year, month + 1, 0, 12, 0, 0);
     const lastDayOfMonth = endOfMonth.getDate();
     let firstDate = rt.semiMonthlyDays ? rt.semiMonthlyDays[0] : 1;
     let secondDate = rt.semiMonthlyDays ? rt.semiMonthlyDays[1] : 15;
@@ -1205,8 +1207,8 @@ class RecurringTransactionManager {
       return;
     }
 
-    const startOfMonth = new Date(year, month, 1);
-    const endOfMonth = new Date(year, month + 1, 0);
+    const startOfMonth = new Date(year, month, 1, 12, 0, 0);
+    const endOfMonth = new Date(year, month + 1, 0, 12, 0, 0);
     let occurrenceCount = 0;
     let currentDate = new Date(startDate);
     while (currentDate < startOfMonth) {
@@ -1624,7 +1626,7 @@ class RecurringTransactionManager {
       });
       const skippedTransactions = this.store.getSkippedTransactions();
       Object.keys(skippedTransactions).forEach((skipDate) => {
-        if (new Date(skipDate) >= startDate) {
+        if (this.parseDateString(skipDate) >= startDate) {
           const skipIndex = skippedTransactions[skipDate].indexOf(recurringId);
           if (skipIndex > -1) {
             skippedTransactions[skipDate].splice(skipIndex, 1);

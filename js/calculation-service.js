@@ -34,7 +34,7 @@ class CalculationService {
     let latestDate = null;
     for (const dateString in transactions) {
       const [year, month, day] = dateString.split("-").map(Number);
-      const transactionDate = new Date(year, month - 1, day);
+      const transactionDate = new Date(year, month - 1, day, 12, 0, 0);
       if (earliestDate === null || transactionDate < earliestDate) {
         earliestDate = transactionDate;
       }
@@ -43,14 +43,14 @@ class CalculationService {
       }
     }
     if (viewedDate) {
-      const viewedMonthStart = new Date(viewedDate.getFullYear(), viewedDate.getMonth(), 1);
+      const viewedMonthStart = new Date(viewedDate.getFullYear(), viewedDate.getMonth(), 1, 12, 0, 0);
 
       if (!latestDate || viewedMonthStart > latestDate) {
         latestDate = viewedMonthStart;
       }
 
       // Always calculate at least 6 months ahead to ensure future month balances propagate correctly
-      const futureMonthCap = new Date(viewedDate.getFullYear(), viewedDate.getMonth() + 6, 1);
+      const futureMonthCap = new Date(viewedDate.getFullYear(), viewedDate.getMonth() + 6, 1, 12, 0, 0);
       if (futureMonthCap > latestDate) {
         latestDate = futureMonthCap;
       }
@@ -250,7 +250,7 @@ class CalculationService {
 
     let monthlyBalances = this.store.getMonthlyBalances();
     if (!monthlyBalances[monthKey]) {
-      const viewedDate = new Date(year, month, 1);
+      const viewedDate = new Date(year, month, 1, 12, 0, 0);
       this.updateMonthlyBalances(viewedDate);
       monthlyBalances = this.store.getMonthlyBalances();
     }

@@ -986,8 +986,8 @@ class TransactionUI {
     const type = typeElement.value;
     const description = descriptionElement.value;
 
-    if (isNaN(amount) || amount <= 0) {
-      Utils.showNotification("Please enter a valid amount", "error");
+    if (isNaN(amount) || amount < 0) {
+      Utils.showNotification("Please enter a valid amount (must be 0 or greater)", "error");
       return;
     }
 
@@ -1144,8 +1144,12 @@ class TransactionUI {
     const transaction = transactions[date][index];
     const isRecurring = transaction.recurringId !== undefined;
 
-    // Calculate the target date
-    const currentDate = new Date(date + "T12:00:00");
+    // Calculate the target date using consistent date parsing
+    const currentDate = Utils.parseDateString(date);
+    if (!currentDate) {
+      Utils.showNotification("Error: Invalid date format", "error");
+      return;
+    }
     currentDate.setDate(currentDate.getDate() + direction);
     const targetDate = Utils.formatDateString(currentDate);
 

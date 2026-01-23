@@ -100,9 +100,24 @@ const Utils = {
   },
 
 
-  formatDisplayDate: function (dateString) {
+  // Parse date string to Date object using noon to avoid DST/timezone issues
+  parseDateString: function (dateString) {
+    if (!dateString || typeof dateString !== 'string') {
+      return null;
+    }
     const [year, month, day] = dateString.split("-").map(Number);
-    const dateObj = new Date(year, month - 1, day);
+    if (isNaN(year) || isNaN(month) || isNaN(day)) {
+      return null;
+    }
+    return new Date(year, month - 1, day, 12, 0, 0);
+  },
+
+
+  formatDisplayDate: function (dateString) {
+    const dateObj = this.parseDateString(dateString);
+    if (!dateObj) {
+      return "";
+    }
 
     return dateObj.toLocaleString("default", {
       month: "long",

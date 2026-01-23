@@ -65,9 +65,8 @@ class CashflowApp {
     // Set up callback to refresh from cloud after PIN unlock (session resume)
     this.pinProtection.onUnlockCallback = async () => {
       try {
+        // safeCloudLoad() already handles cache invalidation internally
         await this.safeCloudLoad();
-        this.recurringManager.invalidateCache();
-        this.calculationService.invalidateCache();
         this.updateUI();
         // Restart heartbeat after unlock
         this.cloudSync.startHeartbeat(60000);
