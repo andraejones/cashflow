@@ -635,7 +635,7 @@ class CloudSync {
     // Skip heartbeat check if we just saved (grace period of 90 seconds)
     // This avoids false positives from GitHub ETag inconsistencies between PATCH and GET
     const SAVE_GRACE_PERIOD = 90000;
-    if (this._lastSaveTime && (Date.now() - this._lastSaveTime) < SAVE_GRACE_PERIOD) {
+    if (this._lastSaveTime && (Date.now() - this._lastSaveTime) <= SAVE_GRACE_PERIOD) {
       return false; // Assume no changes since we just saved
     }
 

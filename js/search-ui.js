@@ -224,6 +224,14 @@ class SearchUI {
         hasMaxAmount = !isNaN(maxAmount);
       }
     }
+    // Validate amount range - min should not exceed max
+    if (hasMinAmount && hasMaxAmount && minAmount > maxAmount) {
+      searchResults.innerHTML = "Invalid amount range: minimum amount cannot exceed maximum amount.";
+      clearButton.disabled = false;
+      exportButton.disabled = true;
+      paginationControls.style.display = "none";
+      return;
+    }
     if (
       searchTerm === "" &&
       !dateFrom &&

@@ -1540,7 +1540,7 @@ class DebtSnowballUI {
       if (viewBalances === null && year === viewYear && month === viewMonth) {
         viewBalances = { ...balances };
       }
-      const monthKey = `${year}-${month + 1}`;
+      const monthKey = `${year}-${String(month + 1).padStart(2, "0")}`;
       const monthIndex = this.getMonthIndex(year, month);
       const monthlyTotalsByDebtId = {};
       Object.keys(recurringTemplates).forEach((debtId) => {
@@ -2467,7 +2467,7 @@ class DebtSnowballUI {
     const maxMonths = (endYear - startYear) * 12 + (endMonth - startMonth) + 12; // Add buffer
 
     for (let i = 0; i < maxMonths; i++) {
-      const monthKey = `${year}-${month + 1}`;
+      const monthKey = `${year}-${String(month + 1).padStart(2, "0")}`;
       const monthIndex = this.getMonthIndex(year, month);
 
       // Calculate monthly minimums
@@ -2611,7 +2611,7 @@ class DebtSnowballUI {
     const currentIndex = this.getMonthIndex(today.getFullYear(), today.getMonth());
     const viewIndex = this.getMonthIndex(year, month);
     const allowMutation = force || viewIndex >= currentIndex;
-    const monthKey = `${year}-${month + 1}`;
+    const monthKey = `${year}-${String(month + 1).padStart(2, "0")}`;
     let changed = false;
     let snowballAdded = false;
 

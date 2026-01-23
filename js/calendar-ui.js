@@ -82,14 +82,14 @@ class CalendarUI {
 
 
   cleanUpHtmlArtifacts() {
-    const bodyChildren = document.body.childNodes;
+    // Convert live NodeList to static array to avoid issues when modifying during iteration
+    const bodyChildren = Array.from(document.body.childNodes);
     for (let i = 0; i < bodyChildren.length; i++) {
       const node = bodyChildren[i];
       if (node.nodeType === Node.TEXT_NODE &&
         (node.textContent.includes("<div") ||
           node.textContent.includes("modal-content"))) {
         document.body.removeChild(node);
-        i--;
       }
     }
   }
@@ -172,7 +172,7 @@ class CalendarUI {
     // We need to track running balance starting from today
     // First, calculate balance at end of today
     const todayStr = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, "0")}-${today.getDate().toString().padStart(2, "0")}`;
-    const todayMonthKey = `${today.getFullYear()}-${today.getMonth() + 1}`;
+    const todayMonthKey = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, "0")}`;
     const monthlyBalances = this.store.getMonthlyBalances();
     let currentBalance = monthlyBalances[todayMonthKey]?.startingBalance || 0;
 
@@ -328,7 +328,7 @@ class CalendarUI {
     }
 
     // Add Notes link with star indicator if notes exist
-    const monthKey = `${year}-${month + 1}`;
+    const monthKey = `${year}-${String(month + 1).padStart(2, "0")}`;
     const hasNotes = this.store.hasMonthlyNotes(monthKey);
     const notesIndicator = hasNotes ? ' ★' : '';
     summaryHtml += ` | <span class="notes-link" onclick="app.calendarUI.showNotesModal()">Notes${notesIndicator}</span>`;
@@ -484,7 +484,7 @@ class CalendarUI {
 
     const year = this.currentDate.getFullYear();
     const month = this.currentDate.getMonth();
-    const monthKey = `${year}-${month + 1}`;
+    const monthKey = `${year}-${String(month + 1).padStart(2, "0")}`;
 
     const monthNames = [
       "January", "February", "March", "April", "May", "June",
@@ -512,7 +512,7 @@ class CalendarUI {
 
     const year = this.currentDate.getFullYear();
     const month = this.currentDate.getMonth();
-    const monthKey = `${year}-${month + 1}`;
+    const monthKey = `${year}-${String(month + 1).padStart(2, "0")}`;
 
     this.store.setMonthlyNotes(monthKey, textarea.value);
     this.hideNotesModal();
