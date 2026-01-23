@@ -118,8 +118,9 @@ class CashflowApp {
 
 
   cleanUpHtmlArtifacts() {
-    const bodyChildren = document.body.childNodes;
-    for (let i = bodyChildren.length - 1; i >= 0; i--) {
+    // Convert live NodeList to static array to avoid issues when modifying during iteration
+    const bodyChildren = Array.from(document.body.childNodes);
+    for (let i = 0; i < bodyChildren.length; i++) {
       const node = bodyChildren[i];
       if (node.nodeType === Node.TEXT_NODE &&
         (node.textContent.includes("<div") ||
