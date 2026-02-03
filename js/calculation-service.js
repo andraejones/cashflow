@@ -114,6 +114,14 @@ class CalculationService {
       return monthA - monthB;
     });
 
+    // Ensure recurring transactions are expanded for all months before
+    // calculating balances. The cache prevents redundant expansion.
+    allMonths.forEach((monthKey) => {
+      const [year, month] = monthKey.split("-").map(Number);
+      // month in monthKey is 1-indexed, applyRecurringTransactions expects 0-indexed
+      this.recurringManager.applyRecurringTransactions(year, month - 1);
+    });
+
     let previousBalance = 0;
     allMonths.forEach((monthKey, index) => {
       const [year, month] = monthKey.split("-").map(Number);
