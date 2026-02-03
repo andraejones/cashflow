@@ -277,9 +277,6 @@ class SearchUI {
       }
 
       for (const transaction of transactions[date]) {
-        if (transaction.hidden === true) {
-          continue;
-        }
         if (
           transaction.recurringId &&
           this.recurringManager.isTransactionSkipped(
@@ -404,6 +401,9 @@ class SearchUI {
       }$${transaction.amount.toFixed(2)}`;
 
       resultDiv.className = "search-result-item";
+      if (transaction.hidden === true) {
+        resultDiv.classList.add("hidden-transaction");
+      }
       resultDiv.setAttribute("role", "button");
       resultDiv.setAttribute("tabindex", "0");
       const dateSpan = document.createElement("span");
@@ -427,6 +427,13 @@ class SearchUI {
         recurringSpan.className = "search-result-recurring";
         recurringSpan.textContent = "(Recurring)";
         resultDiv.appendChild(recurringSpan);
+      }
+
+      if (transaction.hidden === true) {
+        const hiddenSpan = document.createElement("span");
+        hiddenSpan.className = "search-result-recurring hidden-label";
+        hiddenSpan.textContent = "(Hidden - Debt Snowball)";
+        resultDiv.appendChild(hiddenSpan);
       }
       resultDiv.addEventListener("click", () => {
         document.getElementById("searchModal").style.display = "none";

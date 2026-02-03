@@ -1667,6 +1667,18 @@ body.app-locked #calendarOptions {
   text-decoration: line-through;
 }
 
+/* Hidden transactions (e.g., Debt Snowball adjusted payments) */
+.hidden-transaction {
+  opacity: 0.5;
+  font-style: italic;
+}
+
+.hidden-label {
+  font-size: 0.85em;
+  color: var(--muted-color);
+  margin-left: 4px;
+}
+
 @media (prefers-reduced-motion: reduce) {
 
   .calendar,
