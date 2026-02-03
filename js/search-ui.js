@@ -253,10 +253,20 @@ class SearchUI {
 
     let foundTransactions = [];
     const transactions = this.store.getTransactions();
+
+    // Normalize search term for amount matching
+    const normalizeAmount = (term) => {
+      // Strip currency symbols and whitespace
+      const cleaned = term.replace(/[$,\s]/g, '').replace(/^[+-]/, '');
+      const num = parseFloat(cleaned);
+      return isNaN(num) ? null : num;
+    };
+
     const matchesAmount = (amount, searchTerm) => {
-      const searchNumber = parseFloat(searchTerm);
-      if (!isNaN(searchNumber)) {
-        return amount === searchNumber;
+      const searchNumber = normalizeAmount(searchTerm);
+      if (searchNumber !== null) {
+        // Match if the amounts are equal (to 2 decimal places)
+        return Math.abs(amount - searchNumber) < 0.005;
       }
       return false;
     };

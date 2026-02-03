@@ -13,6 +13,7 @@ class CashflowApp {
     // Operation lock to prevent race conditions during cloud load/save
     this._operationLock = false;
     this._pendingUpdateUI = false;
+    this._initialized = false;
     this.cloudSync = new CloudSync(this.store, () => this.updateUI());
     this.transactionUI = new TransactionUI(
       this.store,
@@ -45,7 +46,16 @@ class CashflowApp {
       this.transactionUI,
       this.debtSnowball
     );
-    this.init();
+
+    // Store init promise for external awaiting
+    this._initPromise = this.init();
+  }
+
+  // Static factory method for creating an initialized app
+  static async create(pinProtection) {
+    const app = new CashflowApp(pinProtection);
+    await app._initPromise;
+    return app;
   }
 
 
@@ -56,6 +66,7 @@ class CashflowApp {
     } catch (error) {
       console.error("Error loading from cloud:", error);
     }
+    this._initialized = true;
     this.updateUI();
     window.addTransaction = () => this.transactionUI.addTransaction();
 
@@ -264,18 +275,17 @@ class CashflowApp {
     }
   }
 }
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
   window.pinProtection = new PinProtection();
-  pinProtection.promptUnlock().then((unlocked) => {
-          if (unlocked) {
-            window.app = new CashflowApp(pinProtection);
-          }
-        });
-      });
-    
-      // Ensure any pending data is saved before closing/refreshing
-      window.addEventListener("beforeunload", () => {
-        if (window.app && window.app.store) {
-          window.app.store.flushPendingSave();
-        }
-      });
+  const unlocked = await pinProtection.promptUnlock();
+  if (unlocked) {
+    window.app = await CashflowApp.create(pinProtection);
+  }
+});
+
+// Ensure any pending data is saved before closing/refreshing
+window.addEventListener("beforeunload", () => {
+  if (window.app && window.app.store) {
+    window.app.store.flushPendingSave();
+  }
+});

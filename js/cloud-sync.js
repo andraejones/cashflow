@@ -95,12 +95,139 @@ class CloudSync {
   }
 
 
+  // Encryption constants
+  _SALT_LENGTH = 16;
+  _IV_LENGTH = 12;
+  _PBKDF2_ITERATIONS = 100000;
+
+  // Generate a device-specific key for token encryption
+  async _getDeviceKey() {
+    // Use a stable device identifier from localStorage, or create one
+    let deviceId = localStorage.getItem('_device_id');
+    if (!deviceId) {
+      deviceId = crypto.randomUUID ? crypto.randomUUID() :
+        'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+          const r = Math.random() * 16 | 0;
+          return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+        });
+      localStorage.setItem('_device_id', deviceId);
+    }
+    return deviceId;
+  }
+
+  // AES-GCM encryption for tokens
+  async encryptValueAsync(value) {
+    const deviceKey = await this._getDeviceKey();
+    const encoder = new TextEncoder();
+
+    const salt = crypto.getRandomValues(new Uint8Array(this._SALT_LENGTH));
+    const iv = crypto.getRandomValues(new Uint8Array(this._IV_LENGTH));
+
+    const keyMaterial = await crypto.subtle.importKey(
+      'raw',
+      encoder.encode(deviceKey),
+      'PBKDF2',
+      false,
+      ['deriveKey']
+    );
+
+    const key = await crypto.subtle.deriveKey(
+      {
+        name: 'PBKDF2',
+        salt: salt,
+        iterations: this._PBKDF2_ITERATIONS,
+        hash: 'SHA-256'
+      },
+      keyMaterial,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt']
+    );
+
+    const encrypted = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv: iv },
+      key,
+      encoder.encode(value)
+    );
+
+    // Combine: "aes:" + base64(salt + iv + ciphertext)
+    const combined = new Uint8Array(salt.length + iv.length + encrypted.byteLength);
+    combined.set(salt, 0);
+    combined.set(iv, salt.length);
+    combined.set(new Uint8Array(encrypted), salt.length + iv.length);
+
+    return "aes:" + btoa(String.fromCharCode(...combined));
+  }
+
+  // AES-GCM decryption for tokens
+  async decryptValueAsync(encryptedValue) {
+    // Check for legacy format (no "aes:" prefix)
+    if (!encryptedValue.startsWith("aes:")) {
+      // Legacy format - decode and migrate
+      try {
+        const legacyValue = atob(encryptedValue).split("").reverse().join("");
+        return legacyValue;
+      } catch {
+        return null;
+      }
+    }
+
+    try {
+      const deviceKey = await this._getDeviceKey();
+      const combined = Uint8Array.from(atob(encryptedValue.slice(4)), c => c.charCodeAt(0));
+
+      const salt = combined.slice(0, this._SALT_LENGTH);
+      const iv = combined.slice(this._SALT_LENGTH, this._SALT_LENGTH + this._IV_LENGTH);
+      const ciphertext = combined.slice(this._SALT_LENGTH + this._IV_LENGTH);
+
+      const encoder = new TextEncoder();
+      const keyMaterial = await crypto.subtle.importKey(
+        'raw',
+        encoder.encode(deviceKey),
+        'PBKDF2',
+        false,
+        ['deriveKey']
+      );
+
+      const key = await crypto.subtle.deriveKey(
+        {
+          name: 'PBKDF2',
+          salt: salt,
+          iterations: this._PBKDF2_ITERATIONS,
+          hash: 'SHA-256'
+        },
+        keyMaterial,
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['decrypt']
+      );
+
+      const decrypted = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: iv },
+        key,
+        ciphertext
+      );
+
+      return new TextDecoder().decode(decrypted);
+    } catch (error) {
+      console.error("Token decryption error:", error);
+      return null;
+    }
+  }
+
+  // Synchronous legacy methods for backward compatibility
   encryptValue(value) {
+    // For synchronous calls, use legacy method but will be migrated on next async save
     return btoa(value.split("").reverse().join(""));
   }
 
-
   decryptValue(encryptedValue) {
+    // Handle both legacy and new formats
+    if (encryptedValue.startsWith("aes:")) {
+      // Can't decrypt async format synchronously - caller should use async method
+      console.warn("Attempting to decrypt AES format synchronously - use decryptValueAsync");
+      return null;
+    }
     try {
       return atob(encryptedValue).split("").reverse().join("");
     } catch (error) {
@@ -112,15 +239,50 @@ class CloudSync {
 
   getCloudCredentials() {
     const encryptedToken = localStorage.getItem("github_token_encrypted");
-    const token = encryptedToken ? this.decryptValue(encryptedToken) : null;
+    // For synchronous access, handle both legacy and mark for async migration
+    let token = null;
+    if (encryptedToken) {
+      if (encryptedToken.startsWith("aes:")) {
+        // New format - need async decryption, return null for sync call
+        // Callers needing the token should use getCloudCredentialsAsync
+        token = null;
+      } else {
+        // Legacy format - decrypt synchronously
+        token = this.decryptValue(encryptedToken);
+      }
+    }
     const gistId = localStorage.getItem("gist_id");
     return { token, gistId };
   }
 
+  async getCloudCredentialsAsync() {
+    const encryptedToken = localStorage.getItem("github_token_encrypted");
+    let token = null;
+    if (encryptedToken) {
+      token = await this.decryptValueAsync(encryptedToken);
+      // If we decrypted legacy format, re-encrypt with new format
+      if (token && !encryptedToken.startsWith("aes:")) {
+        const newEncrypted = await this.encryptValueAsync(token);
+        localStorage.setItem("github_token_encrypted", newEncrypted);
+        console.log("Migrated GitHub token to secure encryption");
+      }
+    }
+    const gistId = localStorage.getItem("gist_id");
+    return { token, gistId };
+  }
 
   setCloudCredentials(token, gistId) {
     if (token) {
+      // Use legacy sync method for compatibility, will be migrated on next async access
       const encryptedToken = this.encryptValue(token);
+      localStorage.setItem("github_token_encrypted", encryptedToken);
+    }
+    localStorage.setItem("gist_id", gistId);
+  }
+
+  async setCloudCredentialsAsync(token, gistId) {
+    if (token) {
+      const encryptedToken = await this.encryptValueAsync(token);
       localStorage.setItem("github_token_encrypted", encryptedToken);
     }
     localStorage.setItem("gist_id", gistId);
@@ -294,11 +456,11 @@ class CloudSync {
   }
 
 
-  scheduleCloudSave() {
+  async scheduleCloudSave() {
     if (!this.autoSyncEnabled) {
       return;
     }
-    const { token, gistId } = this.getCloudCredentials();
+    const { token, gistId } = await this.getCloudCredentialsAsync();
     if (!token || !gistId) {
       return;
     }
@@ -649,7 +811,7 @@ class CloudSync {
       return false; // Assume no changes since we just saved
     }
 
-    const { token, gistId } = this.getCloudCredentials();
+    const { token, gistId } = await this.getCloudCredentialsAsync();
     if (!token || !gistId) {
       return null; // Can't check - no credentials
     }
@@ -685,9 +847,9 @@ class CloudSync {
   }
 
   // Start periodic heartbeat to check for remote changes
-  startHeartbeat(intervalMs = 60000) {
+  async startHeartbeat(intervalMs = 60000) {
     this.stopHeartbeat();
-    const { token, gistId } = this.getCloudCredentials();
+    const { token, gistId } = await this.getCloudCredentialsAsync();
     if (!token || !gistId) {
       return; // No credentials, don't start heartbeat
     }
@@ -745,7 +907,7 @@ class CloudSync {
     Utils.showLoading("Saving to cloud...");
 
     try {
-      let { token, gistId } = this.getCloudCredentials();
+      let { token, gistId } = await this.getCloudCredentialsAsync();
 
       if (!token || !gistId) {
         try {
@@ -764,7 +926,7 @@ class CloudSync {
             Utils.showNotification("Creating new Gist...");
             gistId = await this.createNewGist(token, data);
             Utils.showNotification(`New Gist created with ID: ${gistId}`);
-            this.setCloudCredentials(token, gistId);
+            await this.setCloudCredentialsAsync(token, gistId);
             this._storeSyncTime();
             // Record save time for grace period (avoids false "remote changes" detection)
             this._lastSaveTime = Date.now();
@@ -774,7 +936,7 @@ class CloudSync {
             return;
           }
 
-          this.setCloudCredentials(token, gistId);
+          await this.setCloudCredentialsAsync(token, gistId);
         } catch (error) {
           if (syncIndicator)
             syncIndicator.className = "cloud-sync-indicator error";
@@ -816,6 +978,8 @@ class CloudSync {
                 localStorage.setItem('_backup_before_merge', JSON.stringify(localData));
               } catch (backupError) {
                 console.warn("Could not create backup before merge:", backupError);
+                // Abort merge if we can't create backup - data safety first
+                throw new Error("Cannot create backup before merge. Aborting to prevent data loss.");
               }
 
               // Merge local and remote data
@@ -949,7 +1113,7 @@ class CloudSync {
     Utils.showLoading("Loading from cloud...");
 
     try {
-      let { token, gistId } = this.getCloudCredentials();
+      let { token, gistId } = await this.getCloudCredentialsAsync();
 
       if (!token || !gistId) {
         try {
@@ -964,7 +1128,7 @@ class CloudSync {
             throw new Error("A Gist ID is required to load data from the cloud");
           }
 
-          this.setCloudCredentials(token, gistId);
+          await this.setCloudCredentialsAsync(token, gistId);
         } catch (error) {
           if (syncIndicator)
             syncIndicator.className = "cloud-sync-indicator error";
@@ -1030,6 +1194,8 @@ class CloudSync {
             localStorage.setItem('_backup_before_merge', JSON.stringify(localData));
           } catch (backupError) {
             console.warn("Could not create backup before merge:", backupError);
+            // Abort merge if we can't create backup - data safety first
+            throw new Error("Cannot create backup before merge. Aborting to prevent data loss.");
           }
 
           // Merge local and remote data
@@ -1051,15 +1217,15 @@ class CloudSync {
           }
         }
 
-        // Cancel any pending debounced saves to prevent race condition
-        // where stale local data overwrites the imported/merged data
-        this.store.cancelPendingSave();
-
         const success = this.store.importData(dataToImport);
 
         if (!success) {
           throw new Error("Invalid data format in cloud storage");
         }
+
+        // Cancel any pending debounced saves AFTER successful import
+        // to prevent race condition where stale local data overwrites the imported/merged data
+        this.store.cancelPendingSave();
 
         if (remoteData.autoSyncEnabled !== undefined) {
           this.autoSyncEnabled = remoteData.autoSyncEnabled;
