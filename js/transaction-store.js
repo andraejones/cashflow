@@ -30,6 +30,8 @@ class TransactionStore {
     this._saveDebounceTimer = null;
     this._saveDebounceDelay = 500; // 500ms debounce delay
     this._pendingIsDataModified = false;
+    this._saveInProgress = false;
+    this._queuedSave = null;
 
     this.loadData();
   }
@@ -51,6 +53,13 @@ class TransactionStore {
       this._saveDebounceTimer = null;
       const wasModified = this._pendingIsDataModified;
       this._pendingIsDataModified = false;
+
+      // If a save is in progress, queue this one
+      if (this._saveInProgress) {
+        this._queuedSave = wasModified;
+        return;
+      }
+
       this.saveData(wasModified);
     }, this._saveDebounceDelay);
   }
@@ -170,6 +179,11 @@ class TransactionStore {
         });
         if (needsMigration) {
           console.log("Migrated transactions to include IDs and timestamps");
+          // Save immediately to persist migration
+          this.storage.setItem(
+            "transactions",
+            encrypt(JSON.stringify(this.transactions))
+          );
         }
       }
 
@@ -331,6 +345,9 @@ class TransactionStore {
       this._pendingIsDataModified = false;
     }
 
+    // Mark save as in progress
+    this._saveInProgress = true;
+
     try {
       const encrypt = (val) => {
         if (
@@ -382,6 +399,15 @@ class TransactionStore {
       this.triggerSaveCallbacks(isDataModified);
     } catch (error) {
       console.error("Error saving data to storage:", error);
+    } finally {
+      this._saveInProgress = false;
+
+      // Process queued save if any
+      if (this._queuedSave !== null) {
+        const queuedModified = this._queuedSave;
+        this._queuedSave = null;
+        this.saveData(queuedModified);
+      }
     }
   }
 
@@ -893,7 +919,32 @@ class TransactionStore {
       return false;
     }
 
+    // Create backup of current data before import for recovery
+    const backup = {
+      transactions: this.transactions,
+      monthlyBalances: this.monthlyBalances,
+      recurringTransactions: this.recurringTransactions,
+      skippedTransactions: this.skippedTransactions,
+      movedTransactions: this.movedTransactions,
+      debts: this.debts,
+      cashInfusions: this.cashInfusions,
+      monthlyNotes: this.monthlyNotes,
+      debtSnowballSettings: this.debtSnowballSettings,
+      _deletedItems: this._deletedItems
+    };
+
     try {
+      // Validate data structure before any assignment
+      if (typeof data.transactions !== 'object') {
+        throw new Error("Invalid transactions format");
+      }
+      if (typeof data.monthlyBalances !== 'object') {
+        throw new Error("Invalid monthlyBalances format");
+      }
+      if (!Array.isArray(data.recurringTransactions)) {
+        throw new Error("Invalid recurringTransactions format");
+      }
+
       this.transactions = data.transactions;
       this.monthlyBalances = data.monthlyBalances;
       this.recurringTransactions = data.recurringTransactions;
@@ -1072,10 +1123,21 @@ class TransactionStore {
         });
       });
 
-      this.saveData(false);
+      this.saveData(true);
       return true;
     } catch (error) {
       console.error("Error during import:", error);
+      // Restore from backup on failure
+      this.transactions = backup.transactions;
+      this.monthlyBalances = backup.monthlyBalances;
+      this.recurringTransactions = backup.recurringTransactions;
+      this.skippedTransactions = backup.skippedTransactions;
+      this.movedTransactions = backup.movedTransactions;
+      this.debts = backup.debts;
+      this.cashInfusions = backup.cashInfusions;
+      this.monthlyNotes = backup.monthlyNotes;
+      this.debtSnowballSettings = backup.debtSnowballSettings;
+      this._deletedItems = backup._deletedItems;
       return false;
     }
   }

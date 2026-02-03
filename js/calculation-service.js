@@ -278,8 +278,8 @@ class CalculationService {
     // Calculate the minimum running balance from today through the next 30 days
     // This should match how the calendar displays running balances
 
-    // Clear cached daily totals to ensure fresh calculations after applying recurring transactions
-    this._cachedDailyTotals = {};
+    // Clear all caches to ensure fresh calculations after applying recurring transactions
+    this.invalidateCache();
 
     const today = new Date();
     const todayYear = today.getFullYear();

@@ -70,7 +70,7 @@ class TransactionUI {
     this._boundWindowClickHandler = (event) => {
       const transactionModal = document.getElementById("transactionModal");
       const searchModal = document.getElementById("searchModal");
-      if (event.target == transactionModal || event.target == searchModal) {
+      if (event.target === transactionModal || event.target === searchModal) {
         this.closeModals();
       }
     };
@@ -494,26 +494,33 @@ class TransactionUI {
     const activeEl = document.activeElement;
     if (
       activeEl &&
-      (transactionModal.contains(activeEl) || searchModal.contains(activeEl))
+      (transactionModal?.contains(activeEl) || searchModal?.contains(activeEl))
     ) {
       activeEl.blur();
     }
 
-    transactionModal.style.display = "none";
-    searchModal.style.display = "none";
-    ModalManager.closeModal(transactionModal);
-    ModalManager.closeModal(searchModal);
-    document.getElementById("transactionAmount").value = "";
-    document.getElementById("transactionDescription").value = "";
-    document.getElementById("transactionRecurrence").value = "once";
+    if (transactionModal) {
+      transactionModal.style.display = "none";
+      ModalManager.closeModal(transactionModal);
+      transactionModal.setAttribute("aria-hidden", "true");
+    }
+    if (searchModal) {
+      searchModal.style.display = "none";
+      ModalManager.closeModal(searchModal);
+      searchModal.setAttribute("aria-hidden", "true");
+    }
+
+    const transactionAmount = document.getElementById("transactionAmount");
+    if (transactionAmount) transactionAmount.value = "";
+    const transactionDescription = document.getElementById("transactionDescription");
+    if (transactionDescription) transactionDescription.value = "";
+    const transactionRecurrence = document.getElementById("transactionRecurrence");
+    if (transactionRecurrence) transactionRecurrence.value = "once";
+
     const advancedOptions = document.getElementById("advancedRecurrenceOptions");
     if (advancedOptions) {
       advancedOptions.remove();
     }
-    document
-      .getElementById("transactionModal")
-      .setAttribute("aria-hidden", "true");
-    document.getElementById("searchModal").setAttribute("aria-hidden", "true");
   }
 
 

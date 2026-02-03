@@ -15,6 +15,11 @@ class PinProtection {
     this.credentialId = null;
     this.webAuthnInitPromise = null;
 
+    // Encryption constants
+    this.SALT_LENGTH = 16;
+    this.IV_LENGTH = 12;
+    this.PBKDF2_ITERATIONS = 100000;
+
     // Initialize WebAuthn support check
     this.webAuthnInitPromise = this.initWebAuthn();
   }
@@ -57,7 +62,34 @@ class PinProtection {
     return decodeURIComponent(escape(atob(value)));
   }
 
-  hashPin(pin) {
+  // Secure PIN hashing using SHA-256 with salt
+  async hashPinSecure(pin, salt = null) {
+    const encoder = new TextEncoder();
+    // Generate or use provided salt
+    if (!salt) {
+      salt = crypto.getRandomValues(new Uint8Array(this.SALT_LENGTH));
+    } else if (typeof salt === 'string') {
+      salt = this.base64ToArrayBuffer(salt);
+      salt = new Uint8Array(salt);
+    }
+
+    // Combine salt + pin
+    const saltedPin = new Uint8Array(salt.length + encoder.encode(pin).length);
+    saltedPin.set(salt);
+    saltedPin.set(encoder.encode(pin), salt.length);
+
+    // Hash with SHA-256
+    const hashBuffer = await crypto.subtle.digest('SHA-256', saltedPin);
+    const hashArray = new Uint8Array(hashBuffer);
+
+    // Return salt:hash as base64
+    const saltBase64 = this.arrayBufferToBase64(salt.buffer);
+    const hashBase64 = this.arrayBufferToBase64(hashBuffer);
+    return `${saltBase64}:${hashBase64}`;
+  }
+
+  // Legacy hash for migration detection
+  hashPinLegacy(pin) {
     return this.encodeBase64(pin).split("").reverse().join("");
   }
 
@@ -65,12 +97,39 @@ class PinProtection {
     return localStorage.getItem("pin_hash") !== null;
   }
 
-  verifyPin(pin) {
-    return this.hashPin(pin) === localStorage.getItem("pin_hash");
+  // Check if stored hash is legacy format (no colon separator)
+  _isLegacyHash() {
+    const stored = localStorage.getItem("pin_hash");
+    return stored && !stored.includes(':');
   }
 
-  setPin(pin) {
-    localStorage.setItem("pin_hash", this.hashPin(pin));
+  async verifyPin(pin) {
+    const stored = localStorage.getItem("pin_hash");
+    if (!stored) return false;
+
+    // Check for legacy format and migrate if needed
+    if (this._isLegacyHash()) {
+      // Verify against legacy hash
+      const legacyHash = this.hashPinLegacy(pin);
+      if (legacyHash === stored) {
+        // Migrate to secure hash
+        const secureHash = await this.hashPinSecure(pin);
+        localStorage.setItem("pin_hash", secureHash);
+        console.log("Migrated PIN to secure hash format");
+        return true;
+      }
+      return false;
+    }
+
+    // Verify against secure hash
+    const [saltBase64] = stored.split(':');
+    const computedHash = await this.hashPinSecure(pin, saltBase64);
+    return computedHash === stored;
+  }
+
+  async setPin(pin) {
+    const secureHash = await this.hashPinSecure(pin);
+    localStorage.setItem("pin_hash", secureHash);
     this.currentPin = pin;
     // Start inactivity monitoring when PIN is set
     this.startInactivityMonitoring();
@@ -91,17 +150,125 @@ class PinProtection {
     return this.currentPin;
   }
 
-  encrypt(value) {
-    if (!this.currentPin) return value;
-    const xor = Array.from(value).map((ch, i) => String.fromCharCode(ch.charCodeAt(0) ^ this.currentPin.charCodeAt(i % this.currentPin.length))).join("");
-    return this.encodeBase64(xor);
+  // Derive AES key from PIN using PBKDF2
+  async _deriveKey(pin, salt) {
+    const encoder = new TextEncoder();
+    const keyMaterial = await crypto.subtle.importKey(
+      'raw',
+      encoder.encode(pin),
+      'PBKDF2',
+      false,
+      ['deriveKey']
+    );
+
+    return crypto.subtle.deriveKey(
+      {
+        name: 'PBKDF2',
+        salt: salt,
+        iterations: this.PBKDF2_ITERATIONS,
+        hash: 'SHA-256'
+      },
+      keyMaterial,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt']
+    );
   }
 
+  // AES-GCM encryption
+  async encryptAES(value, pin) {
+    const encoder = new TextEncoder();
+    const salt = crypto.getRandomValues(new Uint8Array(this.SALT_LENGTH));
+    const iv = crypto.getRandomValues(new Uint8Array(this.IV_LENGTH));
+
+    const key = await this._deriveKey(pin, salt);
+    const encrypted = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv: iv },
+      key,
+      encoder.encode(value)
+    );
+
+    // Combine: salt (16) + iv (12) + ciphertext
+    const combined = new Uint8Array(salt.length + iv.length + encrypted.byteLength);
+    combined.set(salt, 0);
+    combined.set(iv, salt.length);
+    combined.set(new Uint8Array(encrypted), salt.length + iv.length);
+
+    return this.arrayBufferToBase64(combined.buffer);
+  }
+
+  // AES-GCM decryption
+  async decryptAES(encryptedValue, pin) {
+    try {
+      const combined = new Uint8Array(this.base64ToArrayBuffer(encryptedValue));
+
+      const salt = combined.slice(0, this.SALT_LENGTH);
+      const iv = combined.slice(this.SALT_LENGTH, this.SALT_LENGTH + this.IV_LENGTH);
+      const ciphertext = combined.slice(this.SALT_LENGTH + this.IV_LENGTH);
+
+      const key = await this._deriveKey(pin, salt);
+      const decrypted = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: iv },
+        key,
+        ciphertext
+      );
+
+      return new TextDecoder().decode(decrypted);
+    } catch (e) {
+      console.error("AES decryption error", e);
+      return null;
+    }
+  }
+
+  // Check if a value is encrypted with AES (has proper length for salt+iv+data)
+  _isAESEncrypted(value) {
+    try {
+      const decoded = this.base64ToArrayBuffer(value);
+      // Minimum length: salt (16) + iv (12) + at least 1 byte of ciphertext + tag (16)
+      return decoded.byteLength >= this.SALT_LENGTH + this.IV_LENGTH + 17;
+    } catch {
+      return false;
+    }
+  }
+
+  // Legacy XOR decrypt for migration
+  _decryptLegacyXOR(value, pin) {
+    try {
+      const decoded = this.decodeBase64(value);
+      const xor = Array.from(decoded).map((ch, i) =>
+        String.fromCharCode(ch.charCodeAt(0) ^ pin.charCodeAt(i % pin.length))
+      ).join("");
+      return xor;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Synchronous encrypt for compatibility - stores as marker for async encryption
+  encrypt(value) {
+    if (!this.currentPin) return value;
+    // For synchronous calls, we need to handle this differently
+    // Store the value with a marker and encrypt asynchronously on next save
+    // For now, use the legacy method but mark for migration
+    const xor = Array.from(value).map((ch, i) =>
+      String.fromCharCode(ch.charCodeAt(0) ^ this.currentPin.charCodeAt(i % this.currentPin.length))
+    ).join("");
+    return "xor:" + this.encodeBase64(xor);
+  }
+
+  // Synchronous decrypt for compatibility
   decrypt(value) {
     if (!this.currentPin) return value;
     try {
+      // Check for legacy XOR format (no prefix or "xor:" prefix)
+      if (value.startsWith("xor:")) {
+        return this._decryptLegacyXOR(value.slice(4), this.currentPin);
+      }
+      // Try legacy XOR without prefix (for old data)
       const decoded = this.decodeBase64(value);
-      const xor = Array.from(decoded).map((ch, i) => String.fromCharCode(ch.charCodeAt(0) ^ this.currentPin.charCodeAt(i % this.currentPin.length))).join("");
+      const xor = Array.from(decoded).map((ch, i) =>
+        String.fromCharCode(ch.charCodeAt(0) ^ this.currentPin.charCodeAt(i % this.currentPin.length))
+      ).join("");
       return xor;
     } catch (e) {
       console.error("PIN decryption error", e);
@@ -206,19 +373,113 @@ class PinProtection {
     }
   }
 
-  // Store PIN for biometric unlock (obfuscated in localStorage)
-  storePinForBiometrics(pin) {
-    const obfuscated = this.encodeBase64(pin.split('').reverse().join(''));
-    localStorage.setItem("biometric_pin", obfuscated);
+  // Store PIN for biometric unlock using device-bound key
+  async storePinForBiometrics(pin) {
+    // Use a device-specific key derived from credential ID for encryption
+    const credentialId = this.credentialId || localStorage.getItem("webauthn_credential_id");
+    if (!credentialId) {
+      console.error("No credential ID available for biometric PIN storage");
+      return;
+    }
+
+    // Derive encryption key from credential ID (device-bound secret)
+    const encoder = new TextEncoder();
+    const keyMaterial = await crypto.subtle.importKey(
+      'raw',
+      encoder.encode(credentialId),
+      'PBKDF2',
+      false,
+      ['deriveKey']
+    );
+
+    const salt = crypto.getRandomValues(new Uint8Array(this.SALT_LENGTH));
+    const iv = crypto.getRandomValues(new Uint8Array(this.IV_LENGTH));
+
+    const key = await crypto.subtle.deriveKey(
+      {
+        name: 'PBKDF2',
+        salt: salt,
+        iterations: this.PBKDF2_ITERATIONS,
+        hash: 'SHA-256'
+      },
+      keyMaterial,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt']
+    );
+
+    const encrypted = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv: iv },
+      key,
+      encoder.encode(pin)
+    );
+
+    // Combine: salt (16) + iv (12) + ciphertext
+    const combined = new Uint8Array(salt.length + iv.length + encrypted.byteLength);
+    combined.set(salt, 0);
+    combined.set(iv, salt.length);
+    combined.set(new Uint8Array(encrypted), salt.length + iv.length);
+
+    localStorage.setItem("biometric_pin", this.arrayBufferToBase64(combined.buffer));
   }
 
   // Retrieve PIN after biometric authentication
-  retrievePinForBiometrics() {
-    const obfuscated = localStorage.getItem("biometric_pin");
-    if (!obfuscated) return null;
+  async retrievePinForBiometrics() {
+    const stored = localStorage.getItem("biometric_pin");
+    if (!stored) return null;
+
+    const credentialId = this.credentialId || localStorage.getItem("webauthn_credential_id");
+    if (!credentialId) return null;
+
     try {
-      return this.decodeBase64(obfuscated).split('').reverse().join('');
-    } catch {
+      // Check for legacy obfuscated format (shorter, no salt/iv structure)
+      const decoded = this.base64ToArrayBuffer(stored);
+      if (decoded.byteLength < this.SALT_LENGTH + this.IV_LENGTH + 17) {
+        // Legacy format - decode and migrate
+        const legacyPin = this.decodeBase64(stored).split('').reverse().join('');
+        // Re-store with proper encryption
+        await this.storePinForBiometrics(legacyPin);
+        console.log("Migrated biometric PIN to secure format");
+        return legacyPin;
+      }
+
+      // Modern AES-GCM encrypted format
+      const combined = new Uint8Array(decoded);
+      const salt = combined.slice(0, this.SALT_LENGTH);
+      const iv = combined.slice(this.SALT_LENGTH, this.SALT_LENGTH + this.IV_LENGTH);
+      const ciphertext = combined.slice(this.SALT_LENGTH + this.IV_LENGTH);
+
+      const encoder = new TextEncoder();
+      const keyMaterial = await crypto.subtle.importKey(
+        'raw',
+        encoder.encode(credentialId),
+        'PBKDF2',
+        false,
+        ['deriveKey']
+      );
+
+      const key = await crypto.subtle.deriveKey(
+        {
+          name: 'PBKDF2',
+          salt: salt,
+          iterations: this.PBKDF2_ITERATIONS,
+          hash: 'SHA-256'
+        },
+        keyMaterial,
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['decrypt']
+      );
+
+      const decrypted = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: iv },
+        key,
+        ciphertext
+      );
+
+      return new TextDecoder().decode(decrypted);
+    } catch (e) {
+      console.error("Error retrieving biometric PIN:", e);
       return null;
     }
   }
@@ -247,7 +508,7 @@ class PinProtection {
         inputType: "password",
         confirmText: "Continue",
       });
-      if (!pin || !this.verifyPin(pin)) {
+      if (!pin || !await this.verifyPin(pin)) {
         await Utils.showModalAlert("Incorrect PIN.", "Error");
         return false;
       }
@@ -257,7 +518,7 @@ class PinProtection {
     try {
       await this.registerWebAuthn();
       // Store PIN for future biometric unlocks
-      this.storePinForBiometrics(this.currentPin);
+      await this.storePinForBiometrics(this.currentPin);
       await Utils.showModalAlert("FaceID/TouchID enabled successfully!", "Success");
       return true;
     } catch (error) {
@@ -293,8 +554,8 @@ class PinProtection {
         const biometricResult = await this.authenticateWebAuthn();
         if (biometricResult) {
           // Biometric success - retrieve stored PIN
-          const storedPin = this.retrievePinForBiometrics();
-          if (storedPin && this.verifyPin(storedPin)) {
+          const storedPin = await this.retrievePinForBiometrics();
+          if (storedPin && await this.verifyPin(storedPin)) {
             this.currentPin = storedPin;
             this.isLocked = false;
             this.hideLockOverlay();
@@ -343,7 +604,7 @@ class PinProtection {
 
     if (result === null) return false;
 
-    if (this.verifyPin(result)) {
+    if (await this.verifyPin(result)) {
       this.currentPin = result;
       this.isLocked = false;
       this.hideLockOverlay();
@@ -454,7 +715,7 @@ class PinProtection {
         }
       );
       if (oldPin === null) return;
-      if (!this.verifyPin(oldPin)) {
+      if (!await this.verifyPin(oldPin)) {
         await Utils.showModalAlert("Incorrect PIN", "Change PIN");
         return;
       }
@@ -495,10 +756,10 @@ class PinProtection {
       await Utils.showModalAlert("PINs do not match", "Confirm PIN");
       return;
     }
-    this.setPin(newPin);
+    await this.setPin(newPin);
     // Update stored biometric PIN if biometrics is enabled
     if (this.isWebAuthnEnabled()) {
-      this.storePinForBiometrics(newPin);
+      await this.storePinForBiometrics(newPin);
     }
     store.saveData(false);
     await Utils.showModalAlert("PIN updated", "Change PIN");

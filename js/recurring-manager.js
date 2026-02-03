@@ -391,8 +391,11 @@ class RecurringTransactionManager {
       const startDate = this.parseDateString(rt.startDate);
       const endDate = rt.endDate ? this.parseDateString(rt.endDate) : null;
       const maxOccurrences = rt.maxOccurrences || null;
+      // Always check adjacent months when business day adjustment is enabled
+      // because adjustment can push transaction across month boundaries
       const needsCrossMonth =
         rt.businessDayAdjustment && rt.businessDayAdjustment !== "none";
+      // Check previous and next month to handle cross-month adjustments
       const monthOffsets = needsCrossMonth ? [-1, 0, 1] : [0];
 
       monthOffsets.forEach((offset) => {
@@ -574,7 +577,23 @@ class RecurringTransactionManager {
     const endOfMonth = new Date(year, month + 1, 0);
     const transactions = this.store.getTransactions();
 
-    // First, clear existing recurring transactions for this month (same as full expansion)
+    // First, collect existing modified instances to preserve them
+    const modifiedInstances = new Map();
+    for (let day = 1; day <= endOfMonth.getDate(); day++) {
+      const dateObj = new Date(year, month, day);
+      const dateString = Utils.formatDateString(dateObj);
+
+      if (transactions[dateString]) {
+        transactions[dateString].forEach(t => {
+          if (t.recurringId && t.modifiedInstance) {
+            const key = `${t.recurringId}-${t.originalDate || dateString}`;
+            modifiedInstances.set(key, { dateString, transaction: t });
+          }
+        });
+      }
+    }
+
+    // Clear existing recurring transactions for this month (same as full expansion)
     for (let day = 1; day <= endOfMonth.getDate(); day++) {
       const dateObj = new Date(year, month, day);
       const dateString = Utils.formatDateString(dateObj);
@@ -593,13 +612,21 @@ class RecurringTransactionManager {
       }
     }
 
-    // Apply cached transactions
+    // Apply cached transactions (but skip if modified instance exists)
     for (const item of cachedData) {
       const { dateString, transaction } = item;
+
+      // Check if there's a modified instance that should override this
+      const key = `${transaction.recurringId}-${transaction.originalDate || dateString}`;
+      if (modifiedInstances.has(key)) {
+        // Modified instance exists - don't overwrite it
+        continue;
+      }
+
       if (!transactions[dateString]) {
         transactions[dateString] = [];
       }
-      // Check if this transaction already exists (e.g., modified instance)
+      // Check if this transaction already exists
       const existsAlready = transactions[dateString].some(t =>
         t.recurringId === transaction.recurringId &&
         (t.originalDate || dateString) === (transaction.originalDate || dateString)

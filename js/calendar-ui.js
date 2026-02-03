@@ -115,7 +115,12 @@ class CalendarUI {
     ];
 
     const currentMonthElement = document.getElementById("currentMonth");
-    const pendingMessage = currentMonthElement?.querySelector("#pendingMessage");
+    if (!currentMonthElement) {
+      console.error("currentMonth element not found");
+      return;
+    }
+
+    const pendingMessage = currentMonthElement.querySelector("#pendingMessage");
     if (pendingMessage) {
       pendingMessage.remove();
     }
@@ -147,6 +152,10 @@ class CalendarUI {
     const firstDay = new Date(year, month, 1).getDay();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     const calendarDays = document.getElementById("calendarDays");
+    if (!calendarDays) {
+      console.error("calendarDays element not found");
+      return;
+    }
     calendarDays.innerHTML = "";
     for (let i = 0; i < firstDay; i++) {
       const day = document.createElement("div");
@@ -523,18 +532,23 @@ class CalendarUI {
   async toggleBiometrics() {
     if (!window.pinProtection) return;
 
-    // Ensure WebAuthn initialization is complete
-    await pinProtection.ensureWebAuthnInit();
+    try {
+      // Ensure WebAuthn initialization is complete
+      await pinProtection.ensureWebAuthnInit();
 
-    if (pinProtection.isWebAuthnEnabled()) {
-      // Disable biometrics
-      await pinProtection.disableBiometrics();
-    } else {
-      // Enable biometrics
-      await pinProtection.enableBiometrics();
+      if (pinProtection.isWebAuthnEnabled()) {
+        // Disable biometrics
+        await pinProtection.disableBiometrics();
+      } else {
+        // Enable biometrics
+        await pinProtection.enableBiometrics();
+      }
+
+      // Refresh calendar to update button label
+      this.generateCalendar();
+    } catch (error) {
+      console.error("Error toggling biometrics:", error);
+      Utils.showNotification("Failed to update biometric settings. Please try again.", "error");
     }
-
-    // Refresh calendar to update button label
-    this.generateCalendar();
   }
 }
