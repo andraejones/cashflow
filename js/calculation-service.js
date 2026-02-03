@@ -177,8 +177,7 @@ class CalculationService {
       }
       previousBalance = monthlyBalances[monthKey].endingBalance;
     });
-    // Save data (cache was already invalidated at start)
-    this.store.saveData(false);
+    // derived data (monthlyBalances) is updated in memory, no need to persist to disk on every view
   }
 
 

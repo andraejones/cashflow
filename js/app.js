@@ -267,8 +267,15 @@ class CashflowApp {
 document.addEventListener("DOMContentLoaded", () => {
   window.pinProtection = new PinProtection();
   pinProtection.promptUnlock().then((unlocked) => {
-    if (unlocked) {
-      window.app = new CashflowApp(pinProtection);
-    }
-  });
-});
+          if (unlocked) {
+            window.app = new CashflowApp(pinProtection);
+          }
+        });
+      });
+    
+      // Ensure any pending data is saved before closing/refreshing
+      window.addEventListener("beforeunload", () => {
+        if (window.app && window.app.store) {
+          window.app.store.flushPendingSave();
+        }
+      });

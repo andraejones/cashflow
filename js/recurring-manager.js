@@ -565,7 +565,8 @@ class RecurringTransactionManager {
     }
     this.expansionCache.set(cacheKey, allRecurringForMonth);
 
-    this.store.saveData(false);
+    // Derived data (expanded transactions) is updated in memory
+    // No need to persist to disk as it's re-generated on load/view
   }
 
   // Apply cached transactions to the store (used on cache hit)
@@ -607,8 +608,6 @@ class RecurringTransactionManager {
         transactions[dateString].push({ ...transaction });
       }
     }
-
-    this.store.saveData(false);
   }
 
 
