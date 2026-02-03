@@ -528,6 +528,11 @@ class TransactionUI {
     try {
       console.log('Opening transaction modal for date:', date);
 
+      // Ensure recurring transactions are expanded for this date's month
+      // (handles cases when modal opens via search for a different month)
+      const [year, month] = date.split("-").map(Number);
+      this.recurringManager.applyRecurringTransactions(year, month - 1);
+
       const modal = document.getElementById("transactionModal");
       const transactionDate = document.getElementById("transactionDate");
       const modalTransactions = document.getElementById("modalTransactions");
@@ -560,11 +565,12 @@ class TransactionUI {
       if (transactions[date]) {
         let hasVisible = false;
         transactions[date].forEach((t, index) => {
-          if (t.hidden === true) {
-            return;
-          }
+          const isHidden = t.hidden === true;
           hasVisible = true;
           const transactionDiv = document.createElement("div");
+          if (isHidden) {
+            transactionDiv.classList.add("hidden-transaction");
+          }
           const isRecurring = t.recurringId !== undefined;
           const isSkipped =
             isRecurring &&
@@ -616,8 +622,13 @@ class TransactionUI {
             amountSpan.classList.add("skipped");
           }
           amountSpan.style.opacity = isSkipped ? "0.5" : "1";
-          amountSpan.textContent = `${sign}$${t.amount.toFixed(2)}${isSkipped ? " (Skipped)" : ""
-            }`;
+          let statusLabel = "";
+          if (isSkipped) {
+            statusLabel = " (Skipped)";
+          } else if (isHidden) {
+            statusLabel = " (Hidden - Debt Snowball)";
+          }
+          amountSpan.textContent = `${sign}$${t.amount.toFixed(2)}${statusLabel}`;
           transactionDiv.appendChild(amountSpan);
 
           if (descriptionText) {
@@ -1334,6 +1345,11 @@ class TransactionUI {
         advancedOptions.remove();
       }
       const transactionModal = document.getElementById("transactionModal");
+      // Blur any focused element inside the modal before hiding to avoid aria-hidden warning
+      const activeEl = document.activeElement;
+      if (activeEl && transactionModal.contains(activeEl)) {
+        activeEl.blur();
+      }
       transactionModal.style.display = "none";
       transactionModal.setAttribute("aria-hidden", "true");
       ModalManager.closeModal(transactionModal);

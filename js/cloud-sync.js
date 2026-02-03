@@ -460,6 +460,10 @@ class CloudSync {
     if (!this.autoSyncEnabled) {
       return;
     }
+    // Prevent scheduling new saves during an active sync
+    if (this._isSyncing) {
+      return;
+    }
     const { token, gistId } = await this.getCloudCredentialsAsync();
     if (!token || !gistId) {
       return;
@@ -1000,6 +1004,11 @@ class CloudSync {
               };
 
               console.log("Merged local and remote data due to conflict");
+
+              // Refresh UI with merged data
+              if (this.onUpdate) {
+                this.onUpdate();
+              }
             } catch (parseError) {
               console.warn("Could not parse remote data for merge, proceeding with local data");
             }
