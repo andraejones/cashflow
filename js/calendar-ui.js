@@ -433,29 +433,23 @@ class CalendarUI {
       const transactions = this.store.getTransactions();
       if (transactions[date] && transactions[date].length > 0) {
         modalTransactions.innerHTML = "";
-        let hasVisible = false;
         transactions[date].forEach((t) => {
-          if (t.hidden === true) {
-            return;
-          }
-          hasVisible = true;
+          const isHidden = t.hidden === true;
           const row = document.createElement("div");
+          if (isHidden) {
+            row.classList.add("hidden-transaction");
+          }
           const amountSpan = document.createElement("span");
           amountSpan.className = t.type;
           const sign = t.type === "balance" ? "=" : t.type === "income" ? "+" : "-";
-          amountSpan.textContent = `${sign}$${t.amount.toFixed(2)}`;
+          const hiddenLabel = isHidden ? " (Hidden - Debt Snowball)" : "";
+          amountSpan.textContent = `${sign}$${t.amount.toFixed(2)}${hiddenLabel}`;
           row.appendChild(amountSpan);
           if (typeof t.description === "string" && t.description) {
             row.appendChild(document.createTextNode(` - ${t.description}`));
           }
           modalTransactions.appendChild(row);
         });
-        if (!hasVisible) {
-          const emptyMessage = document.createElement("p");
-          emptyMessage.textContent = "No transactions for this date.";
-          modalTransactions.innerHTML = "";
-          modalTransactions.appendChild(emptyMessage);
-        }
       } else {
         const emptyMessage = document.createElement("p");
         emptyMessage.textContent = "No transactions for this date.";
