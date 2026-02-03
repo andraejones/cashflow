@@ -12,6 +12,7 @@ class CloudSync {
     this._heartbeatInterval = null;
     this._updateAvailable = false;
     this._lastSaveTime = null;
+    this._isSyncing = false;
 
     if (typeof this.store.registerSaveCallback === 'function') {
       this.store.registerSaveCallback((isDataModified) => {
@@ -87,6 +88,10 @@ class CloudSync {
 
   isAutoSyncEnabled() {
     return this.autoSyncEnabled;
+  }
+
+  isSyncInProgress() {
+    return this._isSyncing;
   }
 
 
@@ -634,6 +639,9 @@ class CloudSync {
 
   // Lightweight check if remote Gist has changed (returns true/false/null)
   async checkForRemoteChanges() {
+    if (this._isSyncing) {
+      return false;
+    }
     // Skip heartbeat check if we just saved (grace period of 90 seconds)
     // This avoids false positives from GitHub ETag inconsistencies between PATCH and GET
     const SAVE_GRACE_PERIOD = 90000;
@@ -725,6 +733,13 @@ class CloudSync {
   }
 
   async saveToCloud() {
+    if (this._isSyncing) {
+      console.log("Sync already in progress, skipping saveToCloud");
+      Utils.showNotification("Sync already in progress...", "info");
+      return;
+    }
+    this._isSyncing = true;
+
     const syncIndicator = document.querySelector(".cloud-sync-indicator");
     if (syncIndicator) syncIndicator.className = "cloud-sync-indicator syncing";
     Utils.showLoading("Saving to cloud...");
@@ -915,12 +930,20 @@ class CloudSync {
         "error"
       );
     } finally {
+      this._isSyncing = false;
       Utils.hideLoading();
     }
   }
 
 
   async loadFromCloud() {
+    if (this._isSyncing) {
+      console.log("Sync already in progress, skipping loadFromCloud");
+      Utils.showNotification("Sync already in progress...", "info");
+      return;
+    }
+    this._isSyncing = true;
+
     const syncIndicator = document.querySelector(".cloud-sync-indicator");
     if (syncIndicator) syncIndicator.className = "cloud-sync-indicator syncing";
     Utils.showLoading("Loading from cloud...");
@@ -1081,6 +1104,7 @@ class CloudSync {
         "error"
       );
     } finally {
+      this._isSyncing = false;
       Utils.hideLoading();
     }
   }
