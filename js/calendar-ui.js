@@ -283,6 +283,8 @@ class CalendarUI {
       // Check if this date has any moved transactions (from or to)
       const hasMoveAnomaly = this.store.hasMoveAnomaly(dateString);
 
+      const isCurrentDay = year === today.getFullYear() && month === today.getMonth() && i === today.getDate();
+
       day.querySelector(".day-content").innerHTML = `
         ${dailyTotals.income > 0
           ? `<div class="income">+${dailyTotals.income.toFixed(2)}</div>`
@@ -292,7 +294,7 @@ class CalendarUI {
           ? `<div class="expense">-${dailyTotals.expense.toFixed(2)}</div>`
           : ""
         }
-        ${balanceWithoutUnsettled !== null
+        ${balanceWithoutUnsettled !== null && isCurrentDay
           ? `<div class="balance-without-unsettled">${balanceWithoutUnsettled.toFixed(2)}</div>`
           : ""
         }
