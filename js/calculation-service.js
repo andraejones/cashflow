@@ -197,6 +197,7 @@ class CalculationService {
     const transactions = this.store.getTransactions();
     let income = 0;
     let expense = 0;
+    let unsettledExpense = 0;
     let balance = null;
     let hasSkippedTransactions = false;
 
@@ -221,6 +222,9 @@ class CalculationService {
             income = this.roundToCents(income + t.amount);
           } else if (t.type === "expense") {
             expense = this.roundToCents(expense + t.amount);
+            if (t.settled === false && !t.recurringId) {
+              unsettledExpense = this.roundToCents(unsettledExpense + t.amount);
+            }
           }
         }
       });
@@ -229,6 +233,7 @@ class CalculationService {
     const result = {
       income: this.roundToCents(income),
       expense: this.roundToCents(expense),
+      unsettledExpense: this.roundToCents(unsettledExpense),
       balance: balance !== null ? this.roundToCents(balance) : null,
       hasSkippedTransactions,
     };

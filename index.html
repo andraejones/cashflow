@@ -49,6 +49,10 @@
           <option value="balance">Balance</option>
         </select>
         <input type="text" id="transactionDescription" placeholder="Description" aria-label="Transaction description" />
+        <label id="settledToggleLabel" class="settled-toggle-label" style="display:none">
+          <input type="checkbox" id="transactionSettled" checked />
+          Settled
+        </label>
         <select id="transactionRecurrence" aria-label="Transaction recurrence">
           <option value="once">One-time</option>
           <option value="daily">Daily</option>

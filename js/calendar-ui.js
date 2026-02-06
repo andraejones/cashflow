@@ -163,6 +163,7 @@ class CalendarUI {
       calendarDays.appendChild(day);
     }
     let runningBalance = summary.startingBalance;
+    let runningUnsettledExpense = 0;
 
     // Calculate the end date of the 30-day unallocated range
     const unallocatedEndDate = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
@@ -269,9 +270,16 @@ class CalendarUI {
         : 0;
       if (dailyTotals.balance !== null) {
         runningBalance = dailyTotals.balance;
+        runningUnsettledExpense = 0;
       } else {
         runningBalance += dailyTotals.income - dailyTotals.expense;
+        runningUnsettledExpense += dailyTotals.unsettledExpense;
       }
+
+      const balanceWithoutUnsettled = runningUnsettledExpense > 0
+        ? this.calculationService.roundToCents(runningBalance + runningUnsettledExpense)
+        : null;
+
       // Check if this date has any moved transactions (from or to)
       const hasMoveAnomaly = this.store.hasMoveAnomaly(dateString);
 
@@ -282,6 +290,10 @@ class CalendarUI {
         }
         ${dailyTotals.expense > 0
           ? `<div class="expense">-${dailyTotals.expense.toFixed(2)}</div>`
+          : ""
+        }
+        ${balanceWithoutUnsettled !== null
+          ? `<div class="balance-without-unsettled">${balanceWithoutUnsettled.toFixed(2)}</div>`
           : ""
         }
         <div class="balance">${runningBalance.toFixed(2)}</div>
