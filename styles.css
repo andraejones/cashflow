@@ -1679,6 +1679,99 @@ body.app-locked #calendarOptions {
   margin-left: 4px;
 }
 
+/* Settled toggle in add form */
+.settled-toggle-label {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted-color);
+  font-size: 0.95em;
+  cursor: pointer;
+}
+
+.settled-toggle-label input[type="checkbox"] {
+  accent-color: var(--accent-color);
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+
+/* Unsettled transaction in modal */
+.unsettled-transaction {
+  border-left: 3px solid var(--accent-color);
+  padding-left: 10px;
+  background-color: rgba(246, 176, 66, 0.08);
+  border-radius: var(--radius-sm);
+}
+
+/* Carried-forward unsettled entries on today */
+.carried-forward-transaction {
+  border-left: 3px solid var(--accent-color);
+  padding-left: 10px;
+  background-color: rgba(246, 176, 66, 0.06);
+  border-radius: var(--radius-sm);
+}
+
+.carried-forward-label {
+  font-style: italic;
+  color: var(--muted-color);
+  font-size: 0.9em;
+}
+
+/* Section header for carried-forward */
+.carried-forward-header {
+  font-size: 0.75em;
+  color: var(--muted-color);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: 16px;
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-color);
+  font-weight: 600;
+}
+
+/* Settle/Unsettle button */
+.settle-btn {
+  margin-left: 10px;
+  cursor: pointer;
+  color: var(--accent-strong);
+  font-weight: 500;
+}
+
+/* Balance without unsettled (actual account balance) */
+.balance-without-unsettled {
+  font-size: 11px;
+  color: var(--muted-color);
+  opacity: 0.75;
+  font-weight: 600;
+}
+
+@media (max-width: 480px) {
+  .settle-btn {
+    display: block;
+    margin: 8px 0;
+    text-align: center;
+    padding: 8px;
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+  }
+
+  .balance-without-unsettled {
+    font-size: 9px;
+  }
+}
+
+@media (max-width: 768px) {
+  .balance-without-unsettled {
+    font-size: 10px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
 
   .calendar,

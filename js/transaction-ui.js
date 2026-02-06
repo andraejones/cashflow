@@ -86,8 +86,8 @@ class TransactionUI {
     const recurrenceSelect = document.getElementById("transactionRecurrence");
     const transactionDescription = document.getElementById("transactionDescription");
 
-    transactionType.addEventListener("change", function () {
-      if (this.value === "balance") {
+    transactionType.addEventListener("change", () => {
+      if (transactionType.value === "balance") {
         recurrenceSelect.value = "once";
         recurrenceSelect.style.display = "none";
         transactionDescription.value = "Ending Balance";
@@ -98,9 +98,11 @@ class TransactionUI {
         transactionDescription.value = "";
         transactionDescription.placeholder = "Description";
       }
+      this.updateSettledToggleVisibility();
     });
     document.getElementById("transactionRecurrence").addEventListener("change", () => {
       this.updateRecurrenceOptions();
+      this.updateSettledToggleVisibility();
     });
     this.setupFocusTrap("transactionModal");
     this.setupFocusTrap("searchModal");
@@ -141,6 +143,16 @@ class TransactionUI {
         }
       }
     });
+  }
+
+
+  updateSettledToggleVisibility() {
+    const type = document.getElementById("transactionType").value;
+    const recurrence = document.getElementById("transactionRecurrence").value;
+    const label = document.getElementById("settledToggleLabel");
+    if (label) {
+      label.style.display = (type === "expense" && recurrence === "once") ? "" : "none";
+    }
   }
 
 
@@ -622,11 +634,17 @@ class TransactionUI {
             amountSpan.classList.add("skipped");
           }
           amountSpan.style.opacity = isSkipped ? "0.5" : "1";
+          const isUnsettled = !isRecurring && normalizedType === "expense" && t.settled === false;
+          if (isUnsettled) {
+            transactionDiv.classList.add("unsettled-transaction");
+          }
           let statusLabel = "";
           if (isSkipped) {
             statusLabel = " (Skipped)";
           } else if (isHidden) {
             statusLabel = " (Hidden - Debt Snowball)";
+          } else if (isUnsettled) {
+            statusLabel = " (Unsettled)";
           }
           amountSpan.textContent = `${sign}$${t.amount.toFixed(2)}${statusLabel}`;
           transactionDiv.appendChild(amountSpan);
@@ -681,22 +699,38 @@ class TransactionUI {
             transactionDiv.appendChild(skipBtn);
           }
 
-          // Add Forward and Backward buttons for moving transactions
-          const backwardBtn = document.createElement("span");
-          backwardBtn.className = "move-btn backward-btn";
-          backwardBtn.setAttribute("role", "button");
-          backwardBtn.setAttribute("tabindex", "0");
-          backwardBtn.setAttribute("aria-label", "Move to previous day");
-          backwardBtn.textContent = "←";
-          transactionDiv.appendChild(backwardBtn);
+          // Add Settle/Unsettle button for one-time expenses
+          let settleBtn = null;
+          if (!isRecurring && normalizedType === "expense") {
+            settleBtn = document.createElement("span");
+            settleBtn.className = "settle-btn";
+            settleBtn.setAttribute("role", "button");
+            settleBtn.setAttribute("tabindex", "0");
+            settleBtn.setAttribute("aria-label", t.settled === false ? "Settle expense" : "Unsettle expense");
+            settleBtn.textContent = t.settled === false ? "Settle" : "Unsettle";
+            transactionDiv.appendChild(settleBtn);
+          }
 
-          const forwardBtn = document.createElement("span");
-          forwardBtn.className = "move-btn forward-btn";
-          forwardBtn.setAttribute("role", "button");
-          forwardBtn.setAttribute("tabindex", "0");
-          forwardBtn.setAttribute("aria-label", "Move to next day");
-          forwardBtn.textContent = "→";
-          transactionDiv.appendChild(forwardBtn);
+          // Add Forward and Backward buttons for moving transactions (hide for unsettled expenses)
+          let backwardBtn = null;
+          let forwardBtn = null;
+          if (!isUnsettled) {
+            backwardBtn = document.createElement("span");
+            backwardBtn.className = "move-btn backward-btn";
+            backwardBtn.setAttribute("role", "button");
+            backwardBtn.setAttribute("tabindex", "0");
+            backwardBtn.setAttribute("aria-label", "Move to previous day");
+            backwardBtn.textContent = "←";
+            transactionDiv.appendChild(backwardBtn);
+
+            forwardBtn = document.createElement("span");
+            forwardBtn.className = "move-btn forward-btn";
+            forwardBtn.setAttribute("role", "button");
+            forwardBtn.setAttribute("tabindex", "0");
+            forwardBtn.setAttribute("aria-label", "Move to next day");
+            forwardBtn.textContent = "→";
+            transactionDiv.appendChild(forwardBtn);
+          }
 
           const editForm = document.createElement("div");
           editForm.className = "edit-form";
@@ -827,26 +861,73 @@ class TransactionUI {
             });
           }
 
-          // Move button event listeners
-          backwardBtn.addEventListener("click", () =>
-            this.moveTransactionToDay(date, index, -1)
-          );
-          backwardBtn.addEventListener("keydown", (event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              this.moveTransactionToDay(date, index, -1);
-            }
-          });
+          if (settleBtn) {
+            const toggleSettled = () => {
+              if (t.settled === false) {
+                // Settling: move to today if not already there
+                const now = new Date();
+                const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+                if (date === todayStr) {
+                  this.store.setTransactionSettled(date, index, true);
+                } else {
+                  this.store.deleteTransaction(date, index);
+                  this.store.addTransaction(todayStr, {
+                    amount: t.amount,
+                    type: t.type,
+                    description: t.description,
+                    settled: true,
+                  });
+                }
+                this.showTransactionDetails(date);
+                this.onUpdate();
+                if (this.cloudSync) {
+                  this.cloudSync.scheduleCloudSave();
+                }
+                Utils.showNotification("Transaction settled");
+              } else {
+                // Unsettling: keep in place
+                this.store.setTransactionSettled(date, index, false);
+                this.showTransactionDetails(date);
+                this.onUpdate();
+                if (this.cloudSync) {
+                  this.cloudSync.scheduleCloudSave();
+                }
+                Utils.showNotification("Transaction unsettled");
+              }
+            };
+            settleBtn.addEventListener("click", toggleSettled);
+            settleBtn.addEventListener("keydown", (event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                toggleSettled();
+              }
+            });
+          }
 
-          forwardBtn.addEventListener("click", () =>
-            this.moveTransactionToDay(date, index, 1)
-          );
-          forwardBtn.addEventListener("keydown", (event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              this.moveTransactionToDay(date, index, 1);
-            }
-          });
+          // Move button event listeners
+          if (backwardBtn) {
+            backwardBtn.addEventListener("click", () =>
+              this.moveTransactionToDay(date, index, -1)
+            );
+            backwardBtn.addEventListener("keydown", (event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                this.moveTransactionToDay(date, index, -1);
+              }
+            });
+          }
+
+          if (forwardBtn) {
+            forwardBtn.addEventListener("click", () =>
+              this.moveTransactionToDay(date, index, 1)
+            );
+            forwardBtn.addEventListener("keydown", (event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                this.moveTransactionToDay(date, index, 1);
+              }
+            });
+          }
 
           modalTransactions.appendChild(transactionDiv);
         });
@@ -856,6 +937,76 @@ class TransactionUI {
       } else {
         modalTransactions.innerHTML = "<p>No transactions for this date.</p>";
       }
+
+      // Show carried-forward unsettled transactions on today
+      const today = new Date();
+      const todayString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+      if (date === todayString) {
+        const unsettled = this.store.getUnsettledTransactions().filter(
+          (u) => u.date < todayString
+        );
+        if (unsettled.length > 0) {
+          const header = document.createElement("div");
+          header.className = "carried-forward-header";
+          header.textContent = "UNSETTLED (CARRIED FORWARD)";
+          modalTransactions.appendChild(header);
+
+          unsettled.forEach((u) => {
+            const div = document.createElement("div");
+            div.className = "carried-forward-transaction";
+
+            const displayDate = Utils.formatDisplayDate(u.date);
+            const shortDate = this.formatShortDisplayDate(u.date);
+
+            const amountSpan = document.createElement("span");
+            amountSpan.classList.add("expense");
+            amountSpan.textContent = `-$${u.transaction.amount.toFixed(2)}`;
+            div.appendChild(amountSpan);
+
+            const desc = u.transaction.description || "";
+            if (desc) {
+              div.appendChild(document.createTextNode(` - ${desc}`));
+            }
+
+            const fromLabel = document.createElement("span");
+            fromLabel.className = "carried-forward-label";
+            fromLabel.textContent = ` (from ${shortDate})`;
+            div.appendChild(fromLabel);
+
+            const settleBtn = document.createElement("span");
+            settleBtn.className = "settle-btn";
+            settleBtn.setAttribute("role", "button");
+            settleBtn.setAttribute("tabindex", "0");
+            settleBtn.textContent = "Settle";
+            const doSettle = () => {
+              this.store.deleteTransaction(u.date, u.index);
+              this.store.addTransaction(todayString, {
+                amount: u.transaction.amount,
+                type: u.transaction.type,
+                description: u.transaction.description,
+                settled: true,
+              });
+              this.showTransactionDetails(date);
+              this.onUpdate();
+              if (this.cloudSync) {
+                this.cloudSync.scheduleCloudSave();
+              }
+              Utils.showNotification("Transaction settled");
+            };
+            settleBtn.addEventListener("click", doSettle);
+            settleBtn.addEventListener("keydown", (event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                doSettle();
+              }
+            });
+            div.appendChild(settleBtn);
+
+            modalTransactions.appendChild(div);
+          });
+        }
+      }
+
       const recurrenceSelect = document.getElementById("transactionRecurrence");
       if (transactionType.value === "balance") {
         recurrenceSelect.value = "once";
@@ -863,6 +1014,7 @@ class TransactionUI {
       } else {
         recurrenceSelect.style.display = "";
       }
+      this.updateSettledToggleVisibility();
       if (hasBalanceTransaction) {
         const balanceOption = transactionType.querySelector(
           'option[value="balance"]'
@@ -1298,6 +1450,9 @@ class TransactionUI {
           type: type,
           description: description,
         };
+        if (type === "expense") {
+          newTransaction.settled = document.getElementById("transactionSettled").checked;
+        }
         if (type === "balance") {
           const transactions = this.store.getTransactions();
           if (transactions[date]) {
@@ -1340,6 +1495,8 @@ class TransactionUI {
       document.getElementById("transactionAmount").value = "";
       document.getElementById("transactionDescription").value = "";
       document.getElementById("transactionRecurrence").value = "once";
+      document.getElementById("transactionSettled").checked = true;
+      document.getElementById("settledToggleLabel").style.display = "none";
       const advancedOptions = document.getElementById("advancedRecurrenceOptions");
       if (advancedOptions) {
         advancedOptions.remove();

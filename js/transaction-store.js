@@ -886,6 +886,35 @@ class TransactionStore {
   }
 
 
+  setTransactionSettled(date, index, isSettled) {
+    if (!date || index === undefined) {
+      console.error("Invalid parameters for setTransactionSettled");
+      return false;
+    }
+
+    if (this.transactions[date] && this.transactions[date][index]) {
+      this.transactions[date][index].settled = isSettled;
+      this.transactions[date][index]._lastModified = new Date().toISOString();
+      this.debouncedSave();
+      return true;
+    }
+    return false;
+  }
+
+
+  getUnsettledTransactions() {
+    const results = [];
+    Object.keys(this.transactions).forEach((date) => {
+      this.transactions[date].forEach((t, index) => {
+        if (t.settled === false && t.type === "expense" && !t.recurringId) {
+          results.push({ date, index, transaction: t });
+        }
+      });
+    });
+    return results;
+  }
+
+
   exportData() {
     return {
       transactions: this.transactions,
