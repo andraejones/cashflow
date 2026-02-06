@@ -821,20 +821,6 @@ body.app-locked #calendarOptions {
   background-color: #e09a2b;
 }
 
-.move-btn {
-  margin-left: 8px;
-  cursor: pointer;
-  color: var(--primary-color);
-  font-weight: bold;
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-  transition: background-color 0.2s;
-}
-
-.move-btn:hover {
-  background-color: rgba(15, 122, 108, 0.1);
-}
-
 .edit-form {
   display: none;
   margin-top: 10px;
@@ -1589,10 +1575,12 @@ body.app-locked #calendarOptions {
 
   .edit-btn,
   .delete-btn,
-  .skip-btn {
-    display: block;
-    margin: 8px 0;
-    text-align: center;
+  .skip-btn,
+  .settle-btn {
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+    margin: 4px;
   }
 
 
@@ -1749,18 +1737,6 @@ body.app-locked #calendarOptions {
 }
 
 @media (max-width: 480px) {
-  .settle-btn {
-    display: block;
-    margin: 8px 0;
-    text-align: center;
-    padding: 8px;
-    min-width: 44px;
-    min-height: 44px;
-    display: inline-flex;
-    justify-content: center;
-    align-items: center;
-  }
-
   .balance-without-unsettled {
     font-size: 9px;
   }
