@@ -711,27 +711,6 @@ class TransactionUI {
             transactionDiv.appendChild(settleBtn);
           }
 
-          // Add Forward and Backward buttons for moving transactions (hide for unsettled expenses)
-          let backwardBtn = null;
-          let forwardBtn = null;
-          if (!isUnsettled) {
-            backwardBtn = document.createElement("span");
-            backwardBtn.className = "move-btn backward-btn";
-            backwardBtn.setAttribute("role", "button");
-            backwardBtn.setAttribute("tabindex", "0");
-            backwardBtn.setAttribute("aria-label", "Move to previous day");
-            backwardBtn.textContent = "←";
-            transactionDiv.appendChild(backwardBtn);
-
-            forwardBtn = document.createElement("span");
-            forwardBtn.className = "move-btn forward-btn";
-            forwardBtn.setAttribute("role", "button");
-            forwardBtn.setAttribute("tabindex", "0");
-            forwardBtn.setAttribute("aria-label", "Move to next day");
-            forwardBtn.textContent = "→";
-            transactionDiv.appendChild(forwardBtn);
-          }
-
           const editForm = document.createElement("div");
           editForm.className = "edit-form";
           editForm.id = `edit-form-${date}-${index}`;
@@ -800,6 +779,13 @@ class TransactionUI {
             editScopeSelect.appendChild(allOption);
             editForm.appendChild(editScopeSelect);
           }
+
+          const dateInput = document.createElement("input");
+          dateInput.type = "date";
+          dateInput.id = `edit-date-${date}-${index}`;
+          dateInput.value = date;
+          dateInput.setAttribute("aria-label", "Date");
+          editForm.appendChild(dateInput);
 
           const saveButton = document.createElement("button");
           saveButton.setAttribute("aria-label", "Save changes");
@@ -900,31 +886,6 @@ class TransactionUI {
               if (event.key === "Enter" || event.key === " ") {
                 event.preventDefault();
                 toggleSettled();
-              }
-            });
-          }
-
-          // Move button event listeners
-          if (backwardBtn) {
-            backwardBtn.addEventListener("click", () =>
-              this.moveTransactionToDay(date, index, -1)
-            );
-            backwardBtn.addEventListener("keydown", (event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                this.moveTransactionToDay(date, index, -1);
-              }
-            });
-          }
-
-          if (forwardBtn) {
-            forwardBtn.addEventListener("click", () =>
-              this.moveTransactionToDay(date, index, 1)
-            );
-            forwardBtn.addEventListener("keydown", (event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                this.moveTransactionToDay(date, index, 1);
               }
             });
           }
@@ -1155,6 +1116,7 @@ class TransactionUI {
     const amount = parseFloat(amountElement.value);
     const type = typeElement.value;
     const description = descriptionElement.value;
+    const newDate = document.getElementById(`edit-date-${date}-${index}`)?.value || date;
 
     if (isNaN(amount) || amount < 0) {
       Utils.showNotification("Please enter a valid amount (must be 0 or greater)", "error");
@@ -1171,33 +1133,90 @@ class TransactionUI {
     const transaction = transactions[date][index];
     const isRecurring = transaction.recurringId !== undefined;
 
-    let editScope = "this";
-    if (isRecurring && transaction.type !== "balance") {
-      const editRecurrenceElement = document.getElementById(`edit-recurrence-${date}-${index}`);
-      if (editRecurrenceElement) {
-        editScope = editRecurrenceElement.value;
-      }
-    }
-
     try {
-      this.recurringManager.editTransaction(
-        date,
-        index,
-        {
-          amount,
-          type,
-          description,
-        },
-        editScope
-      );
+      if (newDate === date) {
+        // No date change — existing edit-in-place behavior
+        let editScope = "this";
+        if (isRecurring && transaction.type !== "balance") {
+          const editRecurrenceElement = document.getElementById(`edit-recurrence-${date}-${index}`);
+          if (editRecurrenceElement) {
+            editScope = editRecurrenceElement.value;
+          }
+        }
 
-      this.showTransactionDetails(date);
-      this.onUpdate();
-      if (this.cloudSync) {
-        this.cloudSync.scheduleCloudSave();
+        this.recurringManager.editTransaction(
+          date,
+          index,
+          { amount, type, description },
+          editScope
+        );
+
+        this.showTransactionDetails(date);
+        this.onUpdate();
+        if (this.cloudSync) {
+          this.cloudSync.scheduleCloudSave();
+        }
+        Utils.showNotification("Transaction updated successfully");
+      } else {
+        // Date changed — move the transaction
+        if (isRecurring) {
+          // Skip the original recurring occurrence
+          if (!this.recurringManager.isTransactionSkipped(date, transaction.recurringId)) {
+            this.recurringManager.toggleSkipTransaction(date, transaction.recurringId);
+          }
+          // Store move info
+          this.store.moveTransaction(transaction.recurringId, date, newDate);
+          // Create one-time at new date with edited fields
+          this.store.addTransaction(newDate, {
+            amount,
+            type,
+            description,
+            movedFrom: date,
+            originalRecurringId: transaction.recurringId
+          });
+        } else if (transaction.movedFrom && transaction.originalRecurringId) {
+          // One-time that was previously moved from a recurring
+          if (newDate === transaction.movedFrom) {
+            // Moving back to original date — restore recurring occurrence
+            this.store.cancelMoveTransaction(transaction.originalRecurringId, transaction.movedFrom);
+            if (this.recurringManager.isTransactionSkipped(transaction.movedFrom, transaction.originalRecurringId)) {
+              this.recurringManager.toggleSkipTransaction(transaction.movedFrom, transaction.originalRecurringId);
+            }
+            this.store.deleteTransaction(date, index);
+          } else {
+            // Moving to a different date — update move info
+            this.store.moveTransaction(
+              transaction.originalRecurringId,
+              transaction.movedFrom,
+              newDate
+            );
+            this.store.deleteTransaction(date, index);
+            this.store.addTransaction(newDate, {
+              amount,
+              type,
+              description,
+              movedFrom: transaction.movedFrom,
+              originalRecurringId: transaction.originalRecurringId
+            });
+          }
+        } else {
+          // Regular one-time transaction
+          this.store.deleteTransaction(date, index);
+          const newTransaction = { amount, type, description };
+          // Preserve settled status for expenses
+          if (transaction.settled !== undefined) {
+            newTransaction.settled = transaction.settled;
+          }
+          this.store.addTransaction(newDate, newTransaction);
+        }
+
+        this.showTransactionDetails(newDate);
+        this.onUpdate();
+        if (this.cloudSync) {
+          this.cloudSync.scheduleCloudSave();
+        }
+        Utils.showNotification(`Transaction moved to ${Utils.formatDisplayDate(newDate)}`);
       }
-
-      Utils.showNotification("Transaction updated successfully");
     } catch (error) {
       console.error("Error saving edit:", error);
       Utils.showNotification("Error updating transaction", "error");
@@ -1300,103 +1319,6 @@ class TransactionUI {
     } else {
       Utils.showNotification("Debt snowball not available", "error");
     }
-  }
-
-
-  moveTransactionToDay(date, index, direction) {
-    const transactions = this.store.getTransactions();
-    if (!transactions[date] || !transactions[date][index]) {
-      console.error(`Transaction not found: date=${date}, index=${index}`);
-      Utils.showNotification("Error: Transaction not found", "error");
-      return;
-    }
-
-    const transaction = transactions[date][index];
-    const isRecurring = transaction.recurringId !== undefined;
-
-    // Calculate the target date using consistent date parsing
-    const currentDate = Utils.parseDateString(date);
-    if (!currentDate) {
-      Utils.showNotification("Error: Invalid date format", "error");
-      return;
-    }
-    currentDate.setDate(currentDate.getDate() + direction);
-    const targetDate = Utils.formatDateString(currentDate);
-
-    if (isRecurring) {
-      // For recurring transactions, create a move exception
-      // First, skip the original occurrence
-      if (!this.recurringManager.isTransactionSkipped(date, transaction.recurringId)) {
-        this.recurringManager.toggleSkipTransaction(date, transaction.recurringId);
-      }
-
-      // Store the move info for the star indicator
-      this.store.moveTransaction(transaction.recurringId, date, targetDate);
-
-      // Create a one-time transaction at the target date with reference to original
-      this.store.addTransaction(targetDate, {
-        amount: transaction.amount,
-        type: transaction.type,
-        description: transaction.description,
-        movedFrom: date,
-        originalRecurringId: transaction.recurringId
-      });
-    } else {
-      // For one-time transactions, simply move it
-      // Check if this is an already-moved recurring transaction
-      if (transaction.movedFrom && transaction.originalRecurringId) {
-        // Check if we're moving back to the original date
-        if (targetDate === transaction.movedFrom) {
-          // Cancel the move entirely - restore original recurring occurrence
-          this.store.cancelMoveTransaction(transaction.originalRecurringId, transaction.movedFrom);
-
-          // Unskip the original recurring occurrence
-          if (this.recurringManager.isTransactionSkipped(transaction.movedFrom, transaction.originalRecurringId)) {
-            this.recurringManager.toggleSkipTransaction(transaction.movedFrom, transaction.originalRecurringId);
-          }
-
-          // Delete the moved one-time transaction
-          this.store.deleteTransaction(date, index);
-
-          this.showTransactionDetails(targetDate);
-          this.onUpdate();
-          if (this.cloudSync) {
-            this.cloudSync.scheduleCloudSave();
-          }
-
-          Utils.showNotification("Transaction restored to original date");
-          return;
-        }
-
-        // Update the move info to new target
-        this.store.moveTransaction(
-          transaction.originalRecurringId,
-          transaction.movedFrom,
-          targetDate
-        );
-      }
-
-      // Delete from current date
-      this.store.deleteTransaction(date, index);
-
-      // Add to target date
-      this.store.addTransaction(targetDate, {
-        amount: transaction.amount,
-        type: transaction.type,
-        description: transaction.description,
-        movedFrom: transaction.movedFrom || null,
-        originalRecurringId: transaction.originalRecurringId || null
-      });
-    }
-
-    this.showTransactionDetails(targetDate);
-    this.onUpdate();
-    if (this.cloudSync) {
-      this.cloudSync.scheduleCloudSave();
-    }
-
-    const directionText = direction > 0 ? "forward" : "backward";
-    Utils.showNotification(`Transaction moved ${directionText} to ${Utils.formatDisplayDate(targetDate)}`);
   }
 
 
