@@ -242,6 +242,22 @@ class CalculationService {
     return result;
   }
 
+  getRunningBalanceForDate(dateString) {
+    const [year, month, day] = dateString.split("-").map(Number);
+    const summary = this.calculateMonthlySummary(year, month - 1);
+    let runningBalance = summary.startingBalance;
+
+    for (let d = 1; d <= day; d++) {
+      const ds = `${year}-${String(month).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+      const dailyTotals = this.calculateDailyTotals(ds);
+      if (dailyTotals.balance !== null) {
+        runningBalance = dailyTotals.balance;
+      } else {
+        runningBalance += dailyTotals.income - dailyTotals.expense;
+      }
+    }
+    return this.roundToCents(runningBalance);
+  }
 
   calculateMonthlySummary(year, month) {
     // Use padded month format consistently: YYYY-MM

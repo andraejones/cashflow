@@ -597,6 +597,17 @@ body.app-locked #calendarOptions {
   justify-content: center;
 }
 
+.modal-balance {
+  font-size: 0.95em;
+  font-weight: 600;
+  color: var(--ink-color);
+  margin: -4px 0 8px;
+}
+
+.modal-balance.negative {
+  color: var(--error-color-contrast);
+}
+
 .close:hover,
 .close:focus {
   color: #1f2b2a;

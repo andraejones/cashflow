@@ -2,11 +2,12 @@
 
 class TransactionUI {
 
-  constructor(store, recurringManager, onUpdate, cloudSync = null) {
+  constructor(store, recurringManager, onUpdate, cloudSync = null, calculationService = null) {
     this.store = store;
     this.recurringManager = recurringManager;
     this.onUpdate = onUpdate;
     this.cloudSync = cloudSync;
+    this.calculationService = calculationService;
     this.debtSnowballUI = null; // Set via setDebtSnowballUI after construction
 
     // Track event listeners for cleanup
@@ -564,6 +565,14 @@ class TransactionUI {
       const formattedDate = Utils.formatDisplayDate(date);
 
       modalDate.textContent = formattedDate;
+
+      const modalBalance = document.getElementById("modalBalance");
+      if (modalBalance && this.calculationService) {
+        const balance = this.calculationService.getRunningBalanceForDate(date);
+        modalBalance.textContent = `Balance: $${balance.toFixed(2)}`;
+        modalBalance.className = balance < 0 ? "modal-balance negative" : "modal-balance";
+      }
+
       modalTransactions.innerHTML = "";
       transactionType.innerHTML = `
         <option value="expense">Expense</option>
@@ -1044,6 +1053,12 @@ class TransactionUI {
       const modalDate = document.getElementById("modalDate");
       if (modalDate) {
         modalDate.textContent = Utils.formatDisplayDate(date);
+      }
+      const modalBalance = document.getElementById("modalBalance");
+      if (modalBalance && this.calculationService) {
+        const balance = this.calculationService.getRunningBalanceForDate(date);
+        modalBalance.textContent = `Balance: $${balance.toFixed(2)}`;
+        modalBalance.className = balance < 0 ? "modal-balance negative" : "modal-balance";
       }
       const transactionDate = document.getElementById("transactionDate");
       if (transactionDate) {
