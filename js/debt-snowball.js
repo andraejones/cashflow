@@ -2056,7 +2056,7 @@ class DebtSnowballUI {
       this.planSummary.textContent = "No active debts to target.";
       return;
     }
-    const monthKey = `${viewYear}-${viewMonth + 1}`;
+    const monthKey = `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}`;
     const monthInfo = projection.monthTargets?.[monthKey] || {};
     const targetDebtId = monthInfo.targetDebtId;
     const fallbackTarget = [...summaries].sort(

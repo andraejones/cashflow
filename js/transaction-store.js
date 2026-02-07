@@ -179,11 +179,8 @@ class TransactionStore {
         });
         if (needsMigration) {
           console.log("Migrated transactions to include IDs and timestamps");
-          // Save immediately to persist migration
-          this.storage.setItem(
-            "transactions",
-            encrypt(JSON.stringify(this.transactions))
-          );
+          // Mark for save after load completes (encrypt() is only defined in saveData())
+          this._needsMigrationSave = true;
         }
       }
 
@@ -321,6 +318,12 @@ class TransactionStore {
           }
         });
       }
+
+      // Handle deferred migration save (encrypt() is only defined in saveData())
+      if (this._needsMigrationSave) {
+        delete this._needsMigrationSave;
+        this.saveData(false); // Don't trigger cloud sync for migration
+      }
     } catch (error) {
       console.error("Error loading data from storage:", error);
       this.transactions = {};
@@ -334,6 +337,29 @@ class TransactionStore {
         autoGenerate: false,
       };
     }
+  }
+
+
+  /**
+   * Prune deleted items older than 30 days to prevent unbounded growth.
+   * Supports both old format (just ID string) and new format (object with deletedAt).
+   */
+  _pruneDeletedItems() {
+    const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
+    const keys = ['transactions', 'recurringTransactions', 'debts', 'cashInfusions'];
+
+    keys.forEach(key => {
+      if (Array.isArray(this._deletedItems[key])) {
+        this._deletedItems[key] = this._deletedItems[key].filter(item => {
+          // New format: object with id and deletedAt
+          if (typeof item === 'object' && item.deletedAt) {
+            return item.deletedAt > thirtyDaysAgo;
+          }
+          // Old format: just keep (will be replaced on next delete)
+          return true;
+        });
+      }
+    });
   }
 
 
@@ -392,6 +418,8 @@ class TransactionStore {
         "movedTransactions",
         encrypt(JSON.stringify(this.movedTransactions))
       );
+      // Prune old deleted items before saving
+      this._pruneDeletedItems();
       this.storage.setItem(
         "deletedItems",
         encrypt(JSON.stringify(this._deletedItems))
@@ -514,8 +542,8 @@ class TransactionStore {
     if (index === -1) {
       return false;
     }
-    // Track deleted ID for merge conflict resolution
-    this._deletedItems.cashInfusions.push(id);
+    // Track deleted ID for merge conflict resolution (with timestamp for pruning)
+    this._deletedItems.cashInfusions.push({ id, deletedAt: Date.now() });
     this.cashInfusions.splice(index, 1);
     this.debouncedSave();
     return true;
@@ -663,8 +691,8 @@ class TransactionStore {
     if (index === -1) {
       return false;
     }
-    // Track deleted ID for merge conflict resolution
-    this._deletedItems.debts.push(id);
+    // Track deleted ID for merge conflict resolution (with timestamp for pruning)
+    this._deletedItems.debts.push({ id, deletedAt: Date.now() });
     this.debts.splice(index, 1);
     this.debouncedSave();
     return true;
@@ -740,7 +768,8 @@ class TransactionStore {
       // Track deleted ID for merge conflict resolution
       const deletedTxn = this.transactions[date][index];
       if (deletedTxn.id) {
-        this._deletedItems.transactions.push(deletedTxn.id);
+        // Track deleted ID for merge conflict resolution (with timestamp for pruning)
+        this._deletedItems.transactions.push({ id: deletedTxn.id, deletedAt: Date.now() });
       }
 
       this.transactions[date].splice(index, 1);
@@ -807,8 +836,8 @@ class TransactionStore {
       return false;
     }
 
-    // Track deleted ID for merge conflict resolution
-    this._deletedItems.recurringTransactions.push(id);
+    // Track deleted ID for merge conflict resolution (with timestamp for pruning)
+    this._deletedItems.recurringTransactions.push({ id, deletedAt: Date.now() });
 
     this.recurringTransactions.splice(index, 1);
     for (const dateKey in this.transactions) {

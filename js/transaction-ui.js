@@ -578,7 +578,9 @@ class TransactionUI {
         let hasVisible = false;
         transactions[date].forEach((t, index) => {
           const isHidden = t.hidden === true;
-          hasVisible = true;
+          if (!isHidden) {
+            hasVisible = true;
+          }
           const transactionDiv = document.createElement("div");
           if (isHidden) {
             transactionDiv.classList.add("hidden-transaction");
@@ -864,7 +866,8 @@ class TransactionUI {
                     settled: true,
                   });
                 }
-                this.showTransactionDetails(date);
+                // Refresh to show today's modal (where transaction was moved)
+                this.showTransactionDetails(todayStr);
                 this.onUpdate();
                 if (this.cloudSync) {
                   this.cloudSync.scheduleCloudSave();
@@ -940,14 +943,20 @@ class TransactionUI {
             settleBtn.setAttribute("tabindex", "0");
             settleBtn.textContent = "Settle";
             const doSettle = () => {
-              this.store.deleteTransaction(u.date, u.index);
+              // Find transaction by ID to avoid stale index issues
+              const transactions = this.store.getTransactions()[u.date] || [];
+              const currentIndex = transactions.findIndex(t => t.id === u.transaction.id);
+              if (currentIndex !== -1) {
+                this.store.deleteTransaction(u.date, currentIndex);
+              }
               this.store.addTransaction(todayString, {
                 amount: u.transaction.amount,
                 type: u.transaction.type,
                 description: u.transaction.description,
                 settled: true,
               });
-              this.showTransactionDetails(date);
+              // Refresh to show today's modal (where transaction was moved)
+              this.showTransactionDetails(todayString);
               this.onUpdate();
               if (this.cloudSync) {
                 this.cloudSync.scheduleCloudSave();
