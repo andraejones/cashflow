@@ -218,7 +218,14 @@ class CloudSync {
   // Synchronous legacy methods for backward compatibility
   encryptValue(value) {
     // For synchronous calls, use legacy method but will be migrated on next async save
-    return btoa(value.split("").reverse().join(""));
+    try {
+      return btoa(value.split("").reverse().join(""));
+    } catch (e) {
+      // Handle non-ASCII characters
+      const utf8Bytes = new TextEncoder().encode(value);
+      const binary = String.fromCharCode(...utf8Bytes);
+      return btoa(binary.split("").reverse().join(""));
+    }
   }
 
   decryptValue(encryptedValue) {

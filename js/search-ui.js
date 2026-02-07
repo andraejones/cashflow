@@ -1,7 +1,7 @@
 // Search UI
 
 class SearchUI {
-  
+
   constructor(store, recurringManager, transactionUI) {
     this.store = store;
     this.recurringManager = recurringManager;
@@ -14,7 +14,7 @@ class SearchUI {
     this.initEventListeners();
   }
 
-  
+
   initEventListeners() {
     document
       .getElementById("searchButton")
@@ -74,7 +74,7 @@ class SearchUI {
       });
   }
 
-  
+
   toggleAdvancedSearch() {
     const advancedControls = document.getElementById("advancedSearchControls");
     const isHidden =
@@ -89,7 +89,7 @@ class SearchUI {
     toggleButton.setAttribute("aria-expanded", isHidden ? "true" : "false");
   }
 
-  
+
   showSearchModal() {
     const modal = document.getElementById("searchModal");
     modal.style.display = "block";
@@ -102,7 +102,7 @@ class SearchUI {
     this.updateActionButtons();
   }
 
-  
+
   changePage(delta) {
     // Guard against division by zero
     if (this.resultsPerPage <= 0) {
@@ -120,7 +120,7 @@ class SearchUI {
     this.updateSearchResults();
   }
 
-  
+
   exportSearchResults() {
     if (this.searchResults.length === 0) {
       if (typeof Utils !== 'undefined' && typeof Utils.showNotification === 'function') {
@@ -148,7 +148,7 @@ class SearchUI {
 
     try {
       const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8" });
-      
+
       if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
         const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
@@ -158,7 +158,7 @@ class SearchUI {
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-        
+
         if (typeof URL.revokeObjectURL === 'function') {
           URL.revokeObjectURL(url);
         }
@@ -179,7 +179,7 @@ class SearchUI {
     }
   }
 
-  
+
   performSearch() {
     const searchTerm = document
       .getElementById("searchInput")
@@ -201,16 +201,16 @@ class SearchUI {
     let maxAmount = Infinity;
     let hasMinAmount = false;
     let hasMaxAmount = false;
-    
+
     const dateFromEl = document.getElementById("dateRangeFrom");
     if (dateFromEl) dateFrom = dateFromEl.value;
-    
+
     const dateToEl = document.getElementById("dateRangeTo");
     if (dateToEl) dateTo = dateToEl.value;
-    
+
     const typeFilterEl = document.getElementById("transactionTypeFilter");
     if (typeFilterEl) typeFilter = typeFilterEl.value;
-    
+
     const minAmountEl = document.getElementById("minAmountFilter");
     if (minAmountEl) {
       const rawMin = minAmountEl.value.trim();
@@ -313,9 +313,9 @@ class SearchUI {
           formattedAmount === searchTerm ||
           `$${formattedAmount}` === searchTerm ||
           `${transaction.type === "income" ? "+" : "-"}${formattedAmount}` ===
-            searchTerm ||
+          searchTerm ||
           `${transaction.type === "income" ? "+" : "-"}$${formattedAmount}` ===
-            searchTerm;
+          searchTerm;
 
         if (descriptionMatch || amountMatch || formattedAmountMatch) {
           foundTransactions.push({
@@ -330,7 +330,7 @@ class SearchUI {
     this.updateSearchResults();
   }
 
-  
+
   updateSearchResults() {
     const searchResults = document.getElementById("searchResults");
     const clearButton = document.getElementById("clearSearchButton");
@@ -376,9 +376,8 @@ class SearchUI {
     }
     const headerDiv = document.createElement("div");
     headerDiv.className = "search-results-header";
-    headerDiv.innerHTML = `Found ${this.totalResults} matching transaction${
-      this.totalResults > 1 ? "s" : ""
-    }`;
+    headerDiv.innerHTML = `Found ${this.totalResults} matching transaction${this.totalResults > 1 ? "s" : ""
+      }`;
     searchResults.appendChild(headerDiv);
     const totalPages = Math.ceil(this.totalResults / this.resultsPerPage);
     const startIdx = (this.currentPage - 1) * this.resultsPerPage;
@@ -396,9 +395,8 @@ class SearchUI {
       const resultDiv = document.createElement("div");
       const [year, month, day] = date.split("-");
       const formattedDate = `${month}/${day}/${year}`;
-      const amountText = `${
-        transaction.type === "income" ? "+" : "-"
-      }$${transaction.amount.toFixed(2)}`;
+      const amountText = `${transaction.type === "income" ? "+" : transaction.type === "balance" ? "=" : "-"
+        }$${transaction.amount.toFixed(2)}`;
 
       resultDiv.className = "search-result-item";
       if (transaction.hidden === true) {
@@ -454,7 +452,7 @@ class SearchUI {
     exportButton.disabled = false;
   }
 
-  
+
   clearSearch() {
     const searchResults = document.getElementById("searchResults");
     const clearButton = document.getElementById("clearSearchButton");

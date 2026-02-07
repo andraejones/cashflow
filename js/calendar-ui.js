@@ -165,8 +165,8 @@ class CalendarUI {
     let runningBalance = summary.startingBalance;
     let runningUnsettledExpense = 0;
 
-    // Calculate the end date of the 30-day unallocated range
-    const unallocatedEndDate = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
+    // Calculate the end date of the 30-day unallocated range (DST-safe)
+    const unallocatedEndDate = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 30);
     const unallocatedEndYear = unallocatedEndDate.getFullYear();
     const unallocatedEndMonth = unallocatedEndDate.getMonth();
     const unallocatedEndDay = unallocatedEndDate.getDate();
@@ -199,7 +199,7 @@ class CalendarUI {
 
     // Now iterate through the next 30 days to find the lowest
     for (let d = 1; d <= 30; d++) {
-      const checkDate = new Date(today.getTime() + d * 24 * 60 * 60 * 1000);
+      const checkDate = new Date(today.getFullYear(), today.getMonth(), today.getDate() + d);
       const dateStr = `${checkDate.getFullYear()}-${(checkDate.getMonth() + 1).toString().padStart(2, "0")}-${checkDate.getDate().toString().padStart(2, "0")}`;
       const dailyTotals = this.calculationService.calculateDailyTotals(dateStr);
 
@@ -328,7 +328,7 @@ class CalendarUI {
     // Show only if the viewed month overlaps with the 30-day window from today
     const todayYear = today.getFullYear();
     const todayMonth = today.getMonth();
-    const thirtyDaysFromNow = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const thirtyDaysFromNow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 30);
 
     // Check if viewed month is in the past (before current month)
     const viewedMonthStart = new Date(year, month, 1);
