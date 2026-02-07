@@ -21,7 +21,8 @@ class CashflowApp {
       () => {
         this.updateUI();
       },
-      this.cloudSync
+      this.cloudSync,
+      this.calculationService
     );
 
     this.searchUI = new SearchUI(

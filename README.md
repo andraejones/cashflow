@@ -8,16 +8,18 @@ Plan and monitor monthly cash movement and debts.
 
 ## Documentation status
 
-Updated for appVersion 2.0.0 on 2026-01-18 (source of truth: `js/transaction-store.js`).
+Updated for appVersion 2.0.0 on 2026-02-06 (source of truth: `js/transaction-store.js`).
 
 ## Features
 
 - Monthly calendar with daily totals and running balance.
 - One-off and recurring transactions (daily to yearly, custom intervals, business-day adjustments).
+- Unsettled expense tracking for one-time expenses with dual balance display (with/without unsettled).
+- Hidden transactions (e.g. debt snowball generated) shown with visual distinction.
 - Debt snowball planner with minimum plus extra payment scheduling.
 - Search with advanced filters and CSV export.
 - Full data import and export (JSON).
-- Optional PIN lock and GitHub Gist cloud sync.
+- Optional PIN lock with FaceID/TouchID biometric unlock and GitHub Gist cloud sync.
 
 ## Calendar star indicators
 
@@ -39,14 +41,14 @@ A star also appears next to the "Notes" link in the monthly summary when notes e
 ## Data storage and privacy
 
 - Local-first: data is stored in browser `localStorage`.
-- If a PIN is set, stored data is encrypted with the current PIN.
+- If a PIN is set, stored data is encrypted with the current PIN. FaceID/TouchID can be used to unlock on supported devices.
 - Optional cloud sync stores the same payload in a private GitHub Gist.
   - Requires a GitHub personal access token with `gist` scope and a Gist ID.
   - Token is encrypted and stored under `github_token_encrypted`; Gist ID under `gist_id`.
 
 ## Data format
 
-The exported JSON schema includes: `transactions`, `monthlyBalances`, `recurringTransactions`, `skippedTransactions`, `debts`, `cashInfusions`, `debtSnowballSettings`, `monthlyNotes`, and metadata fields. See `CLAUDE.md` for localStorage key details.
+The exported JSON schema includes: `transactions`, `monthlyBalances`, `recurringTransactions`, `skippedTransactions`, `movedTransactions`, `debts`, `cashInfusions`, `debtSnowballSettings`, `monthlyNotes`, `_deletedItems`, and metadata fields. See `CLAUDE.md` for localStorage key details.
 
 ## Project structure
 
@@ -62,4 +64,3 @@ The exported JSON schema includes: `transactions`, `monthlyBalances`, `recurring
 - `js/debt-snowball.js`: debt snowball modeling.
 - `js/pin-protection.js`: PIN locking and encryption.
 - `js/utils.js`: date and ID helpers plus notifications.
-- `tests/`: performance and UI/UX test suites.
