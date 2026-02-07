@@ -76,10 +76,11 @@ DOMContentLoaded
 ```
 transactions, monthlyBalances, recurringTransactions, skippedTransactions,
 debts, cashInfusions, debtSnowballSettings, monthlyNotes, movedTransactions,
-pin_hash, github_token_encrypted, gist_id, auto_sync_enabled
+deletedItems, pin_hash, github_token_encrypted, gist_id, auto_sync_enabled,
+webauthn_credential_id, biometric_pin, _device_id, gist_etag,
+local_last_sync, _backup_before_merge
 ```
 
 ## Important Files
 
 - `styles.css` - CSS variables for theming (primary, accent, error colors)
-- `tests/` - Performance and UI/UX test suites
