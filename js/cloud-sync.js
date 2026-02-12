@@ -535,7 +535,7 @@ class CloudSync {
           public: false,
           files: {
             "cashflow_data.json": {
-              content: JSON.stringify(data, null, 2),
+              content: JSON.stringify(data),
             },
           },
         }),
@@ -815,6 +815,21 @@ class CloudSync {
     };
   }
 
+  // Get the full content of a Gist file, fetching via raw_url if truncated
+  async _getGistFileContent(gistFile, token) {
+    if (!gistFile.truncated) {
+      return gistFile.content;
+    }
+    // File was truncated by GitHub API - fetch full content via raw_url
+    const rawResponse = await fetch(gistFile.raw_url, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!rawResponse.ok) {
+      throw new Error(`Failed to fetch full file content: HTTP ${rawResponse.status}`);
+    }
+    return await rawResponse.text();
+  }
+
   // Lightweight check if remote Gist has changed (returns true/false/null)
   async checkForRemoteChanges() {
     if (this._isSyncing) {
@@ -986,7 +1001,8 @@ class CloudSync {
 
           if (gist.files && gist.files["cashflow_data.json"]) {
             try {
-              const remoteData = JSON.parse(gist.files["cashflow_data.json"].content);
+              const fileContent = await this._getGistFileContent(gist.files["cashflow_data.json"], token);
+              const remoteData = JSON.parse(fileContent);
               const localData = dataToSave;
 
               // Create shadow copy of local data before merge for recovery
@@ -1051,7 +1067,7 @@ class CloudSync {
           description: "Cashflow App Data",
           files: {
             "cashflow_data.json": {
-              content: JSON.stringify(dataToSave, null, 2),
+              content: JSON.stringify(dataToSave),
             },
           },
         }),
@@ -1194,7 +1210,7 @@ class CloudSync {
         throw new Error("Gist does not contain valid Cashflow data");
       }
 
-      const content = gist.files["cashflow_data.json"].content;
+      const content = await this._getGistFileContent(gist.files["cashflow_data.json"], token);
 
       try {
         const remoteData = JSON.parse(content);
