@@ -122,9 +122,6 @@ class CalculationService {
       this.recurringManager.applyRecurringTransactions(year, month - 1);
     });
 
-    // Auto-settle expired recurring transactions before balance calculations
-    this.store.autoSettleExpiredRecurring();
-
     let previousBalance = 0;
     allMonths.forEach((monthKey, index) => {
       const [year, month] = monthKey.split("-").map(Number);

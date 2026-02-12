@@ -305,7 +305,7 @@ class CloudSync {
 
 
   async promptForCredentials() {
-    const credentials = this.getCloudCredentials();
+    const credentials = await this.getCloudCredentialsAsync();
     if (credentials.token && credentials.gistId) {
       return credentials;
     }
@@ -463,7 +463,7 @@ class CloudSync {
   }
 
 
-  async scheduleCloudSave() {
+  scheduleCloudSave() {
     if (!this.autoSyncEnabled) {
       return;
     }
@@ -471,15 +471,16 @@ class CloudSync {
     if (this._isSyncing) {
       return;
     }
-    const { token, gistId } = await this.getCloudCredentialsAsync();
-    if (!token || !gistId) {
-      return;
-    }
 
     clearTimeout(this.saveTimeout);
     this.showPendingMessage();
 
-    this.saveTimeout = setTimeout(() => {
+    this.saveTimeout = setTimeout(async () => {
+      const { token, gistId } = await this.getCloudCredentialsAsync();
+      if (!token || !gistId) {
+        this.clearPendingMessage();
+        return;
+      }
       this.saveToCloud()
         .catch(err => console.error("Cloud save failed:", err))
         .finally(() => {

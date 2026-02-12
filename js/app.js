@@ -149,6 +149,7 @@ class CashflowApp {
       this._pendingUpdateUI = true;
       return;
     }
+    this.store.autoSettleExpiredRecurring();
     this.calendarUI.generateCalendar();
   }
 

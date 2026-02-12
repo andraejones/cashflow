@@ -924,6 +924,9 @@ class TransactionStore {
     if (this.transactions[date] && this.transactions[date][index]) {
       this.transactions[date][index].settled = isSettled;
       this.transactions[date][index]._lastModified = new Date().toISOString();
+      if (this.transactions[date][index].recurringId) {
+        this.transactions[date][index].modifiedInstance = true;
+      }
       this.debouncedSave();
       return true;
     }
@@ -936,6 +939,12 @@ class TransactionStore {
     Object.keys(this.transactions).forEach((date) => {
       this.transactions[date].forEach((t, index) => {
         if (t.settled === false && t.type === "expense") {
+          if (t.recurringId) {
+            const skippedIds = this.skippedTransactions[date];
+            if (skippedIds && skippedIds.includes(t.recurringId)) {
+              return;
+            }
+          }
           results.push({ date, index, transaction: t });
         }
       });
@@ -953,6 +962,10 @@ class TransactionStore {
     Object.keys(this.transactions).forEach((date) => {
       this.transactions[date].forEach((t) => {
         if (t.recurringId && t.type === "expense") {
+          const skippedIds = this.skippedTransactions[date];
+          if (skippedIds && skippedIds.includes(t.recurringId)) {
+            return;
+          }
           if (!recurringDates[t.recurringId]) {
             recurringDates[t.recurringId] = [];
           }

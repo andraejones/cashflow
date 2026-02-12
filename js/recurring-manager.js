@@ -1347,8 +1347,8 @@ class RecurringTransactionManager {
       if (originalDateString) {
         newTransaction.originalDate = originalDateString;
       }
-      if (rt.settled === false) {
-        newTransaction.settled = false;
+      if (rt.type === "expense") {
+        newTransaction.settled = rt.settled !== false;
       }
 
       transactions[dateString].push(newTransaction);
@@ -1620,6 +1620,10 @@ class RecurringTransactionManager {
           recurringTransaction.variableType;
         newRecurringTransaction.variablePercentage =
           recurringTransaction.variablePercentage;
+      }
+
+      if (recurringTransaction.settled !== undefined) {
+        newRecurringTransaction.settled = recurringTransaction.settled;
       }
 
       if (recurringTransaction.endDate) {
