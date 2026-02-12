@@ -149,7 +149,6 @@ class TransactionUI {
 
   updateSettledToggleVisibility() {
     const type = document.getElementById("transactionType").value;
-    const recurrence = document.getElementById("transactionRecurrence").value;
     const label = document.getElementById("settledToggleLabel");
     if (label) {
       label.style.display = (type === "expense") ? "" : "none";
@@ -864,11 +863,6 @@ class TransactionUI {
                 // Recurring: settle/unsettle in-place, preserve with modifiedInstance
                 const newSettled = t.settled === false ? true : false;
                 this.store.setTransactionSettled(date, index, newSettled);
-                const txns = this.store.getTransactions()[date];
-                if (txns && txns[index]) {
-                  txns[index].modifiedInstance = true;
-                }
-                this.store.debouncedSave();
                 this.showTransactionDetails(date);
                 this.onUpdate();
                 if (this.cloudSync) {
@@ -978,8 +972,6 @@ class TransactionUI {
                   return;
                 }
                 this.store.setTransactionSettled(u.date, currentIndex, true);
-                transactions[currentIndex].modifiedInstance = true;
-                this.store.debouncedSave();
               } else {
                 // One-time: delete from original date, create settled copy on today
                 const transactions = this.store.getTransactions()[u.date] || [];
@@ -1291,13 +1283,17 @@ class TransactionUI {
           // Store move info
           this.store.moveTransaction(transaction.recurringId, date, newDate);
           // Create one-time at new date with edited fields
-          this.store.addTransaction(newDate, {
+          const movedTransaction = {
             amount,
             type,
             description,
             movedFrom: date,
             originalRecurringId: transaction.recurringId
-          });
+          };
+          if (transaction.settled !== undefined) {
+            movedTransaction.settled = transaction.settled;
+          }
+          this.store.addTransaction(newDate, movedTransaction);
         } else if (transaction.movedFrom && transaction.originalRecurringId) {
           // One-time that was previously moved from a recurring
           if (newDate === transaction.movedFrom) {
@@ -1315,13 +1311,17 @@ class TransactionUI {
               newDate
             );
             this.store.deleteTransaction(date, index);
-            this.store.addTransaction(newDate, {
+            const reMovedTransaction = {
               amount,
               type,
               description,
               movedFrom: transaction.movedFrom,
               originalRecurringId: transaction.originalRecurringId
-            });
+            };
+            if (transaction.settled !== undefined) {
+              reMovedTransaction.settled = transaction.settled;
+            }
+            this.store.addTransaction(newDate, reMovedTransaction);
           }
         } else {
           // Regular one-time transaction
@@ -1538,8 +1538,8 @@ class TransactionUI {
           description: description,
           recurringId: recurringId,
         };
-        if (newRecurringTransaction.settled === false) {
-          firstInstance.settled = false;
+        if (type === "expense") {
+          firstInstance.settled = newRecurringTransaction.settled !== false;
         }
 
         this.store.addTransaction(date, firstInstance);
