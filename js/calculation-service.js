@@ -122,6 +122,9 @@ class CalculationService {
       this.recurringManager.applyRecurringTransactions(year, month - 1);
     });
 
+    // Auto-settle expired recurring transactions before balance calculations
+    this.store.autoSettleExpiredRecurring();
+
     let previousBalance = 0;
     allMonths.forEach((monthKey, index) => {
       const [year, month] = monthKey.split("-").map(Number);
@@ -222,7 +225,7 @@ class CalculationService {
             income = this.roundToCents(income + t.amount);
           } else if (t.type === "expense") {
             expense = this.roundToCents(expense + t.amount);
-            if (t.settled === false && !t.recurringId) {
+            if (t.settled === false) {
               unsettledExpense = this.roundToCents(unsettledExpense + t.amount);
             }
           }

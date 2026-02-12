@@ -935,12 +935,57 @@ class TransactionStore {
     const results = [];
     Object.keys(this.transactions).forEach((date) => {
       this.transactions[date].forEach((t, index) => {
-        if (t.settled === false && t.type === "expense" && !t.recurringId) {
+        if (t.settled === false && t.type === "expense") {
           results.push({ date, index, transaction: t });
         }
       });
     });
     return results;
+  }
+
+
+  autoSettleExpiredRecurring() {
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+
+    // Build map of recurringId → sorted list of dates where it appears
+    const recurringDates = {};
+    Object.keys(this.transactions).forEach((date) => {
+      this.transactions[date].forEach((t) => {
+        if (t.recurringId && t.type === "expense") {
+          if (!recurringDates[t.recurringId]) {
+            recurringDates[t.recurringId] = [];
+          }
+          recurringDates[t.recurringId].push(date);
+        }
+      });
+    });
+
+    // Sort each recurring ID's dates
+    Object.keys(recurringDates).forEach((id) => {
+      recurringDates[id].sort();
+    });
+
+    let changed = false;
+    Object.keys(this.transactions).forEach((date) => {
+      this.transactions[date].forEach((t) => {
+        if (t.settled === false && t.recurringId && t.type === "expense") {
+          const dates = recurringDates[t.recurringId] || [];
+          // Check if a later occurrence exists on or before today
+          const hasLaterOccurrence = dates.some((d) => d > date && d <= todayStr);
+          if (hasLaterOccurrence) {
+            t.settled = true;
+            t.modifiedInstance = true;
+            t._lastModified = new Date().toISOString();
+            changed = true;
+          }
+        }
+      });
+    });
+
+    if (changed) {
+      this.debouncedSave();
+    }
   }
 
 

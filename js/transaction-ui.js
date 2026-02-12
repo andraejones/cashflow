@@ -152,7 +152,7 @@ class TransactionUI {
     const recurrence = document.getElementById("transactionRecurrence").value;
     const label = document.getElementById("settledToggleLabel");
     if (label) {
-      label.style.display = (type === "expense" && recurrence === "once") ? "" : "none";
+      label.style.display = (type === "expense") ? "" : "none";
     }
   }
 
@@ -645,7 +645,7 @@ class TransactionUI {
             amountSpan.classList.add("skipped");
           }
           amountSpan.style.opacity = isSkipped ? "0.5" : "1";
-          const isUnsettled = !isRecurring && normalizedType === "expense" && t.settled === false;
+          const isUnsettled = normalizedType === "expense" && t.settled === false;
           if (isUnsettled) {
             transactionDiv.classList.add("unsettled-transaction");
           }
@@ -710,9 +710,9 @@ class TransactionUI {
             transactionDiv.appendChild(skipBtn);
           }
 
-          // Add Settle/Unsettle button for one-time expenses
+          // Add Settle/Unsettle button for expenses
           let settleBtn = null;
-          if (!isRecurring && normalizedType === "expense") {
+          if (normalizedType === "expense" && (!isRecurring || t.settled !== undefined)) {
             settleBtn = document.createElement("span");
             settleBtn.className = "settle-btn";
             settleBtn.setAttribute("role", "button");
@@ -860,8 +860,23 @@ class TransactionUI {
 
           if (settleBtn) {
             const toggleSettled = () => {
-              if (t.settled === false) {
-                // Settling: move to today if not already there
+              if (isRecurring) {
+                // Recurring: settle/unsettle in-place, preserve with modifiedInstance
+                const newSettled = t.settled === false ? true : false;
+                this.store.setTransactionSettled(date, index, newSettled);
+                const txns = this.store.getTransactions()[date];
+                if (txns && txns[index]) {
+                  txns[index].modifiedInstance = true;
+                }
+                this.store.debouncedSave();
+                this.showTransactionDetails(date);
+                this.onUpdate();
+                if (this.cloudSync) {
+                  this.cloudSync.scheduleCloudSave();
+                }
+                Utils.showNotification(newSettled ? "Transaction settled" : "Transaction unsettled");
+              } else if (t.settled === false) {
+                // One-time settling: move to today if not already there
                 const now = new Date();
                 const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
                 if (date === todayStr) {
@@ -875,7 +890,6 @@ class TransactionUI {
                     settled: true,
                   });
                 }
-                // Refresh to show today's modal (where transaction was moved)
                 this.showTransactionDetails(todayStr);
                 this.onUpdate();
                 if (this.cloudSync) {
@@ -883,7 +897,7 @@ class TransactionUI {
                 }
                 Utils.showNotification("Transaction settled");
               } else {
-                // Unsettling: keep in place
+                // One-time unsettling: keep in place
                 this.store.setTransactionSettled(date, index, false);
                 this.showTransactionDetails(date);
                 this.onUpdate();
@@ -927,8 +941,8 @@ class TransactionUI {
           unsettled.forEach((u) => {
             const div = document.createElement("div");
             div.className = "carried-forward-transaction";
+            const isRecurringItem = !!u.transaction.recurringId;
 
-            const displayDate = Utils.formatDisplayDate(u.date);
             const shortDate = this.formatShortDisplayDate(u.date);
 
             const amountSpan = document.createElement("span");
@@ -952,22 +966,37 @@ class TransactionUI {
             settleBtn.setAttribute("tabindex", "0");
             settleBtn.textContent = "Settle";
             const doSettle = () => {
-              // Find transaction by ID to avoid stale index issues
-              const transactions = this.store.getTransactions()[u.date] || [];
-              const currentIndex = transactions.findIndex(t => t.id === u.transaction.id);
-              if (currentIndex === -1) {
-                Utils.showNotification("Error: Original transaction not found", "error");
-                this.showTransactionDetails(todayString);
-                return;
+              if (isRecurringItem) {
+                // Recurring: settle in-place, mark as modified instance
+                const transactions = this.store.getTransactions()[u.date] || [];
+                const currentIndex = transactions.findIndex(t =>
+                  t.recurringId === u.transaction.recurringId && t.settled === false
+                );
+                if (currentIndex === -1) {
+                  Utils.showNotification("Error: Original transaction not found", "error");
+                  this.showTransactionDetails(todayString);
+                  return;
+                }
+                this.store.setTransactionSettled(u.date, currentIndex, true);
+                transactions[currentIndex].modifiedInstance = true;
+                this.store.debouncedSave();
+              } else {
+                // One-time: delete from original date, create settled copy on today
+                const transactions = this.store.getTransactions()[u.date] || [];
+                const currentIndex = transactions.findIndex(t => t.id === u.transaction.id);
+                if (currentIndex === -1) {
+                  Utils.showNotification("Error: Original transaction not found", "error");
+                  this.showTransactionDetails(todayString);
+                  return;
+                }
+                this.store.deleteTransaction(u.date, currentIndex);
+                this.store.addTransaction(todayString, {
+                  amount: u.transaction.amount,
+                  type: u.transaction.type,
+                  description: u.transaction.description,
+                  settled: true,
+                });
               }
-              this.store.deleteTransaction(u.date, currentIndex);
-              this.store.addTransaction(todayString, {
-                amount: u.transaction.amount,
-                type: u.transaction.type,
-                description: u.transaction.description,
-                settled: true,
-              });
-              // Refresh to show today's modal (where transaction was moved)
               this.showTransactionDetails(todayString);
               this.onUpdate();
               if (this.cloudSync) {
@@ -984,45 +1013,73 @@ class TransactionUI {
             });
             div.appendChild(settleBtn);
 
-            const deleteBtn = document.createElement("span");
-            deleteBtn.className = "delete-btn";
-            deleteBtn.setAttribute("role", "button");
-            deleteBtn.setAttribute("tabindex", "0");
-            deleteBtn.setAttribute(
-              "aria-label",
-              `Delete expense of $${u.transaction.amount.toFixed(2)}${desc ? " " + desc : ""}`
-            );
-            deleteBtn.textContent = "Delete";
-            const doDelete = async () => {
-              const shouldDelete = await Utils.showModalConfirm(
-                `Are you sure you want to delete this unsettled transaction?\n\n${desc ? desc + " – " : ""}-$${u.transaction.amount.toFixed(2)}`,
-                "Delete Transaction",
-                { confirmText: "Delete", cancelText: "Cancel" }
-              );
-              if (!shouldDelete) return;
-              const transactions = this.store.getTransactions()[u.date] || [];
-              const currentIndex = transactions.findIndex(t => t.id === u.transaction.id);
-              if (currentIndex === -1) {
-                Utils.showNotification("Error: Original transaction not found", "error");
+            if (isRecurringItem) {
+              // Recurring: show Skip button instead of Delete
+              const skipBtn = document.createElement("span");
+              skipBtn.className = "skip-btn";
+              skipBtn.setAttribute("role", "button");
+              skipBtn.setAttribute("tabindex", "0");
+              skipBtn.setAttribute("aria-label", `Skip recurring expense`);
+              skipBtn.textContent = "Skip";
+              const doSkip = () => {
+                this.recurringManager.toggleSkipTransaction(u.date, u.transaction.recurringId);
                 this.showTransactionDetails(todayString);
-                return;
-              }
-              this.store.deleteTransaction(u.date, currentIndex);
-              this.showTransactionDetails(todayString);
-              this.onUpdate();
-              if (this.cloudSync) {
-                this.cloudSync.scheduleCloudSave();
-              }
-              Utils.showNotification("Transaction deleted");
-            };
-            deleteBtn.addEventListener("click", doDelete);
-            deleteBtn.addEventListener("keydown", (event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                doDelete();
-              }
-            });
-            div.appendChild(deleteBtn);
+                this.onUpdate();
+                if (this.cloudSync) {
+                  this.cloudSync.scheduleCloudSave();
+                }
+                Utils.showNotification("Transaction skipped");
+              };
+              skipBtn.addEventListener("click", doSkip);
+              skipBtn.addEventListener("keydown", (event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  doSkip();
+                }
+              });
+              div.appendChild(skipBtn);
+            } else {
+              // One-time: show Delete button
+              const deleteBtn = document.createElement("span");
+              deleteBtn.className = "delete-btn";
+              deleteBtn.setAttribute("role", "button");
+              deleteBtn.setAttribute("tabindex", "0");
+              deleteBtn.setAttribute(
+                "aria-label",
+                `Delete expense of $${u.transaction.amount.toFixed(2)}${desc ? " " + desc : ""}`
+              );
+              deleteBtn.textContent = "Delete";
+              const doDelete = async () => {
+                const shouldDelete = await Utils.showModalConfirm(
+                  `Are you sure you want to delete this unsettled transaction?\n\n${desc ? desc + " – " : ""}-$${u.transaction.amount.toFixed(2)}`,
+                  "Delete Transaction",
+                  { confirmText: "Delete", cancelText: "Cancel" }
+                );
+                if (!shouldDelete) return;
+                const transactions = this.store.getTransactions()[u.date] || [];
+                const currentIndex = transactions.findIndex(t => t.id === u.transaction.id);
+                if (currentIndex === -1) {
+                  Utils.showNotification("Error: Original transaction not found", "error");
+                  this.showTransactionDetails(todayString);
+                  return;
+                }
+                this.store.deleteTransaction(u.date, currentIndex);
+                this.showTransactionDetails(todayString);
+                this.onUpdate();
+                if (this.cloudSync) {
+                  this.cloudSync.scheduleCloudSave();
+                }
+                Utils.showNotification("Transaction deleted");
+              };
+              deleteBtn.addEventListener("click", doDelete);
+              deleteBtn.addEventListener("keydown", (event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  doDelete();
+                }
+              });
+              div.appendChild(deleteBtn);
+            }
 
             modalTransactions.appendChild(div);
           });
@@ -1466,6 +1523,9 @@ class TransactionUI {
           description: description,
           recurrence: recurrence,
         };
+        if (type === "expense") {
+          newRecurringTransaction.settled = document.getElementById("transactionSettled").checked;
+        }
         this.addAdvancedRecurringOptions(newRecurringTransaction);
 
         const recurringId = this.store.addRecurringTransaction(
@@ -1478,6 +1538,9 @@ class TransactionUI {
           description: description,
           recurringId: recurringId,
         };
+        if (newRecurringTransaction.settled === false) {
+          firstInstance.settled = false;
+        }
 
         this.store.addTransaction(date, firstInstance);
       }
