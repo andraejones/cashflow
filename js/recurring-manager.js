@@ -1347,6 +1347,9 @@ class RecurringTransactionManager {
       if (originalDateString) {
         newTransaction.originalDate = originalDateString;
       }
+      if (rt.settled === false) {
+        newTransaction.settled = false;
+      }
 
       transactions[dateString].push(newTransaction);
     }
