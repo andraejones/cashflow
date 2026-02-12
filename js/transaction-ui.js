@@ -955,9 +955,12 @@ class TransactionUI {
               // Find transaction by ID to avoid stale index issues
               const transactions = this.store.getTransactions()[u.date] || [];
               const currentIndex = transactions.findIndex(t => t.id === u.transaction.id);
-              if (currentIndex !== -1) {
-                this.store.deleteTransaction(u.date, currentIndex);
+              if (currentIndex === -1) {
+                Utils.showNotification("Error: Original transaction not found", "error");
+                this.showTransactionDetails(todayString);
+                return;
               }
+              this.store.deleteTransaction(u.date, currentIndex);
               this.store.addTransaction(todayString, {
                 amount: u.transaction.amount,
                 type: u.transaction.type,
@@ -980,6 +983,46 @@ class TransactionUI {
               }
             });
             div.appendChild(settleBtn);
+
+            const deleteBtn = document.createElement("span");
+            deleteBtn.className = "delete-btn";
+            deleteBtn.setAttribute("role", "button");
+            deleteBtn.setAttribute("tabindex", "0");
+            deleteBtn.setAttribute(
+              "aria-label",
+              `Delete expense of $${u.transaction.amount.toFixed(2)}${desc ? " " + desc : ""}`
+            );
+            deleteBtn.textContent = "Delete";
+            const doDelete = async () => {
+              const shouldDelete = await Utils.showModalConfirm(
+                `Are you sure you want to delete this unsettled transaction?\n\n${desc ? desc + " – " : ""}-$${u.transaction.amount.toFixed(2)}`,
+                "Delete Transaction",
+                { confirmText: "Delete", cancelText: "Cancel" }
+              );
+              if (!shouldDelete) return;
+              const transactions = this.store.getTransactions()[u.date] || [];
+              const currentIndex = transactions.findIndex(t => t.id === u.transaction.id);
+              if (currentIndex === -1) {
+                Utils.showNotification("Error: Original transaction not found", "error");
+                this.showTransactionDetails(todayString);
+                return;
+              }
+              this.store.deleteTransaction(u.date, currentIndex);
+              this.showTransactionDetails(todayString);
+              this.onUpdate();
+              if (this.cloudSync) {
+                this.cloudSync.scheduleCloudSave();
+              }
+              Utils.showNotification("Transaction deleted");
+            };
+            deleteBtn.addEventListener("click", doDelete);
+            deleteBtn.addEventListener("keydown", (event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                doDelete();
+              }
+            });
+            div.appendChild(deleteBtn);
 
             modalTransactions.appendChild(div);
           });

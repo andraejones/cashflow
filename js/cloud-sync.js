@@ -718,36 +718,40 @@ class CloudSync {
     const localDeleted = localData._deletedItems || {};
     const remoteDeleted = remoteData._deletedItems || {};
 
-    // Combine deleted IDs
+    // Extract plain IDs from deleted item objects ({ id, deletedAt } or plain strings)
+    const extractIds = (items) => (items || []).map(d => typeof d === 'string' ? d : d.id).filter(Boolean);
+    const deletedTransactionIds = [...new Set([...extractIds(localDeleted.transactions), ...extractIds(remoteDeleted.transactions)])];
+    const deletedRecurringIds = [...new Set([...extractIds(localDeleted.recurringTransactions), ...extractIds(remoteDeleted.recurringTransactions)])];
+    const deletedDebtIds = [...new Set([...extractIds(localDeleted.debts), ...extractIds(remoteDeleted.debts)])];
+    const deletedCashInfusionIds = [...new Set([...extractIds(localDeleted.cashInfusions), ...extractIds(remoteDeleted.cashInfusions)])];
+
+    // Deduplicate full deleted item objects (preserving deletedAt for pruning)
+    const dedupeDeletedItems = (items) => {
+      const seen = new Set();
+      return (items || []).filter(d => {
+        const id = typeof d === 'string' ? d : d.id;
+        if (!id || seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      });
+    };
     const deletedItems = {
-      transactions: [...new Set([
-        ...(localDeleted.transactions || []),
-        ...(remoteDeleted.transactions || [])
-      ])],
-      recurringTransactions: [...new Set([
-        ...(localDeleted.recurringTransactions || []),
-        ...(remoteDeleted.recurringTransactions || [])
-      ])],
-      debts: [...new Set([
-        ...(localDeleted.debts || []),
-        ...(remoteDeleted.debts || [])
-      ])],
-      cashInfusions: [...new Set([
-        ...(localDeleted.cashInfusions || []),
-        ...(remoteDeleted.cashInfusions || [])
-      ])]
+      transactions: dedupeDeletedItems([...(localDeleted.transactions || []), ...(remoteDeleted.transactions || [])]),
+      recurringTransactions: dedupeDeletedItems([...(localDeleted.recurringTransactions || []), ...(remoteDeleted.recurringTransactions || [])]),
+      debts: dedupeDeletedItems([...(localDeleted.debts || []), ...(remoteDeleted.debts || [])]),
+      cashInfusions: dedupeDeletedItems([...(localDeleted.cashInfusions || []), ...(remoteDeleted.cashInfusions || [])])
     };
 
     const merged = {
       transactions: this._mergeTransactions(
         localData.transactions,
         remoteData.transactions,
-        deletedItems.transactions
+        deletedTransactionIds
       ),
       recurringTransactions: this._mergeById(
         localData.recurringTransactions || [],
         remoteData.recurringTransactions || [],
-        deletedItems.recurringTransactions
+        deletedRecurringIds
       ),
       skippedTransactions: this._mergeSkippedTransactions(
         localData.skippedTransactions,
@@ -760,12 +764,12 @@ class CloudSync {
       debts: this._mergeById(
         localData.debts || [],
         remoteData.debts || [],
-        deletedItems.debts
+        deletedDebtIds
       ),
       cashInfusions: this._mergeById(
         localData.cashInfusions || [],
         remoteData.cashInfusions || [],
-        deletedItems.cashInfusions
+        deletedCashInfusionIds
       ),
       monthlyNotes: this._mergeMonthlyNotes(
         localData.monthlyNotes,
@@ -779,7 +783,7 @@ class CloudSync {
       ),
       // monthlyBalances are derived data - will be recalculated
       monthlyBalances: {},
-      // Track deletions for future merges
+      // Track deletions for future merges (full objects for deletedAt pruning)
       _deletedItems: deletedItems,
       lastUpdated: new Date().toISOString(),
       appVersion: "2.0.0"
