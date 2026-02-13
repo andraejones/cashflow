@@ -363,6 +363,20 @@ class TransactionStore {
   }
 
 
+  _filterPersistedTransactions(transactions) {
+    const filtered = {};
+    for (const date in transactions) {
+      const kept = transactions[date].filter(t =>
+        !t.recurringId || t.modifiedInstance || t.movedFrom !== undefined
+      );
+      if (kept.length > 0) {
+        filtered[date] = kept;
+      }
+    }
+    return filtered;
+  }
+
+
   saveData(isDataModified = true) {
     // Cancel any pending debounced save since we're saving now
     if (this._saveDebounceTimer) {
@@ -387,7 +401,7 @@ class TransactionStore {
 
       this.storage.setItem(
         "transactions",
-        encrypt(JSON.stringify(this.transactions))
+        encrypt(JSON.stringify(this._filterPersistedTransactions(this.transactions)))
       );
       this.storage.setItem(
         "monthlyBalances",
@@ -1004,7 +1018,7 @@ class TransactionStore {
 
   exportData() {
     return {
-      transactions: this.transactions,
+      transactions: this._filterPersistedTransactions(this.transactions),
       monthlyBalances: this.monthlyBalances,
       recurringTransactions: this.recurringTransactions,
       skippedTransactions: this.skippedTransactions,
