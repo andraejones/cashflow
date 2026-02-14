@@ -163,7 +163,15 @@ class CalendarUI {
       calendarDays.appendChild(day);
     }
     let runningBalance = summary.startingBalance;
+    // Pre-compute unsettled expense carryover from prior months
     let runningUnsettledExpense = 0;
+    const monthStartStr = `${year}-${(month + 1).toString().padStart(2, "0")}-01`;
+    const allUnsettled = this.store.getUnsettledTransactions();
+    for (const u of allUnsettled) {
+      if (u.date < monthStartStr) {
+        runningUnsettledExpense += u.transaction.amount;
+      }
+    }
 
     // Calculate the end date of the 30-day unallocated range (DST-safe)
     const unallocatedEndDate = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 30);
@@ -284,6 +292,7 @@ class CalendarUI {
       const hasMoveAnomaly = this.store.hasMoveAnomaly(dateString);
 
       const isCurrentDay = year === today.getFullYear() && month === today.getMonth() && i === today.getDate();
+      const isPastOrToday = dateString <= todayStr;
 
       day.querySelector(".day-content").innerHTML = `
         ${dailyTotals.income > 0
@@ -294,7 +303,7 @@ class CalendarUI {
           ? `<div class="expense">-${dailyTotals.expense.toFixed(2)}</div>`
           : ""
         }
-        ${balanceWithoutUnsettled !== null && isCurrentDay
+        ${balanceWithoutUnsettled !== null && isPastOrToday
           ? `<div class="balance-without-unsettled">${balanceWithoutUnsettled.toFixed(2)}</div>`
           : ""
         }
