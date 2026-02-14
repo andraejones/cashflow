@@ -870,21 +870,9 @@ class TransactionUI {
                 }
                 Utils.showNotification(newSettled ? "Transaction settled" : "Transaction unsettled");
               } else if (t.settled === false) {
-                // One-time settling: move to today if not already there
-                const now = new Date();
-                const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-                if (date === todayStr) {
-                  this.store.setTransactionSettled(date, index, true);
-                } else {
-                  this.store.deleteTransaction(date, index);
-                  this.store.addTransaction(todayStr, {
-                    amount: t.amount,
-                    type: t.type,
-                    description: t.description,
-                    settled: true,
-                  });
-                }
-                this.showTransactionDetails(todayStr);
+                // One-time settling: settle in-place on viewed date
+                this.store.setTransactionSettled(date, index, true);
+                this.showTransactionDetails(date);
                 this.onUpdate();
                 if (this.cloudSync) {
                   this.cloudSync.scheduleCloudSave();
@@ -919,12 +907,12 @@ class TransactionUI {
         modalTransactions.innerHTML = "<p>No transactions for this date.</p>";
       }
 
-      // Show carried-forward unsettled transactions on today
+      // Show carried-forward unsettled transactions on past/present dates
       const today = new Date();
       const todayString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-      if (date === todayString) {
+      if (date <= todayString) {
         const unsettled = this.store.getUnsettledTransactions().filter(
-          (u) => u.date < todayString
+          (u) => u.date < date
         );
         if (unsettled.length > 0) {
           const header = document.createElement("div");
@@ -968,28 +956,28 @@ class TransactionUI {
                 );
                 if (currentIndex === -1) {
                   Utils.showNotification("Error: Original transaction not found", "error");
-                  this.showTransactionDetails(todayString);
+                  this.showTransactionDetails(date);
                   return;
                 }
                 this.store.setTransactionSettled(u.date, currentIndex, true);
               } else {
-                // One-time: delete from original date, create settled copy on today
+                // One-time: delete from original date, create settled copy on viewed date
                 const transactions = this.store.getTransactions()[u.date] || [];
                 const currentIndex = transactions.findIndex(t => t.id === u.transaction.id);
                 if (currentIndex === -1) {
                   Utils.showNotification("Error: Original transaction not found", "error");
-                  this.showTransactionDetails(todayString);
+                  this.showTransactionDetails(date);
                   return;
                 }
                 this.store.deleteTransaction(u.date, currentIndex);
-                this.store.addTransaction(todayString, {
+                this.store.addTransaction(date, {
                   amount: u.transaction.amount,
                   type: u.transaction.type,
                   description: u.transaction.description,
                   settled: true,
                 });
               }
-              this.showTransactionDetails(todayString);
+              this.showTransactionDetails(date);
               this.onUpdate();
               if (this.cloudSync) {
                 this.cloudSync.scheduleCloudSave();
@@ -1015,7 +1003,7 @@ class TransactionUI {
               skipBtn.textContent = "Skip";
               const doSkip = () => {
                 this.recurringManager.toggleSkipTransaction(u.date, u.transaction.recurringId);
-                this.showTransactionDetails(todayString);
+                this.showTransactionDetails(date);
                 this.onUpdate();
                 if (this.cloudSync) {
                   this.cloudSync.scheduleCloudSave();
@@ -1052,11 +1040,11 @@ class TransactionUI {
                 const currentIndex = transactions.findIndex(t => t.id === u.transaction.id);
                 if (currentIndex === -1) {
                   Utils.showNotification("Error: Original transaction not found", "error");
-                  this.showTransactionDetails(todayString);
+                  this.showTransactionDetails(date);
                   return;
                 }
                 this.store.deleteTransaction(u.date, currentIndex);
-                this.showTransactionDetails(todayString);
+                this.showTransactionDetails(date);
                 this.onUpdate();
                 if (this.cloudSync) {
                   this.cloudSync.scheduleCloudSave();

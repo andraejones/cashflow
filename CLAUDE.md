@@ -51,13 +51,15 @@ DOMContentLoaded
 - `movedTransactions`: Internal tracking for transaction repositioning
 - `debts`, `cashInfusions`, `monthlyNotes`, `debtSnowballSettings`
 
+Settled/unsettled support: `setTransactionSettled(date, index, isSettled)` toggles expense settlement status. `getUnsettledTransactions()` returns expenses marked `settled: false` that carry forward until resolved.
+
 **RecurringTransactionManager** (`recurring-manager.js`) - Expands recurring transactions into specific dates. Handles complex recurrence patterns: standard intervals, custom intervals, day-specific rules, business day adjustments, and variable amounts.
 
 **CalculationService** (`calculation-service.js`) - Computes daily running balances and monthly summaries with caching.
 
-**CalendarUI** (`calendar-ui.js`) - Renders monthly calendar grid with daily balances, month navigation, and highlighting (lowest balance, negative balance, unallocated ranges).
+**CalendarUI** (`calendar-ui.js`) - Renders monthly calendar grid with daily balances, month navigation, and highlighting (lowest balance, negative balance, unallocated ranges). On the current day, displays a secondary "balance without unsettled" figure when unsettled expenses exist.
 
-**TransactionUI** (`transaction-ui.js`) - Add/edit transaction modals and recurrence form UI.
+**TransactionUI** (`transaction-ui.js`) - Add/edit transaction modals and recurrence form UI. Supports settle/unsettle toggling for one-time expenses and displays carried-forward unsettled transactions on today's date.
 
 **DebtSnowballUI** (`debt-snowball.js`) - Debt entry management, snowball payment generation, and plan timeline.
 
@@ -84,3 +86,5 @@ local_last_sync, _backup_before_merge
 ## Important Files
 
 - `styles.css` - CSS variables for theming (primary, accent, error colors)
+- `README.md` - Project documentation and feature overview
+- `scripts/verify-logic.js` - Standalone logic verification utility
