@@ -1,43 +1,5 @@
 // Debt snowball UI
 
-const DAY_SPECIFIC_OPTIONS = [
-  { value: "1-0", label: "First Sunday" },
-  { value: "1-1", label: "First Monday" },
-  { value: "1-2", label: "First Tuesday" },
-  { value: "1-3", label: "First Wednesday" },
-  { value: "1-4", label: "First Thursday" },
-  { value: "1-5", label: "First Friday" },
-  { value: "1-6", label: "First Saturday" },
-  { value: "2-0", label: "Second Sunday" },
-  { value: "2-1", label: "Second Monday" },
-  { value: "2-2", label: "Second Tuesday" },
-  { value: "2-3", label: "Second Wednesday" },
-  { value: "2-4", label: "Second Thursday" },
-  { value: "2-5", label: "Second Friday" },
-  { value: "2-6", label: "Second Saturday" },
-  { value: "3-0", label: "Third Sunday" },
-  { value: "3-1", label: "Third Monday" },
-  { value: "3-2", label: "Third Tuesday" },
-  { value: "3-3", label: "Third Wednesday" },
-  { value: "3-4", label: "Third Thursday" },
-  { value: "3-5", label: "Third Friday" },
-  { value: "3-6", label: "Third Saturday" },
-  { value: "4-0", label: "Fourth Sunday" },
-  { value: "4-1", label: "Fourth Monday" },
-  { value: "4-2", label: "Fourth Tuesday" },
-  { value: "4-3", label: "Fourth Wednesday" },
-  { value: "4-4", label: "Fourth Thursday" },
-  { value: "4-5", label: "Fourth Friday" },
-  { value: "4-6", label: "Fourth Saturday" },
-  { value: "-1-0", label: "Last Sunday" },
-  { value: "-1-1", label: "Last Monday" },
-  { value: "-1-2", label: "Last Tuesday" },
-  { value: "-1-3", label: "Last Wednesday" },
-  { value: "-1-4", label: "Last Thursday" },
-  { value: "-1-5", label: "Last Friday" },
-  { value: "-1-6", label: "Last Saturday" },
-];
-
 const WEEKDAY_LABELS = [
   "Sunday",
   "Monday",
@@ -46,21 +8,6 @@ const WEEKDAY_LABELS = [
   "Thursday",
   "Friday",
   "Saturday",
-];
-
-const MONTH_LABELS = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
 ];
 
 class DebtSnowballUI {
@@ -89,7 +36,7 @@ class DebtSnowballUI {
     this.planSummary = document.getElementById("snowballPlanSummary");
     this.planList = document.getElementById("snowballPlanList");
     this.lastFocusedElement = null;
-    this.daySpecificOptions = DAY_SPECIFIC_OPTIONS;
+    this.daySpecificOptions = Utils.DAY_SPECIFIC_OPTIONS;
     this.isSyncingDueDate = false;
     this.currentViewYear = null;
     this.currentViewMonth = null;
@@ -354,13 +301,13 @@ class DebtSnowballUI {
 
     this.debtAdvancedOptions.style.display = "block";
     if (recurrenceType === "semi-monthly") {
-      this.addDebtSemiMonthlyOptions(this.debtAdvancedOptions);
+      Utils.buildSemiMonthlyOptions(this.debtAdvancedOptions, 'debt');
     } else if (recurrenceType === "custom") {
-      this.addDebtCustomIntervalOptions(this.debtAdvancedOptions);
+      Utils.buildCustomIntervalOptions(this.debtAdvancedOptions, 'debt');
     }
-    this.addDebtBusinessDayOptions(this.debtAdvancedOptions);
-    this.addDebtVariableAmountOptions(this.debtAdvancedOptions);
-    this.addDebtEndConditionOptions(this.debtAdvancedOptions);
+    Utils.buildBusinessDayOptions(this.debtAdvancedOptions, 'debt');
+    Utils.buildVariableAmountOptions(this.debtAdvancedOptions, 'debt');
+    Utils.buildEndConditionOptions(this.debtAdvancedOptions, 'debt');
   }
 
   toggleMonthlyFields(show) {
@@ -412,288 +359,6 @@ class DebtSnowballUI {
     this.isSyncingDueDate = true;
     this.debtStartDateInput.value = newDate;
     this.isSyncingDueDate = false;
-  }
-
-  addDebtSemiMonthlyOptions(container) {
-    const group = document.createElement("div");
-    group.className = "option-group";
-
-    const label = document.createElement("label");
-    label.setAttribute("for", "debtSemiMonthlyFirstDay");
-    label.textContent = "Days of month:";
-
-    const helpText = document.createElement("span");
-    helpText.className = "help-text";
-    helpText.textContent = "Select two days of the month";
-
-    const firstDaySelect = document.createElement("select");
-    firstDaySelect.id = "debtSemiMonthlyFirstDay";
-    firstDaySelect.name = "debtSemiMonthlyFirstDay";
-    const secondDaySelect = document.createElement("select");
-    secondDaySelect.id = "debtSemiMonthlySecondDay";
-    secondDaySelect.name = "debtSemiMonthlySecondDay";
-
-    for (let i = 1; i <= 28; i++) {
-      const firstOption = document.createElement("option");
-      firstOption.value = i;
-      firstOption.textContent = i;
-      firstDaySelect.appendChild(firstOption);
-
-      const secondOption = document.createElement("option");
-      secondOption.value = i;
-      secondOption.textContent = i;
-      secondDaySelect.appendChild(secondOption);
-    }
-
-    const lastDayOption = document.createElement("option");
-    lastDayOption.value = "last";
-    lastDayOption.textContent = "Last day";
-    secondDaySelect.appendChild(lastDayOption);
-
-    firstDaySelect.value = 1;
-    secondDaySelect.value = 15;
-
-    group.appendChild(label);
-    group.appendChild(document.createElement("br"));
-    group.appendChild(firstDaySelect);
-    group.appendChild(document.createTextNode(" and "));
-    group.appendChild(secondDaySelect);
-    group.appendChild(document.createElement("br"));
-    group.appendChild(helpText);
-
-    container.appendChild(group);
-  }
-
-  addDebtCustomIntervalOptions(container) {
-    const group = document.createElement("div");
-    group.className = "option-group";
-
-    const label = document.createElement("label");
-    label.setAttribute("for", "debtCustomIntervalValue");
-    label.textContent = "Repeat every:";
-
-    const intervalValue = document.createElement("input");
-    intervalValue.type = "number";
-    intervalValue.id = "debtCustomIntervalValue";
-    intervalValue.name = "debtCustomIntervalValue";
-    intervalValue.min = "1";
-    intervalValue.value = "1";
-    intervalValue.style.width = "60px";
-
-    const intervalUnit = document.createElement("select");
-    intervalUnit.id = "debtCustomIntervalUnit";
-    intervalUnit.name = "debtCustomIntervalUnit";
-
-    const unitOptions = [
-      { value: "days", label: "Day(s)" },
-      { value: "weeks", label: "Week(s)" },
-      { value: "months", label: "Month(s)" },
-    ];
-
-    unitOptions.forEach((option) => {
-      const optionElement = document.createElement("option");
-      optionElement.value = option.value;
-      optionElement.textContent = option.label;
-      intervalUnit.appendChild(optionElement);
-    });
-
-    group.appendChild(label);
-    group.appendChild(document.createElement("br"));
-    group.appendChild(intervalValue);
-    group.appendChild(document.createTextNode(" "));
-    group.appendChild(intervalUnit);
-
-    container.appendChild(group);
-  }
-
-  addDebtBusinessDayOptions(container) {
-    const group = document.createElement("div");
-    group.className = "option-group";
-
-    const label = document.createElement("label");
-    label.setAttribute("for", "debtBusinessDayAdjustment");
-    label.textContent = "When transaction falls on weekend:";
-
-    const adjustmentSelect = document.createElement("select");
-    adjustmentSelect.id = "debtBusinessDayAdjustment";
-    adjustmentSelect.name = "debtBusinessDayAdjustment";
-
-    const adjustmentOptions = [
-      { value: "none", label: "No adjustment" },
-      { value: "previous", label: "Move to previous business day" },
-      { value: "next", label: "Move to next business day" },
-      { value: "nearest", label: "Move to nearest business day" },
-    ];
-
-    adjustmentOptions.forEach((option) => {
-      const optionElement = document.createElement("option");
-      optionElement.value = option.value;
-      optionElement.textContent = option.label;
-      adjustmentSelect.appendChild(optionElement);
-    });
-
-    group.appendChild(label);
-    group.appendChild(document.createElement("br"));
-    group.appendChild(adjustmentSelect);
-
-    container.appendChild(group);
-  }
-
-  addDebtVariableAmountOptions(container) {
-    const group = document.createElement("div");
-    group.className = "option-group";
-    const checkboxDiv = document.createElement("div");
-
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.id = "debtVariableAmountCheck";
-    checkbox.name = "debtVariableAmountCheck";
-
-    const checkboxLabel = document.createElement("label");
-    checkboxLabel.setAttribute("for", "debtVariableAmountCheck");
-    checkboxLabel.textContent = "Amount changes over time";
-
-    checkboxDiv.appendChild(checkbox);
-    checkboxDiv.appendChild(checkboxLabel);
-
-    const variableOptions = document.createElement("div");
-    variableOptions.id = "debtVariableAmountOptions";
-    variableOptions.style.display = "none";
-    variableOptions.style.marginTop = "10px";
-
-    const percentLabel = document.createElement("label");
-    percentLabel.setAttribute("for", "debtVariablePercentage");
-    percentLabel.textContent = "Percentage change per occurrence:";
-
-    const percentInput = document.createElement("input");
-    percentInput.type = "number";
-    percentInput.id = "debtVariablePercentage";
-    percentInput.name = "debtVariablePercentage";
-    percentInput.step = "0.1";
-    percentInput.value = "0";
-    percentInput.style.width = "60px";
-
-    const percentSign = document.createElement("span");
-    percentSign.textContent = "%";
-
-    variableOptions.appendChild(percentLabel);
-    variableOptions.appendChild(document.createElement("br"));
-    variableOptions.appendChild(percentInput);
-    variableOptions.appendChild(percentSign);
-
-    checkbox.addEventListener("change", function () {
-      variableOptions.style.display = this.checked ? "block" : "none";
-    });
-
-    group.appendChild(checkboxDiv);
-    group.appendChild(variableOptions);
-
-    container.appendChild(group);
-  }
-
-  addDebtEndConditionOptions(container) {
-    const group = document.createElement("div");
-    group.className = "option-group";
-
-    const label = document.createElement("label");
-    label.textContent = "End condition:";
-    const radioGroup = document.createElement("div");
-    radioGroup.className = "radio-group";
-    const noEndRadioDiv = document.createElement("div");
-
-    const noEndRadio = document.createElement("input");
-    noEndRadio.type = "radio";
-    noEndRadio.id = "debtEndConditionNone";
-    noEndRadio.name = "debtEndCondition";
-    noEndRadio.value = "none";
-    noEndRadio.checked = true;
-
-    const noEndLabel = document.createElement("label");
-    noEndLabel.setAttribute("for", "debtEndConditionNone");
-    noEndLabel.textContent = "No end date";
-
-    noEndRadioDiv.appendChild(noEndRadio);
-    noEndRadioDiv.appendChild(noEndLabel);
-    const endDateRadioDiv = document.createElement("div");
-
-    const endDateRadio = document.createElement("input");
-    endDateRadio.type = "radio";
-    endDateRadio.id = "debtEndConditionDate";
-    endDateRadio.name = "debtEndCondition";
-    endDateRadio.value = "date";
-
-    const endDateLabel = document.createElement("label");
-    endDateLabel.setAttribute("for", "debtEndConditionDate");
-    endDateLabel.textContent = "End by date:";
-
-    const endDateInput = document.createElement("input");
-    endDateInput.type = "date";
-    endDateInput.id = "debtEndDate";
-    endDateInput.name = "debtEndDate";
-    endDateInput.disabled = true;
-
-    endDateRadioDiv.appendChild(endDateRadio);
-    endDateRadioDiv.appendChild(endDateLabel);
-    endDateRadioDiv.appendChild(document.createElement("br"));
-    endDateRadioDiv.appendChild(endDateInput);
-    const endOccurrenceRadioDiv = document.createElement("div");
-
-    const endOccurrenceRadio = document.createElement("input");
-    endOccurrenceRadio.type = "radio";
-    endOccurrenceRadio.id = "debtEndConditionOccurrence";
-    endOccurrenceRadio.name = "debtEndCondition";
-    endOccurrenceRadio.value = "occurrence";
-
-    const endOccurrenceLabel = document.createElement("label");
-    endOccurrenceLabel.setAttribute("for", "debtEndConditionOccurrence");
-    endOccurrenceLabel.textContent = "End after:";
-
-    const endOccurrenceInput = document.createElement("input");
-    endOccurrenceInput.type = "number";
-    endOccurrenceInput.id = "debtMaxOccurrences";
-    endOccurrenceInput.name = "debtMaxOccurrences";
-    endOccurrenceInput.min = "1";
-    endOccurrenceInput.value = "12";
-    endOccurrenceInput.style.width = "60px";
-    endOccurrenceInput.disabled = true;
-
-    const occurrencesText = document.createElement("span");
-    occurrencesText.textContent = " occurrences";
-
-    endOccurrenceRadioDiv.appendChild(endOccurrenceRadio);
-    endOccurrenceRadioDiv.appendChild(endOccurrenceLabel);
-    endOccurrenceRadioDiv.appendChild(endOccurrenceInput);
-    endOccurrenceRadioDiv.appendChild(occurrencesText);
-
-    noEndRadio.addEventListener("change", function () {
-      if (this.checked) {
-        endDateInput.disabled = true;
-        endOccurrenceInput.disabled = true;
-      }
-    });
-
-    endDateRadio.addEventListener("change", function () {
-      if (this.checked) {
-        endDateInput.disabled = false;
-        endOccurrenceInput.disabled = true;
-      }
-    });
-
-    endOccurrenceRadio.addEventListener("change", function () {
-      if (this.checked) {
-        endDateInput.disabled = true;
-        endOccurrenceInput.disabled = false;
-      }
-    });
-
-    radioGroup.appendChild(noEndRadioDiv);
-    radioGroup.appendChild(endDateRadioDiv);
-    radioGroup.appendChild(endOccurrenceRadioDiv);
-
-    group.appendChild(label);
-    group.appendChild(radioGroup);
-
-    container.appendChild(group);
   }
 
   isValidDateString(dateString) {
@@ -1222,12 +887,12 @@ class DebtSnowballUI {
 
   formatMonthDay(date) {
     if (!date) return "";
-    const month = MONTH_LABELS[date.getMonth()] || "";
+    const month = Utils.MONTH_LABELS[date.getMonth()] || "";
     return `${month} ${date.getDate()}`;
   }
 
   formatMonthYear(year, month) {
-    const monthLabel = MONTH_LABELS[month] || "";
+    const monthLabel = Utils.MONTH_LABELS[month] || "";
     if (!monthLabel || typeof year !== "number") {
       return "";
     }

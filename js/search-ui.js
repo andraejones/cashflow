@@ -123,11 +123,7 @@ class SearchUI {
 
   exportSearchResults() {
     if (this.searchResults.length === 0) {
-      if (typeof Utils !== 'undefined' && typeof Utils.showNotification === 'function') {
-        Utils.showNotification("No results to export", "error");
-      } else {
-        console.error("No results to export");
-      }
+      Utils.showNotification("No results to export", "error");
       return;
     }
     let csvContent = "Date,Type,Amount,Description,Recurring\n";
@@ -166,16 +162,10 @@ class SearchUI {
         console.error("URL.createObjectURL is not supported in this environment");
       }
 
-      if (typeof Utils !== 'undefined' && typeof Utils.showNotification === 'function') {
-        Utils.showNotification("Search results exported successfully!");
-      } else {
-        console.log("Search results exported successfully!");
-      }
+      Utils.showNotification("Search results exported successfully!");
     } catch (error) {
       console.error("Error exporting search results:", error);
-      if (typeof Utils !== 'undefined' && typeof Utils.showNotification === 'function') {
-        Utils.showNotification("Error exporting search results", "error");
-      }
+      Utils.showNotification("Error exporting search results", "error");
     }
   }
 

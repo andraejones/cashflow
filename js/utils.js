@@ -393,4 +393,341 @@ const Utils = {
       element.classList.add('negative-balance');
     }
   },
+
+  DAY_SPECIFIC_OPTIONS: [
+    { value: "1-0", label: "First Sunday" },
+    { value: "1-1", label: "First Monday" },
+    { value: "1-2", label: "First Tuesday" },
+    { value: "1-3", label: "First Wednesday" },
+    { value: "1-4", label: "First Thursday" },
+    { value: "1-5", label: "First Friday" },
+    { value: "1-6", label: "First Saturday" },
+    { value: "2-0", label: "Second Sunday" },
+    { value: "2-1", label: "Second Monday" },
+    { value: "2-2", label: "Second Tuesday" },
+    { value: "2-3", label: "Second Wednesday" },
+    { value: "2-4", label: "Second Thursday" },
+    { value: "2-5", label: "Second Friday" },
+    { value: "2-6", label: "Second Saturday" },
+    { value: "3-0", label: "Third Sunday" },
+    { value: "3-1", label: "Third Monday" },
+    { value: "3-2", label: "Third Tuesday" },
+    { value: "3-3", label: "Third Wednesday" },
+    { value: "3-4", label: "Third Thursday" },
+    { value: "3-5", label: "Third Friday" },
+    { value: "3-6", label: "Third Saturday" },
+    { value: "4-0", label: "Fourth Sunday" },
+    { value: "4-1", label: "Fourth Monday" },
+    { value: "4-2", label: "Fourth Tuesday" },
+    { value: "4-3", label: "Fourth Wednesday" },
+    { value: "4-4", label: "Fourth Thursday" },
+    { value: "4-5", label: "Fourth Friday" },
+    { value: "4-6", label: "Fourth Saturday" },
+    { value: "-1-0", label: "Last Sunday" },
+    { value: "-1-1", label: "Last Monday" },
+    { value: "-1-2", label: "Last Tuesday" },
+    { value: "-1-3", label: "Last Wednesday" },
+    { value: "-1-4", label: "Last Thursday" },
+    { value: "-1-5", label: "Last Friday" },
+    { value: "-1-6", label: "Last Saturday" },
+  ],
+
+  MONTH_LABELS: [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+  ],
+
+  cleanUpHtmlArtifacts: function () {
+    const bodyChildren = Array.from(document.body.childNodes);
+    for (let i = 0; i < bodyChildren.length; i++) {
+      const node = bodyChildren[i];
+      if (node.nodeType === Node.TEXT_NODE &&
+        (node.textContent.includes("<div") ||
+          node.textContent.includes("modal-content"))) {
+        document.body.removeChild(node);
+      }
+    }
+  },
+
+  _buildId: function (prefix, baseName) {
+    if (!prefix) return baseName;
+    return prefix + baseName[0].toUpperCase() + baseName.slice(1);
+  },
+
+  buildSemiMonthlyOptions: function (container, idPrefix) {
+    const group = document.createElement("div");
+    group.className = "option-group";
+
+    const label = document.createElement("label");
+    label.setAttribute("for", this._buildId(idPrefix, "semiMonthlyFirstDay"));
+    label.textContent = "Days of month:";
+
+    const helpText = document.createElement("span");
+    helpText.className = "help-text";
+    helpText.textContent = "Select two days of the month";
+    const firstDaySelect = document.createElement("select");
+    firstDaySelect.id = this._buildId(idPrefix, "semiMonthlyFirstDay");
+    firstDaySelect.name = this._buildId(idPrefix, "semiMonthlyFirstDay");
+    const secondDaySelect = document.createElement("select");
+    secondDaySelect.id = this._buildId(idPrefix, "semiMonthlySecondDay");
+    secondDaySelect.name = this._buildId(idPrefix, "semiMonthlySecondDay");
+    for (let i = 1; i <= 28; i++) {
+      const firstOption = document.createElement("option");
+      firstOption.value = i;
+      firstOption.textContent = i;
+      firstDaySelect.appendChild(firstOption);
+
+      const secondOption = document.createElement("option");
+      secondOption.value = i;
+      secondOption.textContent = i;
+      secondDaySelect.appendChild(secondOption);
+    }
+    const lastDayOption = document.createElement("option");
+    lastDayOption.value = "last";
+    lastDayOption.textContent = "Last day";
+    secondDaySelect.appendChild(lastDayOption);
+    firstDaySelect.value = 1;
+    secondDaySelect.value = 15;
+
+    group.appendChild(label);
+    group.appendChild(document.createElement("br"));
+    group.appendChild(firstDaySelect);
+    group.appendChild(document.createTextNode(" and "));
+    group.appendChild(secondDaySelect);
+    group.appendChild(document.createElement("br"));
+    group.appendChild(helpText);
+
+    container.appendChild(group);
+  },
+
+  buildCustomIntervalOptions: function (container, idPrefix) {
+    const group = document.createElement("div");
+    group.className = "option-group";
+
+    const label = document.createElement("label");
+    label.setAttribute("for", this._buildId(idPrefix, "customIntervalValue"));
+    label.textContent = "Repeat every:";
+
+    const intervalValue = document.createElement("input");
+    intervalValue.type = "number";
+    intervalValue.id = this._buildId(idPrefix, "customIntervalValue");
+    intervalValue.name = this._buildId(idPrefix, "customIntervalValue");
+    intervalValue.min = "1";
+    intervalValue.value = "1";
+    intervalValue.style.width = "60px";
+
+    const intervalUnit = document.createElement("select");
+    intervalUnit.id = this._buildId(idPrefix, "customIntervalUnit");
+    intervalUnit.name = this._buildId(idPrefix, "customIntervalUnit");
+
+    const unitOptions = [
+      { value: "days", label: "Day(s)" },
+      { value: "weeks", label: "Week(s)" },
+      { value: "months", label: "Month(s)" },
+    ];
+
+    unitOptions.forEach(function (option) {
+      const optionElement = document.createElement("option");
+      optionElement.value = option.value;
+      optionElement.textContent = option.label;
+      intervalUnit.appendChild(optionElement);
+    });
+
+    group.appendChild(label);
+    group.appendChild(document.createElement("br"));
+    group.appendChild(intervalValue);
+    group.appendChild(document.createTextNode(" "));
+    group.appendChild(intervalUnit);
+
+    container.appendChild(group);
+  },
+
+  buildBusinessDayOptions: function (container, idPrefix) {
+    const group = document.createElement("div");
+    group.className = "option-group";
+
+    const label = document.createElement("label");
+    label.setAttribute("for", this._buildId(idPrefix, "businessDayAdjustment"));
+    label.textContent = "When transaction falls on weekend:";
+
+    const adjustmentSelect = document.createElement("select");
+    adjustmentSelect.id = this._buildId(idPrefix, "businessDayAdjustment");
+    adjustmentSelect.name = this._buildId(idPrefix, "businessDayAdjustment");
+
+    const adjustmentOptions = [
+      { value: "none", label: "No adjustment" },
+      { value: "previous", label: "Move to previous business day" },
+      { value: "next", label: "Move to next business day" },
+      { value: "nearest", label: "Move to nearest business day" },
+    ];
+
+    adjustmentOptions.forEach(function (option) {
+      const optionElement = document.createElement("option");
+      optionElement.value = option.value;
+      optionElement.textContent = option.label;
+      adjustmentSelect.appendChild(optionElement);
+    });
+
+    group.appendChild(label);
+    group.appendChild(document.createElement("br"));
+    group.appendChild(adjustmentSelect);
+
+    container.appendChild(group);
+  },
+
+  buildVariableAmountOptions: function (container, idPrefix) {
+    const group = document.createElement("div");
+    group.className = "option-group";
+    const checkboxDiv = document.createElement("div");
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.id = this._buildId(idPrefix, "variableAmountCheck");
+    checkbox.name = this._buildId(idPrefix, "variableAmountCheck");
+
+    const checkboxLabel = document.createElement("label");
+    checkboxLabel.setAttribute("for", this._buildId(idPrefix, "variableAmountCheck"));
+    checkboxLabel.textContent = "Amount changes over time";
+
+    checkboxDiv.appendChild(checkbox);
+    checkboxDiv.appendChild(checkboxLabel);
+    const variableOptions = document.createElement("div");
+    variableOptions.id = this._buildId(idPrefix, "variableAmountOptions");
+    variableOptions.style.display = "none";
+    variableOptions.style.marginTop = "10px";
+
+    const percentLabel = document.createElement("label");
+    percentLabel.setAttribute("for", this._buildId(idPrefix, "variablePercentage"));
+    percentLabel.textContent = "Percentage change per occurrence:";
+
+    const percentInput = document.createElement("input");
+    percentInput.type = "number";
+    percentInput.id = this._buildId(idPrefix, "variablePercentage");
+    percentInput.name = this._buildId(idPrefix, "variablePercentage");
+    percentInput.step = "0.1";
+    percentInput.value = "0";
+    percentInput.style.width = "60px";
+
+    const percentSign = document.createElement("span");
+    percentSign.textContent = "%";
+
+    variableOptions.appendChild(percentLabel);
+    variableOptions.appendChild(document.createElement("br"));
+    variableOptions.appendChild(percentInput);
+    variableOptions.appendChild(percentSign);
+    checkbox.addEventListener("change", function () {
+      variableOptions.style.display = this.checked ? "block" : "none";
+    });
+
+    group.appendChild(checkboxDiv);
+    group.appendChild(variableOptions);
+
+    container.appendChild(group);
+  },
+
+  buildEndConditionOptions: function (container, idPrefix) {
+    const group = document.createElement("div");
+    group.className = "option-group";
+
+    const label = document.createElement("label");
+    label.textContent = "End condition:";
+    const radioGroup = document.createElement("div");
+    radioGroup.className = "radio-group";
+    const noEndRadioDiv = document.createElement("div");
+
+    const radioName = this._buildId(idPrefix, "endCondition");
+
+    const noEndRadio = document.createElement("input");
+    noEndRadio.type = "radio";
+    noEndRadio.id = this._buildId(idPrefix, "endConditionNone");
+    noEndRadio.name = radioName;
+    noEndRadio.value = "none";
+    noEndRadio.checked = true;
+
+    const noEndLabel = document.createElement("label");
+    noEndLabel.setAttribute("for", this._buildId(idPrefix, "endConditionNone"));
+    noEndLabel.textContent = "No end date";
+
+    noEndRadioDiv.appendChild(noEndRadio);
+    noEndRadioDiv.appendChild(noEndLabel);
+    const endDateRadioDiv = document.createElement("div");
+
+    const endDateRadio = document.createElement("input");
+    endDateRadio.type = "radio";
+    endDateRadio.id = this._buildId(idPrefix, "endConditionDate");
+    endDateRadio.name = radioName;
+    endDateRadio.value = "date";
+
+    const endDateLabel = document.createElement("label");
+    endDateLabel.setAttribute("for", this._buildId(idPrefix, "endConditionDate"));
+    endDateLabel.textContent = "End by date:";
+
+    const endDateInput = document.createElement("input");
+    endDateInput.type = "date";
+    endDateInput.id = this._buildId(idPrefix, "endDate");
+    endDateInput.name = this._buildId(idPrefix, "endDate");
+    endDateInput.disabled = true;
+
+    endDateRadioDiv.appendChild(endDateRadio);
+    endDateRadioDiv.appendChild(endDateLabel);
+    endDateRadioDiv.appendChild(document.createElement("br"));
+    endDateRadioDiv.appendChild(endDateInput);
+    const endOccurrenceRadioDiv = document.createElement("div");
+
+    const endOccurrenceRadio = document.createElement("input");
+    endOccurrenceRadio.type = "radio";
+    endOccurrenceRadio.id = this._buildId(idPrefix, "endConditionOccurrence");
+    endOccurrenceRadio.name = radioName;
+    endOccurrenceRadio.value = "occurrence";
+
+    const endOccurrenceLabel = document.createElement("label");
+    endOccurrenceLabel.setAttribute("for", this._buildId(idPrefix, "endConditionOccurrence"));
+    endOccurrenceLabel.textContent = "End after:";
+
+    const endOccurrenceInput = document.createElement("input");
+    endOccurrenceInput.type = "number";
+    endOccurrenceInput.id = this._buildId(idPrefix, "maxOccurrences");
+    endOccurrenceInput.name = this._buildId(idPrefix, "maxOccurrences");
+    endOccurrenceInput.min = "1";
+    endOccurrenceInput.value = "12";
+    endOccurrenceInput.style.width = "60px";
+    endOccurrenceInput.disabled = true;
+
+    const occurrencesText = document.createElement("span");
+    occurrencesText.textContent = " occurrences";
+
+    endOccurrenceRadioDiv.appendChild(endOccurrenceRadio);
+    endOccurrenceRadioDiv.appendChild(endOccurrenceLabel);
+    endOccurrenceRadioDiv.appendChild(endOccurrenceInput);
+    endOccurrenceRadioDiv.appendChild(occurrencesText);
+    noEndRadio.addEventListener("change", function () {
+      if (this.checked) {
+        endDateInput.disabled = true;
+        endOccurrenceInput.disabled = true;
+      }
+    });
+
+    endDateRadio.addEventListener("change", function () {
+      if (this.checked) {
+        endDateInput.disabled = false;
+        endOccurrenceInput.disabled = true;
+      }
+    });
+
+    endOccurrenceRadio.addEventListener("change", function () {
+      if (this.checked) {
+        endDateInput.disabled = true;
+        endOccurrenceInput.disabled = false;
+      }
+    });
+
+    radioGroup.appendChild(noEndRadioDiv);
+    radioGroup.appendChild(endDateRadioDiv);
+    radioGroup.appendChild(endOccurrenceRadioDiv);
+
+    group.appendChild(label);
+    group.appendChild(radioGroup);
+
+    container.appendChild(group);
+  },
 };

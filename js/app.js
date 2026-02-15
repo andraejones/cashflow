@@ -62,7 +62,7 @@ class CashflowApp {
 
   async init() {
     try {
-      this.cleanUpHtmlArtifacts();
+      Utils.cleanUpHtmlArtifacts();
       await this.safeCloudLoad();
     } catch (error) {
       console.error("Error loading from cloud:", error);
@@ -124,20 +124,6 @@ class CashflowApp {
       if (this._pendingUpdateUI) {
         this._pendingUpdateUI = false;
         this.updateUI();
-      }
-    }
-  }
-
-
-  cleanUpHtmlArtifacts() {
-    // Convert live NodeList to static array to avoid issues when modifying during iteration
-    const bodyChildren = Array.from(document.body.childNodes);
-    for (let i = 0; i < bodyChildren.length; i++) {
-      const node = bodyChildren[i];
-      if (node.nodeType === Node.TEXT_NODE &&
-        (node.textContent.includes("<div") ||
-          node.textContent.includes("modal-content"))) {
-        document.body.removeChild(node);
       }
     }
   }

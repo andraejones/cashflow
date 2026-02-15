@@ -106,13 +106,6 @@ class RecurringTransactionManager {
   }
 
 
-  // Parse date string to Date object using noon to avoid DST issues
-  parseDateString(dateString) {
-    const [year, month, day] = dateString.split("-").map(Number);
-    return new Date(year, month - 1, day, 12, 0, 0);
-  }
-
-
   // Calculate days between two dates using local timezone with noon to avoid DST issues
   daysBetween(startDate, endDate) {
     const startLocal = new Date(
@@ -374,12 +367,9 @@ class RecurringTransactionManager {
       const dateString = Utils.formatDateString(dateObj);
 
       if (transactions[dateString]) {
-        transactions[dateString] = transactions[dateString].filter(t => {
-          if (!t.recurringId || t.modifiedInstance) {
-            return true;
-          }
-          return false;
-        });
+        transactions[dateString] = transactions[dateString].filter(t =>
+          !t.recurringId || t.modifiedInstance
+        );
 
         if (transactions[dateString].length === 0) {
           delete transactions[dateString];
@@ -388,8 +378,8 @@ class RecurringTransactionManager {
     }
 
     this.store.getRecurringTransactions().forEach((rt) => {
-      const startDate = this.parseDateString(rt.startDate);
-      const endDate = rt.endDate ? this.parseDateString(rt.endDate) : null;
+      const startDate = Utils.parseDateString(rt.startDate);
+      const endDate = rt.endDate ? Utils.parseDateString(rt.endDate) : null;
       const maxOccurrences = rt.maxOccurrences || null;
       // Always check adjacent months when business day adjustment is enabled
       // because adjustment can push transaction across month boundaries
@@ -599,12 +589,9 @@ class RecurringTransactionManager {
       const dateString = Utils.formatDateString(dateObj);
 
       if (transactions[dateString]) {
-        transactions[dateString] = transactions[dateString].filter(t => {
-          if (!t.recurringId || t.modifiedInstance) {
-            return true;
-          }
-          return false;
-        });
+        transactions[dateString] = transactions[dateString].filter(t =>
+          !t.recurringId || t.modifiedInstance
+        );
 
         if (transactions[dateString].length === 0) {
           delete transactions[dateString];
@@ -1323,7 +1310,7 @@ class RecurringTransactionManager {
     });
     if (!existingInstance) {
       const scheduledDate = originalDateString
-        ? this.parseDateString(originalDateString)
+        ? Utils.parseDateString(originalDateString)
         : currentDate;
       const amount = rt.variableAmount
         ? this.calculateVariableAmount(rt, scheduledDate, startDate)
@@ -1440,7 +1427,7 @@ class RecurringTransactionManager {
 
 
   countOccurrencesBefore(rt, beforeDate) {
-    const startDate = this.parseDateString(rt.startDate);
+    const startDate = Utils.parseDateString(rt.startDate);
     let count = 0;
 
     switch (rt.recurrence) {
@@ -1579,7 +1566,7 @@ class RecurringTransactionManager {
     const recurringTransaction = this.getRecurringTransactionById(recurringId);
 
     if (editScope === "future") {
-      const startDate = this.parseDateString(date);
+      const startDate = Utils.parseDateString(date);
       const newRecurringId = Utils.generateUniqueId();
 
       const newRecurringTransaction = {
@@ -1627,7 +1614,7 @@ class RecurringTransactionManager {
       }
 
       if (recurringTransaction.endDate) {
-        const originalEndDate = this.parseDateString(
+        const originalEndDate = Utils.parseDateString(
           recurringTransaction.endDate
         );
         if (originalEndDate >= startDate) {
@@ -1662,7 +1649,7 @@ class RecurringTransactionManager {
       });
       const skippedTransactions = this.store.getSkippedTransactions();
       Object.keys(skippedTransactions).forEach((skipDate) => {
-        if (this.parseDateString(skipDate) >= startDate) {
+        if (Utils.parseDateString(skipDate) >= startDate) {
           const skipIndex = skippedTransactions[skipDate].indexOf(recurringId);
           if (skipIndex > -1) {
             skippedTransactions[skipDate].splice(skipIndex, 1);
@@ -1716,7 +1703,7 @@ class RecurringTransactionManager {
       this.invalidateCache();
       if (deleteFuture) {
         const recurringId = transaction.recurringId;
-        const currentDate = this.parseDateString(date);
+        const currentDate = Utils.parseDateString(date);
         const recurringTransaction =
           this.getRecurringTransactionById(recurringId);
         if (recurringTransaction) {
@@ -1727,7 +1714,7 @@ class RecurringTransactionManager {
           });
         }
         Object.keys(transactions).forEach((dateKey) => {
-          if (this.parseDateString(dateKey) >= currentDate) {
+          if (Utils.parseDateString(dateKey) >= currentDate) {
             const newTransactions = transactions[dateKey].filter(
               (t) => t.recurringId !== recurringId
             );
@@ -1741,7 +1728,7 @@ class RecurringTransactionManager {
         });
         const skippedTransactions = this.store.getSkippedTransactions();
         Object.keys(skippedTransactions).forEach((skipDate) => {
-          if (this.parseDateString(skipDate) >= currentDate) {
+          if (Utils.parseDateString(skipDate) >= currentDate) {
             const index = skippedTransactions[skipDate].indexOf(recurringId);
             if (index > -1) {
               skippedTransactions[skipDate].splice(index, 1);

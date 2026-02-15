@@ -75,16 +75,6 @@ class TransactionStore {
     }
   }
 
-  // Alias for flushPendingSave
-  flushSave() {
-    this.flushPendingSave();
-  }
-
-  // Alias for flushPendingSave
-  saveImmediately() {
-    this.flushPendingSave();
-  }
-
   // Cancel pending save without saving
   cancelPendingSave() {
     if (this._saveDebounceTimer) {
@@ -92,6 +82,49 @@ class TransactionStore {
       this._saveDebounceTimer = null;
       this._pendingIsDataModified = false;
     }
+  }
+
+  _normalizeDebt(debt) {
+    return {
+      ...debt,
+      id: debt.id || Utils.generateUniqueId(),
+      _lastModified: debt._lastModified || new Date().toISOString(),
+      balance: Math.round((Number(debt.balance) || 0) * 100) / 100,
+      minPayment: Math.round((Number(debt.minPayment) || 0) * 100) / 100,
+      dueDay: Number(debt.dueDay) || 1,
+      dueDayPattern:
+        typeof debt.dueDayPattern === "string" ? debt.dueDayPattern : "",
+      recurrence:
+        typeof debt.recurrence === "string" ? debt.recurrence : "monthly",
+      dueStartDate:
+        typeof debt.dueStartDate === "string" ? debt.dueStartDate : "",
+      businessDayAdjustment:
+        typeof debt.businessDayAdjustment === "string"
+          ? debt.businessDayAdjustment
+          : "none",
+      semiMonthlyDays: Array.isArray(debt.semiMonthlyDays)
+        ? debt.semiMonthlyDays.map((day) => Number(day) || 1)
+        : null,
+      semiMonthlyLastDay: debt.semiMonthlyLastDay === true,
+      customInterval:
+        debt.customInterval && typeof debt.customInterval === "object"
+          ? {
+            value: Number(debt.customInterval.value) || 1,
+            unit:
+              debt.customInterval.unit === "weeks" ||
+                debt.customInterval.unit === "months"
+                ? debt.customInterval.unit
+                : "days",
+          }
+          : null,
+      variableAmount: debt.variableAmount === true,
+      variableType:
+        debt.variableType === "percentage" ? "percentage" : "fixed",
+      variablePercentage: Number(debt.variablePercentage) || 0,
+      endDate: typeof debt.endDate === "string" ? debt.endDate : "",
+      maxOccurrences: Number(debt.maxOccurrences) || null,
+      interestRate: Number(debt.interestRate) || 0,
+    };
   }
 
   // Getter for debounce delay
@@ -213,46 +246,7 @@ class TransactionStore {
 
       if (storedDebts) {
         const parsedDebts = JSON.parse(storedDebts);
-        this.debts = parsedDebts.map((debt) => ({
-          ...debt,
-          id: debt.id || Utils.generateUniqueId(),
-          _lastModified: debt._lastModified || new Date().toISOString(),
-          balance: Math.round((Number(debt.balance) || 0) * 100) / 100,
-          minPayment: Math.round((Number(debt.minPayment) || 0) * 100) / 100,
-          dueDay: Number(debt.dueDay) || 1,
-          dueDayPattern:
-            typeof debt.dueDayPattern === "string" ? debt.dueDayPattern : "",
-          recurrence:
-            typeof debt.recurrence === "string" ? debt.recurrence : "monthly",
-          dueStartDate:
-            typeof debt.dueStartDate === "string" ? debt.dueStartDate : "",
-          businessDayAdjustment:
-            typeof debt.businessDayAdjustment === "string"
-              ? debt.businessDayAdjustment
-              : "none",
-          semiMonthlyDays: Array.isArray(debt.semiMonthlyDays)
-            ? debt.semiMonthlyDays.map((day) => Number(day) || 1)
-            : null,
-          semiMonthlyLastDay: debt.semiMonthlyLastDay === true,
-          customInterval:
-            debt.customInterval && typeof debt.customInterval === "object"
-              ? {
-                value: Number(debt.customInterval.value) || 1,
-                unit:
-                  debt.customInterval.unit === "weeks" ||
-                    debt.customInterval.unit === "months"
-                    ? debt.customInterval.unit
-                    : "days",
-              }
-              : null,
-          variableAmount: debt.variableAmount === true,
-          variableType:
-            debt.variableType === "percentage" ? "percentage" : "fixed",
-          variablePercentage: Number(debt.variablePercentage) || 0,
-          endDate: typeof debt.endDate === "string" ? debt.endDate : "",
-          maxOccurrences: Number(debt.maxOccurrences) || null,
-          interestRate: Number(debt.interestRate) || 0,
-        }));
+        this.debts = parsedDebts.map((debt) => this._normalizeDebt(debt));
       }
 
       if (storedCashInfusions) {
@@ -1079,45 +1073,7 @@ class TransactionStore {
       this.monthlyBalances = data.monthlyBalances;
       this.recurringTransactions = data.recurringTransactions;
       this.skippedTransactions = data.skippedTransactions || {};
-      this.debts = (data.debts || []).map((debt) => ({
-        ...debt,
-        id: debt.id || Utils.generateUniqueId(),
-        balance: Math.round((Number(debt.balance) || 0) * 100) / 100,
-        minPayment: Math.round((Number(debt.minPayment) || 0) * 100) / 100,
-        dueDay: Number(debt.dueDay) || 1,
-        dueDayPattern:
-          typeof debt.dueDayPattern === "string" ? debt.dueDayPattern : "",
-        recurrence:
-          typeof debt.recurrence === "string" ? debt.recurrence : "monthly",
-        dueStartDate:
-          typeof debt.dueStartDate === "string" ? debt.dueStartDate : "",
-        businessDayAdjustment:
-          typeof debt.businessDayAdjustment === "string"
-            ? debt.businessDayAdjustment
-            : "none",
-        semiMonthlyDays: Array.isArray(debt.semiMonthlyDays)
-          ? debt.semiMonthlyDays.map((day) => Number(day) || 1)
-          : null,
-        semiMonthlyLastDay: debt.semiMonthlyLastDay === true,
-        customInterval:
-          debt.customInterval && typeof debt.customInterval === "object"
-            ? {
-              value: Number(debt.customInterval.value) || 1,
-              unit:
-                debt.customInterval.unit === "weeks" ||
-                  debt.customInterval.unit === "months"
-                  ? debt.customInterval.unit
-                  : "days",
-            }
-            : null,
-        variableAmount: debt.variableAmount === true,
-        variableType:
-          debt.variableType === "percentage" ? "percentage" : "fixed",
-        variablePercentage: Number(debt.variablePercentage) || 0,
-        endDate: typeof debt.endDate === "string" ? debt.endDate : "",
-        maxOccurrences: Number(debt.maxOccurrences) || null,
-        interestRate: Number(debt.interestRate) || 0,
-      }));
+      this.debts = (data.debts || []).map((debt) => this._normalizeDebt(debt));
       this.cashInfusions = (data.cashInfusions || []).map((infusion) => ({
         ...infusion,
         id: infusion.id || Utils.generateUniqueId(),

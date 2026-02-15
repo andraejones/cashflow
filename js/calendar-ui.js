@@ -67,7 +67,7 @@ class CalendarUI {
       calendarDays.addEventListener("click", this._boundDayClickHandler);
     }
 
-    this.cleanUpHtmlArtifacts();
+    Utils.cleanUpHtmlArtifacts();
   }
 
 
@@ -81,38 +81,9 @@ class CalendarUI {
   }
 
 
-  cleanUpHtmlArtifacts() {
-    // Convert live NodeList to static array to avoid issues when modifying during iteration
-    const bodyChildren = Array.from(document.body.childNodes);
-    for (let i = 0; i < bodyChildren.length; i++) {
-      const node = bodyChildren[i];
-      if (node.nodeType === Node.TEXT_NODE &&
-        (node.textContent.includes("<div") ||
-          node.textContent.includes("modal-content"))) {
-        document.body.removeChild(node);
-      }
-    }
-  }
-
-
   generateCalendar() {
     const year = this.currentDate.getFullYear();
     const month = this.currentDate.getMonth();
-
-    const monthNames = [
-      "January",
-      "February",
-      "March",
-      "April",
-      "May",
-      "June",
-      "July",
-      "August",
-      "September",
-      "October",
-      "November",
-      "December",
-    ];
 
     const currentMonthElement = document.getElementById("currentMonth");
     if (!currentMonthElement) {
@@ -126,17 +97,17 @@ class CalendarUI {
     }
     const today = new Date();
     if (year === today.getFullYear() && month === today.getMonth()) {
-      currentMonthElement.textContent = `${monthNames[month]} ${year}`;
+      currentMonthElement.textContent = `${Utils.MONTH_LABELS[month]} ${year}`;
       currentMonthElement.onclick = null;
       currentMonthElement.style.cursor = "default";
     } else {
-      currentMonthElement.textContent = `${monthNames[month]} ${year} ⏎`;
+      currentMonthElement.textContent = `${Utils.MONTH_LABELS[month]} ${year} ⏎`;
       currentMonthElement.onclick = () => this.returnToCurrentMonth();
       currentMonthElement.style.cursor = "pointer";
     }
 
     // Announce month change to screen readers
-    Utils.announceToScreenReader(`Viewing ${monthNames[month]} ${year}`);
+    Utils.announceToScreenReader(`Viewing ${Utils.MONTH_LABELS[month]} ${year}`);
     if (pendingMessage) {
       currentMonthElement.appendChild(pendingMessage);
     }
@@ -165,7 +136,7 @@ class CalendarUI {
     let runningBalance = summary.startingBalance;
     // Pre-compute unsettled expense carryover from prior months
     let runningUnsettledExpense = 0;
-    const monthStartStr = `${year}-${(month + 1).toString().padStart(2, "0")}-01`;
+    const monthStartStr = Utils.formatDateString(new Date(year, month, 1));
     const allUnsettled = this.store.getUnsettledTransactions();
     for (const u of allUnsettled) {
       if (u.date < monthStartStr) {
@@ -189,14 +160,14 @@ class CalendarUI {
 
     // We need to track running balance starting from today
     // First, calculate balance at end of today
-    const todayStr = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, "0")}-${today.getDate().toString().padStart(2, "0")}`;
+    const todayStr = Utils.formatDateString(today);
     const todayMonthKey = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, "0")}`;
     const monthlyBalances = this.store.getMonthlyBalances();
     let currentBalance = monthlyBalances[todayMonthKey]?.startingBalance || 0;
 
     // Calculate balance up through today
     for (let d = 1; d <= today.getDate(); d++) {
-      const dateStr = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, "0")}-${d.toString().padStart(2, "0")}`;
+      const dateStr = Utils.formatDateString(new Date(today.getFullYear(), today.getMonth(), d));
       const dailyTotals = this.calculationService.calculateDailyTotals(dateStr);
       if (dailyTotals.balance !== null) {
         currentBalance = dailyTotals.balance;
@@ -208,7 +179,7 @@ class CalendarUI {
     // Now iterate through the next 30 days to find the lowest
     for (let d = 1; d <= 30; d++) {
       const checkDate = new Date(today.getFullYear(), today.getMonth(), today.getDate() + d);
-      const dateStr = `${checkDate.getFullYear()}-${(checkDate.getMonth() + 1).toString().padStart(2, "0")}-${checkDate.getDate().toString().padStart(2, "0")}`;
+      const dateStr = Utils.formatDateString(checkDate);
       const dailyTotals = this.calculationService.calculateDailyTotals(dateStr);
 
       if (dailyTotals.balance !== null) {
@@ -255,7 +226,7 @@ class CalendarUI {
         day.classList.add("unallocated-end");
       }
       // Highlight the day(s) with the lowest balance in the 30-day range
-      const currentDateString = `${year}-${(month + 1).toString().padStart(2, "0")}-${i.toString().padStart(2, "0")}`;
+      const currentDateString = Utils.formatDateString(new Date(year, month, i));
       if (lowestBalanceDates.includes(currentDateString)) {
         day.classList.add("lowest-balance");
       }
@@ -267,9 +238,7 @@ class CalendarUI {
       if (negativeBalanceDates.includes(currentDateString)) {
         day.classList.add("negative-balance");
       }
-      const dateString = `${year}-${(month + 1).toString().padStart(2, "0")}-${i
-        .toString()
-        .padStart(2, "0")}`;
+      const dateString = currentDateString;
       const dailyTotals =
         this.calculationService.calculateDailyTotals(dateString);
       const transactions = this.store.getTransactions();
@@ -312,14 +281,7 @@ class CalendarUI {
           ? `<div class="transaction-count">(${transactionCount})</div>`
           : ""
         }
-        ${dailyTotals.balance !== null
-          ? '<div class="ending-balance-indicator">★</div>'
-          : (hasMoveAnomaly
-            ? '<div class="move-indicator">★</div>'
-            : (dailyTotals.hasSkippedTransactions
-              ? '<div class="skip-indicator">★</div>'
-              : ""))
-        }
+        ${this._getDayIndicatorHtml(dailyTotals, hasMoveAnomaly)}
       `;
       day.setAttribute('data-date', dateString);
       // Event listener is handled via delegation in initEventListeners()
@@ -436,6 +398,20 @@ class CalendarUI {
   }
 
 
+  _getDayIndicatorHtml(dailyTotals, hasMoveAnomaly) {
+    if (dailyTotals.balance !== null) {
+      return '<div class="ending-balance-indicator">★</div>';
+    }
+    if (hasMoveAnomaly) {
+      return '<div class="move-indicator">★</div>';
+    }
+    if (dailyTotals.hasSkippedTransactions) {
+      return '<div class="skip-indicator">★</div>';
+    }
+    return "";
+  }
+
+
   openTransactionModalFallback(date) {
     const modal = document.getElementById("transactionModal");
     const dateInput = document.getElementById("transactionDate");
@@ -512,12 +488,7 @@ class CalendarUI {
     const month = this.currentDate.getMonth();
     const monthKey = `${year}-${String(month + 1).padStart(2, "0")}`;
 
-    const monthNames = [
-      "January", "February", "March", "April", "May", "June",
-      "July", "August", "September", "October", "November", "December"
-    ];
-
-    monthLabel.textContent = `${monthNames[month]} ${year}`;
+    monthLabel.textContent = `${Utils.MONTH_LABELS[month]} ${year}`;
     textarea.value = this.store.getMonthlyNotes(monthKey);
 
     modal.style.display = "block";
