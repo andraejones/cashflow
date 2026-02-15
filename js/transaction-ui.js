@@ -14,44 +14,6 @@ class TransactionUI {
     this._boundEscapeHandler = null;
     this._boundWindowClickHandler = null;
 
-    this.daySpecificOptions = [
-      { value: "1-0", label: "First Sunday" },
-      { value: "1-1", label: "First Monday" },
-      { value: "1-2", label: "First Tuesday" },
-      { value: "1-3", label: "First Wednesday" },
-      { value: "1-4", label: "First Thursday" },
-      { value: "1-5", label: "First Friday" },
-      { value: "1-6", label: "First Saturday" },
-      { value: "2-0", label: "Second Sunday" },
-      { value: "2-1", label: "Second Monday" },
-      { value: "2-2", label: "Second Tuesday" },
-      { value: "2-3", label: "Second Wednesday" },
-      { value: "2-4", label: "Second Thursday" },
-      { value: "2-5", label: "Second Friday" },
-      { value: "2-6", label: "Second Saturday" },
-      { value: "3-0", label: "Third Sunday" },
-      { value: "3-1", label: "Third Monday" },
-      { value: "3-2", label: "Third Tuesday" },
-      { value: "3-3", label: "Third Wednesday" },
-      { value: "3-4", label: "Third Thursday" },
-      { value: "3-5", label: "Third Friday" },
-      { value: "3-6", label: "Third Saturday" },
-      { value: "4-0", label: "Fourth Sunday" },
-      { value: "4-1", label: "Fourth Monday" },
-      { value: "4-2", label: "Fourth Tuesday" },
-      { value: "4-3", label: "Fourth Wednesday" },
-      { value: "4-4", label: "Fourth Thursday" },
-      { value: "4-5", label: "Fourth Friday" },
-      { value: "4-6", label: "Fourth Saturday" },
-      { value: "-1-0", label: "Last Sunday" },
-      { value: "-1-1", label: "Last Monday" },
-      { value: "-1-2", label: "Last Tuesday" },
-      { value: "-1-3", label: "Last Wednesday" },
-      { value: "-1-4", label: "Last Thursday" },
-      { value: "-1-5", label: "Last Friday" },
-      { value: "-1-6", label: "Last Saturday" }
-    ];
-
     this.initEventListeners();
   }
 
@@ -179,13 +141,13 @@ class TransactionUI {
     if (recurrenceType === "monthly") {
       this.addDaySpecificOptions(advancedOptions);
     } else if (recurrenceType === "semi-monthly") {
-      this.addSemiMonthlyOptions(advancedOptions);
+      Utils.buildSemiMonthlyOptions(advancedOptions, '');
     } else if (recurrenceType === "custom") {
-      this.addCustomIntervalOptions(advancedOptions);
+      Utils.buildCustomIntervalOptions(advancedOptions, '');
     }
-    this.addBusinessDayOptions(advancedOptions);
-    this.addVariableAmountOptions(advancedOptions);
-    this.addEndConditionOptions(advancedOptions);
+    Utils.buildBusinessDayOptions(advancedOptions, '');
+    Utils.buildVariableAmountOptions(advancedOptions, '');
+    Utils.buildEndConditionOptions(advancedOptions, '');
     const transactionForm = document.getElementById("transactionForm");
     transactionForm.appendChild(advancedOptions);
   }
@@ -206,7 +168,7 @@ class TransactionUI {
     defaultOption.value = "";
     defaultOption.textContent = "Same day each month";
     daySpecificSelect.appendChild(defaultOption);
-    this.daySpecificOptions.forEach(option => {
+    Utils.DAY_SPECIFIC_OPTIONS.forEach(option => {
       const optionElement = document.createElement("option");
       optionElement.value = option.value;
       optionElement.textContent = option.label;
@@ -215,286 +177,6 @@ class TransactionUI {
 
     group.appendChild(label);
     group.appendChild(daySpecificSelect);
-    container.appendChild(group);
-  }
-
-
-  addSemiMonthlyOptions(container) {
-    const group = document.createElement("div");
-    group.className = "option-group";
-
-    const label = document.createElement("label");
-    label.setAttribute("for", "semiMonthlyDays");
-    label.textContent = "Days of month:";
-
-    const helpText = document.createElement("span");
-    helpText.className = "help-text";
-    helpText.textContent = "Select two days of the month";
-    const firstDaySelect = document.createElement("select");
-    firstDaySelect.id = "semiMonthlyFirstDay";
-    firstDaySelect.name = "semiMonthlyFirstDay";
-    const secondDaySelect = document.createElement("select");
-    secondDaySelect.id = "semiMonthlySecondDay";
-    secondDaySelect.name = "semiMonthlySecondDay";
-    for (let i = 1; i <= 28; i++) {
-      const firstOption = document.createElement("option");
-      firstOption.value = i;
-      firstOption.textContent = i;
-      firstDaySelect.appendChild(firstOption);
-
-      const secondOption = document.createElement("option");
-      secondOption.value = i;
-      secondOption.textContent = i;
-      secondDaySelect.appendChild(secondOption);
-    }
-    const lastDayOption = document.createElement("option");
-    lastDayOption.value = "last";
-    lastDayOption.textContent = "Last day";
-    secondDaySelect.appendChild(lastDayOption);
-    firstDaySelect.value = 1;
-    secondDaySelect.value = 15;
-
-    group.appendChild(label);
-    group.appendChild(document.createElement("br"));
-    group.appendChild(firstDaySelect);
-    group.appendChild(document.createTextNode(" and "));
-    group.appendChild(secondDaySelect);
-    group.appendChild(document.createElement("br"));
-    group.appendChild(helpText);
-
-    container.appendChild(group);
-  }
-
-
-  addCustomIntervalOptions(container) {
-    const group = document.createElement("div");
-    group.className = "option-group";
-
-    const label = document.createElement("label");
-    label.setAttribute("for", "customIntervalValue");
-    label.textContent = "Repeat every:";
-
-    const intervalValue = document.createElement("input");
-    intervalValue.type = "number";
-    intervalValue.id = "customIntervalValue";
-    intervalValue.name = "customIntervalValue";
-    intervalValue.min = "1";
-    intervalValue.value = "1";
-    intervalValue.style.width = "60px";
-
-    const intervalUnit = document.createElement("select");
-    intervalUnit.id = "customIntervalUnit";
-    intervalUnit.name = "customIntervalUnit";
-
-    const unitOptions = [
-      { value: "days", label: "Day(s)" },
-      { value: "weeks", label: "Week(s)" },
-      { value: "months", label: "Month(s)" }
-    ];
-
-    unitOptions.forEach(option => {
-      const optionElement = document.createElement("option");
-      optionElement.value = option.value;
-      optionElement.textContent = option.label;
-      intervalUnit.appendChild(optionElement);
-    });
-
-    group.appendChild(label);
-    group.appendChild(document.createElement("br"));
-    group.appendChild(intervalValue);
-    group.appendChild(document.createTextNode(" "));
-    group.appendChild(intervalUnit);
-
-    container.appendChild(group);
-  }
-
-
-  addBusinessDayOptions(container) {
-    const group = document.createElement("div");
-    group.className = "option-group";
-
-    const label = document.createElement("label");
-    label.setAttribute("for", "businessDayAdjustment");
-    label.textContent = "When transaction falls on weekend:";
-
-    const adjustmentSelect = document.createElement("select");
-    adjustmentSelect.id = "businessDayAdjustment";
-    adjustmentSelect.name = "businessDayAdjustment";
-
-    const adjustmentOptions = [
-      { value: "none", label: "No adjustment" },
-      { value: "previous", label: "Move to previous business day" },
-      { value: "next", label: "Move to next business day" },
-      { value: "nearest", label: "Move to nearest business day" }
-    ];
-
-    adjustmentOptions.forEach(option => {
-      const optionElement = document.createElement("option");
-      optionElement.value = option.value;
-      optionElement.textContent = option.label;
-      adjustmentSelect.appendChild(optionElement);
-    });
-
-    group.appendChild(label);
-    group.appendChild(document.createElement("br"));
-    group.appendChild(adjustmentSelect);
-
-    container.appendChild(group);
-  }
-
-
-  addVariableAmountOptions(container) {
-    const group = document.createElement("div");
-    group.className = "option-group";
-    const checkboxDiv = document.createElement("div");
-
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.id = "variableAmountCheck";
-    checkbox.name = "variableAmountCheck";
-
-    const checkboxLabel = document.createElement("label");
-    checkboxLabel.setAttribute("for", "variableAmountCheck");
-    checkboxLabel.textContent = "Amount changes over time";
-
-    checkboxDiv.appendChild(checkbox);
-    checkboxDiv.appendChild(checkboxLabel);
-    const variableOptions = document.createElement("div");
-    variableOptions.id = "variableAmountOptions";
-    variableOptions.style.display = "none";
-    variableOptions.style.marginTop = "10px";
-
-    const percentLabel = document.createElement("label");
-    percentLabel.setAttribute("for", "variablePercentage");
-    percentLabel.textContent = "Percentage change per occurrence:";
-
-    const percentInput = document.createElement("input");
-    percentInput.type = "number";
-    percentInput.id = "variablePercentage";
-    percentInput.name = "variablePercentage";
-    percentInput.step = "0.1";
-    percentInput.value = "0";
-    percentInput.style.width = "60px";
-
-    const percentSign = document.createElement("span");
-    percentSign.textContent = "%";
-
-    variableOptions.appendChild(percentLabel);
-    variableOptions.appendChild(document.createElement("br"));
-    variableOptions.appendChild(percentInput);
-    variableOptions.appendChild(percentSign);
-    checkbox.addEventListener("change", function () {
-      variableOptions.style.display = this.checked ? "block" : "none";
-    });
-
-    group.appendChild(checkboxDiv);
-    group.appendChild(variableOptions);
-
-    container.appendChild(group);
-  }
-
-
-  addEndConditionOptions(container) {
-    const group = document.createElement("div");
-    group.className = "option-group";
-
-    const label = document.createElement("label");
-    label.textContent = "End condition:";
-    const radioGroup = document.createElement("div");
-    radioGroup.className = "radio-group";
-    const noEndRadioDiv = document.createElement("div");
-
-    const noEndRadio = document.createElement("input");
-    noEndRadio.type = "radio";
-    noEndRadio.id = "endConditionNone";
-    noEndRadio.name = "endCondition";
-    noEndRadio.value = "none";
-    noEndRadio.checked = true;
-
-    const noEndLabel = document.createElement("label");
-    noEndLabel.setAttribute("for", "endConditionNone");
-    noEndLabel.textContent = "No end date";
-
-    noEndRadioDiv.appendChild(noEndRadio);
-    noEndRadioDiv.appendChild(noEndLabel);
-    const endDateRadioDiv = document.createElement("div");
-
-    const endDateRadio = document.createElement("input");
-    endDateRadio.type = "radio";
-    endDateRadio.id = "endConditionDate";
-    endDateRadio.name = "endCondition";
-    endDateRadio.value = "date";
-
-    const endDateLabel = document.createElement("label");
-    endDateLabel.setAttribute("for", "endConditionDate");
-    endDateLabel.textContent = "End by date:";
-
-    const endDateInput = document.createElement("input");
-    endDateInput.type = "date";
-    endDateInput.id = "endDate";
-    endDateInput.name = "endDate";
-    endDateInput.disabled = true;
-
-    endDateRadioDiv.appendChild(endDateRadio);
-    endDateRadioDiv.appendChild(endDateLabel);
-    endDateRadioDiv.appendChild(document.createElement("br"));
-    endDateRadioDiv.appendChild(endDateInput);
-    const endOccurrenceRadioDiv = document.createElement("div");
-
-    const endOccurrenceRadio = document.createElement("input");
-    endOccurrenceRadio.type = "radio";
-    endOccurrenceRadio.id = "endConditionOccurrence";
-    endOccurrenceRadio.name = "endCondition";
-    endOccurrenceRadio.value = "occurrence";
-
-    const endOccurrenceLabel = document.createElement("label");
-    endOccurrenceLabel.setAttribute("for", "endConditionOccurrence");
-    endOccurrenceLabel.textContent = "End after:";
-
-    const endOccurrenceInput = document.createElement("input");
-    endOccurrenceInput.type = "number";
-    endOccurrenceInput.id = "maxOccurrences";
-    endOccurrenceInput.name = "maxOccurrences";
-    endOccurrenceInput.min = "1";
-    endOccurrenceInput.value = "12";
-    endOccurrenceInput.style.width = "60px";
-    endOccurrenceInput.disabled = true;
-
-    const occurrencesText = document.createElement("span");
-    occurrencesText.textContent = " occurrences";
-
-    endOccurrenceRadioDiv.appendChild(endOccurrenceRadio);
-    endOccurrenceRadioDiv.appendChild(endOccurrenceLabel);
-    endOccurrenceRadioDiv.appendChild(endOccurrenceInput);
-    endOccurrenceRadioDiv.appendChild(occurrencesText);
-    noEndRadio.addEventListener("change", function () {
-      if (this.checked) {
-        endDateInput.disabled = true;
-        endOccurrenceInput.disabled = true;
-      }
-    });
-
-    endDateRadio.addEventListener("change", function () {
-      if (this.checked) {
-        endDateInput.disabled = false;
-        endOccurrenceInput.disabled = true;
-      }
-    });
-
-    endOccurrenceRadio.addEventListener("change", function () {
-      if (this.checked) {
-        endDateInput.disabled = true;
-        endOccurrenceInput.disabled = false;
-      }
-    });
-
-    radioGroup.appendChild(noEndRadioDiv);
-    radioGroup.appendChild(endDateRadioDiv);
-    radioGroup.appendChild(endOccurrenceRadioDiv);
-
-    group.appendChild(label);
-    group.appendChild(radioGroup);
-
     container.appendChild(group);
   }
 
@@ -536,9 +218,16 @@ class TransactionUI {
   }
 
 
+  _notifyChange() {
+    this.onUpdate();
+    if (this.cloudSync) {
+      this.cloudSync.scheduleCloudSave();
+    }
+  }
+
+
   showTransactionDetails(date) {
     try {
-      console.log('Opening transaction modal for date:', date);
 
       // Ensure recurring transactions are expanded for this date's month
       // (handles cases when modal opens via search for a different month)
@@ -617,7 +306,7 @@ class TransactionUI {
                 additionalInfo += `)`;
               }
               if (recurringTransaction.daySpecific && recurringTransaction.daySpecificData) {
-                const dayOption = this.daySpecificOptions.find(
+                const dayOption = Utils.DAY_SPECIFIC_OPTIONS.find(
                   option => option.value === recurringTransaction.daySpecificData
                 );
                 if (dayOption) {
@@ -859,35 +548,11 @@ class TransactionUI {
 
           if (settleBtn) {
             const toggleSettled = () => {
-              if (isRecurring) {
-                // Recurring: settle/unsettle in-place, preserve with modifiedInstance
-                const newSettled = t.settled === false ? true : false;
-                this.store.setTransactionSettled(date, index, newSettled);
-                this.showTransactionDetails(date);
-                this.onUpdate();
-                if (this.cloudSync) {
-                  this.cloudSync.scheduleCloudSave();
-                }
-                Utils.showNotification(newSettled ? "Transaction settled" : "Transaction unsettled");
-              } else if (t.settled === false) {
-                // One-time settling: settle in-place on viewed date
-                this.store.setTransactionSettled(date, index, true);
-                this.showTransactionDetails(date);
-                this.onUpdate();
-                if (this.cloudSync) {
-                  this.cloudSync.scheduleCloudSave();
-                }
-                Utils.showNotification("Transaction settled");
-              } else {
-                // One-time unsettling: keep in place
-                this.store.setTransactionSettled(date, index, false);
-                this.showTransactionDetails(date);
-                this.onUpdate();
-                if (this.cloudSync) {
-                  this.cloudSync.scheduleCloudSave();
-                }
-                Utils.showNotification("Transaction unsettled");
-              }
+              const newSettled = t.settled === false ? true : false;
+              this.store.setTransactionSettled(date, index, newSettled);
+              this.showTransactionDetails(date);
+              this._notifyChange();
+              Utils.showNotification(newSettled ? "Transaction settled" : "Transaction unsettled");
             };
             settleBtn.addEventListener("click", toggleSettled);
             settleBtn.addEventListener("keydown", (event) => {
@@ -978,10 +643,7 @@ class TransactionUI {
                 });
               }
               this.showTransactionDetails(date);
-              this.onUpdate();
-              if (this.cloudSync) {
-                this.cloudSync.scheduleCloudSave();
-              }
+              this._notifyChange();
               Utils.showNotification("Transaction settled");
             };
             settleBtn.addEventListener("click", doSettle);
@@ -1004,10 +666,7 @@ class TransactionUI {
               const doSkip = () => {
                 this.recurringManager.toggleSkipTransaction(u.date, u.transaction.recurringId);
                 this.showTransactionDetails(date);
-                this.onUpdate();
-                if (this.cloudSync) {
-                  this.cloudSync.scheduleCloudSave();
-                }
+                this._notifyChange();
                 Utils.showNotification("Transaction skipped");
               };
               skipBtn.addEventListener("click", doSkip);
@@ -1045,10 +704,7 @@ class TransactionUI {
                 }
                 this.store.deleteTransaction(u.date, currentIndex);
                 this.showTransactionDetails(date);
-                this.onUpdate();
-                if (this.cloudSync) {
-                  this.cloudSync.scheduleCloudSave();
-                }
+                this._notifyChange();
                 Utils.showNotification("Transaction deleted");
               };
               deleteBtn.addEventListener("click", doDelete);
@@ -1256,10 +912,7 @@ class TransactionUI {
         );
 
         this.showTransactionDetails(date);
-        this.onUpdate();
-        if (this.cloudSync) {
-          this.cloudSync.scheduleCloudSave();
-        }
+        this._notifyChange();
         Utils.showNotification("Transaction updated successfully");
       } else {
         // Date changed — move the transaction
@@ -1323,10 +976,7 @@ class TransactionUI {
         }
 
         this.showTransactionDetails(newDate);
-        this.onUpdate();
-        if (this.cloudSync) {
-          this.cloudSync.scheduleCloudSave();
-        }
+        this._notifyChange();
         Utils.showNotification(`Transaction moved to ${Utils.formatDisplayDate(newDate)}`);
       }
     } catch (error) {
@@ -1377,30 +1027,20 @@ class TransactionUI {
     }
 
     this.showTransactionDetails(date);
-    this.onUpdate();
-    if (this.cloudSync) {
-      this.cloudSync.scheduleCloudSave();
-    }
+    this._notifyChange();
 
     Utils.showNotification("Transaction deleted successfully");
   }
 
 
   toggleSkipTransaction(date, recurringId) {
-    const isSkipped = this.recurringManager.isTransactionSkipped(
-      date,
-      recurringId
-    );
     const newStatus = this.recurringManager.toggleSkipTransaction(
       date,
       recurringId
     );
 
     this.showTransactionDetails(date);
-    this.onUpdate();
-    if (this.cloudSync) {
-      this.cloudSync.scheduleCloudSave();
-    }
+    this._notifyChange();
 
     Utils.showNotification(
       `Transaction ${newStatus ? "skipped" : "unskipped"} successfully`
@@ -1550,10 +1190,7 @@ class TransactionUI {
       transactionModal.style.display = "none";
       transactionModal.setAttribute("aria-hidden", "true");
       ModalManager.closeModal(transactionModal);
-      this.onUpdate();
-      if (this.cloudSync) {
-        this.cloudSync.scheduleCloudSave();
-      }
+      this._notifyChange();
       const typeText =
         type === "balance"
           ? "balance set"
