@@ -1455,7 +1455,7 @@ class RecurringTransactionManager {
         }
         break;
 
-      case "semi-monthly":
+      case "semi-monthly": {
         // Calculate total months difference
         const monthsDiff =
           (beforeDate.getFullYear() - startDate.getFullYear()) * 12 +
@@ -1486,6 +1486,7 @@ class RecurringTransactionManager {
           count -= 1; // Second occurrence hasn't happened yet
         }
         break;
+      }
 
       case "quarterly":
         count = Math.floor(
@@ -1514,7 +1515,7 @@ class RecurringTransactionManager {
         }
         break;
 
-      case "custom":
+      case "custom": {
         if (rt.customInterval) {
           const intervalValue = rt.customInterval.value || 1;
           if (rt.customInterval.unit === "days") {
@@ -1534,6 +1535,7 @@ class RecurringTransactionManager {
           }
         }
         break;
+      }
     }
 
     return Math.max(0, count);
@@ -1739,7 +1741,7 @@ class RecurringTransactionManager {
           }
         });
 
-        this.store.saveData();
+        this.store.debouncedSave();
       } else {
         this.store.setTransactionSkipped(date, transaction.recurringId, true);
       }
