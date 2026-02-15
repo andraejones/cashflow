@@ -878,8 +878,8 @@ class TransactionUI {
     const description = descriptionElement.value;
     const newDate = document.getElementById(`edit-date-${date}-${index}`)?.value || date;
 
-    if (isNaN(amount) || amount < 0) {
-      Utils.showNotification("Please enter a valid amount (must be 0 or greater)", "error");
+    if (isNaN(amount) || amount <= 0) {
+      Utils.showNotification("Please enter a valid amount (must be greater than 0)", "error");
       return;
     }
 
@@ -1093,9 +1093,9 @@ class TransactionUI {
       const type = typeElement.value;
       const description = descriptionElement.value;
       const recurrence = recurrenceElement.value;
-      if (!date || isNaN(amount) || amount < 0) {
+      if (!date || isNaN(amount) || amount <= 0) {
         Utils.showNotification(
-          "Please enter a valid date and amount (must be 0 or greater)",
+          "Please enter a valid date and amount (must be greater than 0)",
           "error"
         );
         return false;

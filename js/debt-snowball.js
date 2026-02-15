@@ -1024,6 +1024,8 @@ class DebtSnowballUI {
     const cutoffDateString = cutoffDate
       ? Utils.formatDateString(cutoffDate)
       : null;
+    const roundToCents = (value) =>
+      Math.round((Number(value) || 0) * 100) / 100;
     return debts.map((debt) => {
       let paid = 0;
       for (const dateKey in transactions) {
@@ -1040,11 +1042,11 @@ class DebtSnowballUI {
             }
           }
           if (t.type === "expense") {
-            paid += t.amount;
+            paid = roundToCents(paid + t.amount);
           }
         });
       }
-      const remaining = Math.max(0, debt.balance - paid);
+      const remaining = roundToCents(Math.max(0, debt.balance - paid));
       return {
         debt,
         paid,

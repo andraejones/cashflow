@@ -278,13 +278,14 @@ class CloudSync {
     return { token, gistId };
   }
 
-  setCloudCredentials(token, gistId) {
+  async setCloudCredentials(token, gistId) {
     if (token) {
-      // Use legacy sync method for compatibility, will be migrated on next async access
-      const encryptedToken = this.encryptValue(token);
+      const encryptedToken = await this.encryptValueAsync(token);
       localStorage.setItem("github_token_encrypted", encryptedToken);
     }
-    localStorage.setItem("gist_id", gistId);
+    if (gistId) {
+      localStorage.setItem("gist_id", gistId);
+    }
   }
 
   async setCloudCredentialsAsync(token, gistId) {
@@ -292,7 +293,9 @@ class CloudSync {
       const encryptedToken = await this.encryptValueAsync(token);
       localStorage.setItem("github_token_encrypted", encryptedToken);
     }
-    localStorage.setItem("gist_id", gistId);
+    if (gistId) {
+      localStorage.setItem("gist_id", gistId);
+    }
   }
 
 
@@ -506,7 +509,9 @@ class CloudSync {
       pendingSpan.style.marginLeft = "10px";
       pendingSpan.style.fontSize = "0.8em";
       pendingSpan.style.color = "#666";
-      currentMonth.appendChild(pendingSpan);
+      if (currentMonth) {
+        currentMonth.appendChild(pendingSpan);
+      }
     }
 
     pendingSpan.textContent = "⌛";
@@ -1088,7 +1093,7 @@ class CloudSync {
             Utils.showNotification("Creating new Gist...");
             const newGistId = await this.createNewGist(token, dataToSave);
             Utils.showNotification(`New Gist created with ID: ${newGistId}`);
-            this.setCloudCredentials(token, newGistId);
+            await this.setCloudCredentials(token, newGistId);
             this._storeSyncTime();
             if (syncIndicator)
               syncIndicator.className = "cloud-sync-indicator synced";
