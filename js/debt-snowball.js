@@ -1641,7 +1641,7 @@ class DebtSnowballUI {
       this.debtList.appendChild(empty);
       return;
     }
-    summaries.forEach(({ debt, remaining }) => {
+    summaries.forEach(({ debt, paid }) => {
       const balance = Number(debt.balance) || 0;
       const minPayment = Number(debt.minPayment) || 0;
       const scheduleLabel = this.getDebtScheduleLabel(debt);
@@ -1662,9 +1662,9 @@ class DebtSnowballUI {
         typeof debt.interestRate === "number" && debt.interestRate > 0
           ? ` • ${debt.interestRate.toFixed(2)}%`
           : "";
-      meta.textContent = `Starting $${debt.balance.toFixed(
+      meta.textContent = `Balance $${balance.toFixed(
         2
-      )} • Remaining $${remaining.toFixed(2)} • Min $${minPayment.toFixed(
+      )} • Paid $${paid.toFixed(2)} • Min $${minPayment.toFixed(
         2
       )} • Due ${scheduleLabel}${interest}`;
       details.appendChild(meta);
