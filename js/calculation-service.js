@@ -303,7 +303,7 @@ class CalculationService {
     return result;
   }
 
-  calculateUnallocated() {
+  calculateMinimum() {
     // Calculate the minimum running balance from today through the next 30 days
     // This should match how the calendar displays running balances
 

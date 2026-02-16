@@ -144,13 +144,13 @@ class CalendarUI {
       }
     }
 
-    // Calculate the end date of the 30-day unallocated range (DST-safe)
-    const unallocatedEndDate = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 30);
-    const unallocatedEndYear = unallocatedEndDate.getFullYear();
-    const unallocatedEndMonth = unallocatedEndDate.getMonth();
-    const unallocatedEndDay = unallocatedEndDate.getDate();
+    // Calculate the end date of the 30-day minimum range (DST-safe)
+    const minimumEndDate = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 30);
+    const minimumEndYear = minimumEndDate.getFullYear();
+    const minimumEndMonth = minimumEndDate.getMonth();
+    const minimumEndDay = minimumEndDate.getDate();
 
-    // Find the day(s) with the lowest balance in the 30-day unallocated range
+    // Find the day(s) with the lowest balance in the 30-day minimum range
     // Calculate across the entire 30-day range (not just the displayed month)
     let lowestBalanceDates = [];
     let lowestBalance = Infinity;
@@ -217,13 +217,13 @@ class CalendarUI {
       ) {
         day.classList.add("current");
       }
-      // Highlight the last day of the 30-day unallocated range
+      // Highlight the last day of the 30-day minimum range
       if (
-        year === unallocatedEndYear &&
-        month === unallocatedEndMonth &&
-        i === unallocatedEndDay
+        year === minimumEndYear &&
+        month === minimumEndMonth &&
+        i === minimumEndDay
       ) {
-        day.classList.add("unallocated-end");
+        day.classList.add("minimum-end");
       }
       // Highlight the day(s) with the lowest balance in the 30-day range
       const currentDateString = Utils.formatDateString(new Date(year, month, i));
@@ -295,7 +295,7 @@ class CalendarUI {
       day.innerHTML = `${i}<div class="day-content"></div>`;
       calendarDays.appendChild(day);
     }
-    // Determine if we should show Unallocated
+    // Determine if we should show Minimum
     // Show only if the viewed month overlaps with the 30-day window from today
     const todayYear = today.getFullYear();
     const todayMonth = today.getMonth();
@@ -306,19 +306,19 @@ class CalendarUI {
     const currentMonthStart = new Date(todayYear, todayMonth, 1);
     const viewedMonthEnd = new Date(year, month + 1, 0); // Last day of viewed month
 
-    // Show Unallocated if:
+    // Show Minimum if:
     // 1. Viewed month is not entirely in the past
     // 2. Viewed month start is within 30 days from today
     const isPastMonth = viewedMonthEnd < currentMonthStart;
     const isWithin30Days = viewedMonthStart <= thirtyDaysFromNow;
-    const showUnallocated = !isPastMonth && isWithin30Days;
+    const showMinimum = !isPastMonth && isWithin30Days;
 
     let summaryHtml = `Monthly Summary: Income: $${summary.income.toFixed(2)} | Expenses: $${summary.expense.toFixed(2)}`;
 
-    if (showUnallocated) {
-      const unallocated = this.calculationService.calculateUnallocated();
-      const unallocatedClass = unallocated <= 0 ? 'unallocated-negative' : '';
-      summaryHtml += ` | Unallocated: <span class="${unallocatedClass}">$${unallocated.toFixed(2)}</span>`;
+    if (showMinimum) {
+      const minimum = this.calculationService.calculateMinimum();
+      const minimumClass = minimum <= 0 ? 'minimum-negative' : '';
+      summaryHtml += ` | Minimum: <span class="${minimumClass}">$${minimum.toFixed(2)}</span>`;
     }
 
     // Add Notes link with star indicator if notes exist
