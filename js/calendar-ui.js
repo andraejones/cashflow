@@ -313,19 +313,19 @@ class CalendarUI {
     const isWithin30Days = viewedMonthStart <= thirtyDaysFromNow;
     const showMinimum = !isPastMonth && isWithin30Days;
 
-    let summaryHtml = `Monthly Summary: Income: $${summary.income.toFixed(2)} | Expenses: $${summary.expense.toFixed(2)}`;
+    let summaryHtml = `<span class="summary-segment">Monthly Summary:</span> <span class="summary-segment">Income: $${summary.income.toFixed(2)}</span> <span class="summary-segment">| Expenses: $${summary.expense.toFixed(2)}</span>`;
 
     if (showMinimum) {
       const minimum = this.calculationService.calculateMinimum();
       const minimumClass = minimum <= 0 ? 'minimum-negative' : '';
-      summaryHtml += ` | Minimum: <span class="${minimumClass}">$${minimum.toFixed(2)}</span>`;
+      summaryHtml += ` <span class="summary-segment">| Minimum: <span class="${minimumClass}">$${minimum.toFixed(2)}</span></span>`;
     }
 
     // Add Notes link with star indicator if notes exist
     const monthKey = `${year}-${String(month + 1).padStart(2, "0")}`;
     const hasNotes = this.store.hasMonthlyNotes(monthKey);
     const notesIndicator = hasNotes ? ' ★' : '';
-    summaryHtml += ` | <span class="notes-link" onclick="app.calendarUI.showNotesModal()">Notes${notesIndicator}</span>`;
+    summaryHtml += ` <span class="summary-segment">| <span class="notes-link" onclick="app.calendarUI.showNotesModal()">Notes${notesIndicator}</span></span>`;
 
     document.getElementById("monthSummary").innerHTML = summaryHtml;
     const pinLabel = window.pinProtection && pinProtection.isPinSet() ? "Change PIN" : "Set PIN";

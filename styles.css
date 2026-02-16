@@ -382,6 +382,11 @@ h4 {
   color: var(--ink-color);
 }
 
+.summary-segment {
+  display: inline-block;
+  white-space: nowrap;
+}
+
 .notes-link {
   cursor: pointer;
   transition: color 0.2s;
