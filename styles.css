@@ -243,7 +243,7 @@ h4 {
   box-shadow: none;
 }
 
-.unallocated-end {
+.minimum-end {
   border: 2px solid var(--primary-color);
   box-shadow: 0 0 0 2px rgba(15, 122, 108, 0.15);
 }
@@ -264,8 +264,8 @@ h4 {
   box-shadow: 0 0 0 2px rgba(180, 50, 30, 0.3);
 }
 
-/* Red styling for negative unallocated value in summary */
-.unallocated-negative {
+/* Red styling for negative minimum value in summary */
+.minimum-negative {
   color: var(--error-color-contrast);
   font-weight: 700;
 }
