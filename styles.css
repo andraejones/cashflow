@@ -910,11 +910,11 @@ body.app-locked #calendarOptions {
   }
 
   .day-content {
-    font-size: 9px;
+    font-size: 10px;
   }
 
   .transaction-count {
-    font-size: 10px;
+    font-size: 11px;
   }
 
   .calendar-option {
@@ -1497,14 +1497,14 @@ body.app-locked #calendarOptions {
   }
 
   #monthSummary {
-    font-size: 12px;
+    font-size: 13px;
     padding: 8px 5px;
     white-space: normal;
     line-height: 1.5;
   }
 
   #calendarOptions {
-    font-size: 12px;
+    font-size: 13px;
     display: flex;
     flex-wrap: wrap;
     justify-content: center;
@@ -1542,13 +1542,6 @@ body.app-locked #calendarOptions {
     padding: 10px;
     font-size: 16px;
   }
-
-  .balance,
-  .income,
-  .expense {
-    font-size: 90%;
-  }
-
 
   .nav-btn,
   .calendar-option,
@@ -1749,7 +1742,7 @@ body.app-locked #calendarOptions {
 
 @media (max-width: 480px) {
   .balance-without-unsettled {
-    font-size: 9px;
+    font-size: 10px;
   }
 }
 
