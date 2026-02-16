@@ -1062,6 +1062,8 @@ class DebtSnowballUI {
     baseExtraPayment,
     rolloverAmount
   ) {
+    const roundToCents = (value) =>
+      Math.round((Number(value) || 0) * 100) / 100;
     const minPaidByDebtId = {};
     const balancesAfterMin = {};
     let inMonthRollover = 0;
@@ -1075,10 +1077,10 @@ class DebtSnowballUI {
         return;
       }
       const actualMin = Math.min(balance, scheduledMin);
-      minPaidByDebtId[debtId] = actualMin;
-      balancesAfterMin[debtId] = Math.max(0, balance - actualMin);
+      minPaidByDebtId[debtId] = roundToCents(actualMin);
+      balancesAfterMin[debtId] = roundToCents(Math.max(0, balance - actualMin));
       if (scheduledMin > actualMin) {
-        inMonthRollover += scheduledMin - actualMin;
+        inMonthRollover = roundToCents(inMonthRollover + (scheduledMin - actualMin));
       }
     });
 
@@ -1089,9 +1091,11 @@ class DebtSnowballUI {
 
     const snowballPaidByDebtId = {};
     let remainingSnowball = applySnowball
-      ? (Number(baseExtraPayment) || 0) +
-      (Number(rolloverAmount) || 0) +
-      inMonthRollover
+      ? roundToCents(
+        (Number(baseExtraPayment) || 0) +
+        (Number(rolloverAmount) || 0) +
+        inMonthRollover
+      )
       : 0;
     const balancesAfterPayments = { ...balancesAfterMin };
 
@@ -1099,16 +1103,18 @@ class DebtSnowballUI {
       if (remainingSnowball <= 0) return;
       const remainingBalance = Number(balancesAfterPayments[debtId]) || 0;
       if (remainingBalance <= 0) return;
-      const applied = Math.min(remainingBalance, remainingSnowball);
+      const applied = roundToCents(Math.min(remainingBalance, remainingSnowball));
       if (applied <= 0) return;
       snowballPaidByDebtId[debtId] = applied;
-      balancesAfterPayments[debtId] = Math.max(0, remainingBalance - applied);
-      remainingSnowball -= applied;
+      balancesAfterPayments[debtId] = roundToCents(Math.max(0, remainingBalance - applied));
+      remainingSnowball = roundToCents(remainingSnowball - applied);
     });
 
-    const snowballAmount = Object.values(snowballPaidByDebtId).reduce(
-      (sum, amount) => sum + (Number(amount) || 0),
-      0
+    const snowballAmount = roundToCents(
+      Object.values(snowballPaidByDebtId).reduce(
+        (sum, amount) => sum + (Number(amount) || 0),
+        0
+      )
     );
 
     return {
@@ -1178,7 +1184,7 @@ class DebtSnowballUI {
       if (!infusionDate) return;
       const infusionYear = infusionDate.getFullYear();
       const infusionMonth = infusionDate.getMonth();
-      const key = `${infusionYear}-${infusionMonth + 1}`;
+      const key = `${infusionYear}-${String(infusionMonth + 1).padStart(2, "0")}`;
       if (!infusionsByMonthKey[key]) {
         infusionsByMonthKey[key] = [];
       }
@@ -1221,9 +1227,8 @@ class DebtSnowballUI {
           year,
           month
         );
-        const totalPayment = occurrences.reduce(
-          (sum, occurrence) => sum + occurrence.amount,
-          0
+        const totalPayment = roundToCents(
+          occurrences.reduce((sum, occurrence) => sum + occurrence.amount, 0)
         );
         monthlyTotalsByDebtId[debtId] = totalPayment;
       });
@@ -2068,7 +2073,7 @@ class DebtSnowballUI {
       if (!infusionDate) return;
       const infusionYear = infusionDate.getFullYear();
       const infusionMonth = infusionDate.getMonth();
-      const key = `${infusionYear}-${infusionMonth + 1}`;
+      const key = `${infusionYear}-${String(infusionMonth + 1).padStart(2, "0")}`;
       if (!infusionsByMonthKey[key]) {
         infusionsByMonthKey[key] = [];
       }
@@ -2146,7 +2151,9 @@ class DebtSnowballUI {
           return;
         }
         const occurrences = this.getRecurringOccurrencesForMonth(template, year, month);
-        const totalPayment = occurrences.reduce((sum, occ) => sum + occ.amount, 0);
+        const totalPayment = roundToCents(
+          occurrences.reduce((sum, occ) => sum + occ.amount, 0)
+        );
         monthlyTotalsByDebtId[debtId] = totalPayment;
       });
 
@@ -2167,7 +2174,7 @@ class DebtSnowballUI {
         const balance = Number(balances[debtId]) || 0;
         const scheduledMin = Number(monthlyTotalsByDebtId[debtId]) || 0;
         if (balance <= 0 || scheduledMin <= 0) return;
-        const actualMin = Math.min(balance, scheduledMin);
+        const actualMin = roundToCents(Math.min(balance, scheduledMin));
         balances[debtId] = roundToCents(balance - actualMin);
       });
 
