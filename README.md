@@ -8,18 +8,18 @@ Plan and monitor monthly cash movement and debts.
 
 ## Documentation status
 
-Updated for appVersion 2.0.0 on 2026-02-06 (source of truth: `js/transaction-store.js`).
+Updated for appVersion 2.0.0 on 2026-02-16 (source of truth: `js/transaction-store.js`).
 
 ## Features
 
 - Monthly calendar with daily totals and running balance.
 - One-off and recurring transactions (daily to yearly, custom intervals, business-day adjustments).
-- Unsettled expense tracking for one-time expenses with dual balance display (with/without unsettled).
+- Unsettled expense tracking for one-time and recurring transactions with dual balance display (with/without unsettled).
 - Hidden transactions (e.g. debt snowball generated) shown with visual distinction.
 - Debt snowball planner with minimum plus extra payment scheduling.
 - Search with advanced filters and CSV export.
 - Full data import and export (JSON).
-- Optional PIN lock with FaceID/TouchID biometric unlock and GitHub Gist cloud sync.
+- Optional PIN lock with FaceID/TouchID biometric unlock and GitHub Gist cloud sync (handles truncated Gist files).
 
 ## Calendar star indicators
 
@@ -64,3 +64,4 @@ The exported JSON schema includes: `transactions`, `monthlyBalances`, `recurring
 - `js/debt-snowball.js`: debt snowball modeling.
 - `js/pin-protection.js`: PIN locking and encryption.
 - `js/utils.js`: date and ID helpers plus notifications.
+- `scripts/verify-logic.js`: standalone logic verification utility.
