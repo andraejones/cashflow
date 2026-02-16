@@ -991,6 +991,8 @@ class TransactionStore {
     Object.keys(this.transactions).forEach((date) => {
       this.transactions[date].forEach((t) => {
         if (t.settled === false && t.recurringId && t.type === "expense") {
+          const skippedIds = this.skippedTransactions[date];
+          if (skippedIds && skippedIds.includes(t.recurringId)) return;
           const dates = recurringDates[t.recurringId] || [];
           // Check if a later occurrence exists on or before today
           const hasLaterOccurrence = dates.some((d) => d > date && d <= todayStr);

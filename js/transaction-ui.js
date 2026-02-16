@@ -400,7 +400,7 @@ class TransactionUI {
 
           // Add Settle/Unsettle button for expenses
           let settleBtn = null;
-          if (normalizedType === "expense" && (!isRecurring || t.settled !== undefined)) {
+          if (normalizedType === "expense" && !isSkipped && (!isRecurring || t.settled !== undefined)) {
             settleBtn = document.createElement("span");
             settleBtn.className = "settle-btn";
             settleBtn.setAttribute("role", "button");
