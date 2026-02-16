@@ -262,7 +262,7 @@ class DebtSnowballUI {
         ? this.currentViewMonth
         : today.getMonth();
     const projection = this.calculateSnowballProjection(viewYear, viewMonth, true);
-    this.renderDebts(projection);
+    this.renderDebts();
     this.renderCashInfusions();
     this.renderPlan(projection);
     this.loadSnowballSettings();
@@ -1031,6 +1031,7 @@ class DebtSnowballUI {
   getDebtSummaries(cutoffDate = null) {
     const debts = this.store.getDebts();
     const transactions = this.store.getTransactions();
+    const cashInfusions = this.store.getCashInfusions();
     const cutoffDateString = cutoffDate
       ? Utils.formatDateString(cutoffDate)
       : null;
@@ -1056,6 +1057,12 @@ class DebtSnowballUI {
           }
         });
       }
+      cashInfusions.forEach((infusion) => {
+        if (infusion.targetDebtId !== debt.id) return;
+        if (!infusion.date) return;
+        if (cutoffDateString && infusion.date >= cutoffDateString) return;
+        paid = roundToCents(paid + (Number(infusion.amount) || 0));
+      });
       const remaining = roundToCents(Math.max(0, debt.balance - paid));
       return {
         debt,
@@ -1636,22 +1643,10 @@ class DebtSnowballUI {
     return { changed, snowballAdded };
   }
 
-  renderDebts(projection) {
+  renderDebts() {
     if (!this.debtList) return;
     this.debtList.innerHTML = "";
     const debts = this.store.getDebts();
-    if (!projection && debts.length > 0) {
-      const today = new Date();
-      const viewYear =
-        typeof this.currentViewYear === "number"
-          ? this.currentViewYear
-          : today.getFullYear();
-      const viewMonth =
-        typeof this.currentViewMonth === "number"
-          ? this.currentViewMonth
-          : today.getMonth();
-      projection = this.calculateSnowballProjection(viewYear, viewMonth, true);
-    }
     if (debts.length === 0) {
       const empty = document.createElement("div");
       empty.className = "debt-empty";
@@ -1659,13 +1654,23 @@ class DebtSnowballUI {
       this.debtList.appendChild(empty);
       return;
     }
-    const viewBalances = projection?.viewBalances || {};
+    const today = new Date();
+    const viewYear =
+      typeof this.currentViewYear === "number"
+        ? this.currentViewYear
+        : today.getFullYear();
+    const viewMonth =
+      typeof this.currentViewMonth === "number"
+        ? this.currentViewMonth
+        : today.getMonth();
+    const cutoff = new Date(viewYear, viewMonth + 1, 1);
+    const summaries = this.getDebtSummaries(cutoff);
+    const summaryMap = {};
+    summaries.forEach((s) => { summaryMap[s.debt.id] = s; });
     debts.forEach((debt) => {
       const balance = Number(debt.balance) || 0;
-      const projected = typeof viewBalances[debt.id] === "number"
-        ? Math.max(0, viewBalances[debt.id])
-        : balance;
-      const paid = Math.max(0, balance - projected);
+      const summary = summaryMap[debt.id];
+      const paid = summary ? summary.paid : 0;
       const minPayment = Number(debt.minPayment) || 0;
       const scheduleLabel = this.getDebtScheduleLabel(debt);
       const row = document.createElement("div");
