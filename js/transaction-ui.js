@@ -1138,6 +1138,14 @@ class TransactionUI {
             }
             this.store.saveData();
           }
+
+          // Auto-settle any unsettled transactions carried forward to this date
+          const unsettled = this.store.getUnsettledTransactions();
+          unsettled.forEach(({ date: uDate, index }) => {
+            if (uDate <= date) {
+              this.store.setTransactionSettled(uDate, index, true);
+            }
+          });
         }
 
         this.store.addTransaction(date, newTransaction);
