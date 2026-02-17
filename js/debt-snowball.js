@@ -114,11 +114,6 @@ class DebtSnowballUI {
         }
       });
     }
-    window.addEventListener("click", (event) => {
-      if (event.target === this.modal) {
-        this.hideModal();
-      }
-    });
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape" && this.modal?.style.display === "block") {
         this.hideModal();

@@ -12,7 +12,6 @@ class TransactionUI {
 
     // Track event listeners for cleanup
     this._boundEscapeHandler = null;
-    this._boundWindowClickHandler = null;
 
     this.initEventListeners();
   }
@@ -28,16 +27,6 @@ class TransactionUI {
         this.closeModals();
       };
     });
-
-    // Store bound handlers for cleanup
-    this._boundWindowClickHandler = (event) => {
-      const transactionModal = document.getElementById("transactionModal");
-      const searchModal = document.getElementById("searchModal");
-      if (event.target === transactionModal || event.target === searchModal) {
-        this.closeModals();
-      }
-    };
-    window.addEventListener("click", this._boundWindowClickHandler);
 
     this._boundEscapeHandler = (event) => {
       if (event.key === "Escape") {
@@ -74,10 +63,6 @@ class TransactionUI {
 
   // Cleanup method to remove event listeners (call when destroying UI)
   destroy() {
-    if (this._boundWindowClickHandler) {
-      window.removeEventListener("click", this._boundWindowClickHandler);
-      this._boundWindowClickHandler = null;
-    }
     if (this._boundEscapeHandler) {
       document.removeEventListener("keydown", this._boundEscapeHandler);
       this._boundEscapeHandler = null;

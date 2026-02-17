@@ -240,7 +240,6 @@ const Utils = {
         confirmButton.removeEventListener("click", handleConfirm);
         cancelButton.removeEventListener("click", handleCancel);
         closeButton.removeEventListener("click", handleCancel);
-        modal.removeEventListener("click", handleBackdrop);
         modal.removeEventListener("keydown", handleKeydown);
         if (previousActiveElement && previousActiveElement.focus) {
           previousActiveElement.focus();
@@ -272,12 +271,6 @@ const Utils = {
         }
       };
 
-      const handleBackdrop = (event) => {
-        if (event.target === modal) {
-          handleClose();
-        }
-      };
-
       const handleKeydown = (event) => {
         if (event.key === "Escape" && !mandatory) {
           event.preventDefault();
@@ -293,7 +286,6 @@ const Utils = {
       if (!mandatory) {
         cancelButton.addEventListener("click", handleCancel);
         closeButton.addEventListener("click", handleClose);
-        modal.addEventListener("click", handleBackdrop);
       }
       modal.addEventListener("keydown", handleKeydown);
 
