@@ -400,7 +400,7 @@ class TransactionUI {
 
           // Add Settle/Unsettle button for expenses
           let settleBtn = null;
-          if (normalizedType === "expense" && !isSkipped && (!isRecurring || t.settled !== undefined)) {
+          if (normalizedType === "expense" && !isSkipped) {
             settleBtn = document.createElement("span");
             settleBtn.className = "settle-btn";
             settleBtn.setAttribute("role", "button");
@@ -1130,13 +1130,14 @@ class TransactionUI {
         if (type === "balance") {
           const transactions = this.store.getTransactions();
           if (transactions[date]) {
-            transactions[date] = transactions[date].filter(
-              (t) => t.type !== "balance"
-            );
-            if (transactions[date].length === 0) {
-              delete transactions[date];
+            const indices = [];
+            transactions[date].forEach((t, i) => {
+              if (t.type === "balance") indices.push(i);
+            });
+            // Delete in reverse order to preserve indices
+            for (let i = indices.length - 1; i >= 0; i--) {
+              this.store.deleteTransaction(date, indices[i]);
             }
-            this.store.saveData();
           }
 
           // Auto-settle any unsettled transactions carried forward to this date

@@ -204,6 +204,11 @@ class CashflowApp {
             const success = this.store.importData(content);
 
             if (success) {
+              // Close any open modals to prevent stale DOM state
+              document.querySelectorAll('.modal[style*="display: block"], .modal[style*="display:block"]').forEach(m => {
+                m.style.display = 'none';
+                m.setAttribute('aria-hidden', 'true');
+              });
               this.recurringManager.invalidateCache();
               this.calculationService.invalidateCache();
               this.updateUI();

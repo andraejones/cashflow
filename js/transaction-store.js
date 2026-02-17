@@ -867,6 +867,13 @@ class TransactionStore {
         }
       }
     }
+    // Clean up movedTransactions for this recurring ID
+    for (const dateKey in this.movedTransactions) {
+      if (this.movedTransactions[dateKey] &&
+          this.movedTransactions[dateKey].recurringId === id) {
+        delete this.movedTransactions[dateKey];
+      }
+    }
 
     this.debouncedSave();
     return true;
