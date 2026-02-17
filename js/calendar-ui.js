@@ -37,15 +37,6 @@ class CalendarUI {
     if (notesCloseBtn) {
       notesCloseBtn.addEventListener("click", () => this.hideNotesModal());
     }
-    // Close notes modal when clicking outside
-    if (notesModal) {
-      notesModal.addEventListener("click", (e) => {
-        if (e.target === notesModal) {
-          this.hideNotesModal();
-        }
-      });
-    }
-
     // Use event delegation for day clicks to avoid memory leaks
     const calendarDays = document.getElementById("calendarDays");
     if (calendarDays) {
