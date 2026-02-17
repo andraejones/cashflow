@@ -52,7 +52,10 @@ class SearchUI {
 
     document
       .getElementById("searchSortBy")
-      .addEventListener("change", () => this.updateSearchResults());
+      .addEventListener("change", () => {
+        this.currentPage = 1;
+        this.updateSearchResults();
+      });
 
     document
       .getElementById("exportResultsButton")
@@ -134,8 +137,8 @@ class SearchUI {
       const descriptionText =
         typeof transaction.description === "string" ? transaction.description : "";
       const description = descriptionText
-        .replace(/,/g, " ")
-        .replace(/"/g, '""');
+        .replace(/"/g, '""')
+        .replace(/[\r\n]+/g, " ");
       const type = transaction.type;
       const recurring = transaction.recurringId ? "Yes" : "No";
 
@@ -315,6 +318,32 @@ class SearchUI {
         }
       }
     }
+
+    // Also search recurring transaction definitions
+    const recurringTransactions = this.store.getRecurringTransactions();
+    // Build set of recurringIds already found to avoid duplicates
+    const foundRecurringIds = new Set();
+    foundTransactions.forEach(({ transaction }) => {
+      if (transaction.recurringId) foundRecurringIds.add(transaction.recurringId);
+    });
+
+    for (const rt of recurringTransactions) {
+      if (foundRecurringIds.has(rt.id)) continue;
+      if (typeFilter && rt.type !== typeFilter) continue;
+      if (hasMinAmount && rt.amount < minAmount) continue;
+      if (hasMaxAmount && rt.amount > maxAmount) continue;
+      if (dateFrom && rt.startDate < dateFrom) continue;
+      if (dateTo && rt.startDate > dateTo) continue;
+      if (searchTerm === "") {
+        foundTransactions.push({ date: rt.startDate, transaction: rt, isRecurringDef: true });
+        continue;
+      }
+      const desc = (typeof rt.description === "string" ? rt.description : "").toLowerCase();
+      if (desc.includes(searchTerm) || matchesAmount(rt.amount, searchTerm)) {
+        foundTransactions.push({ date: rt.startDate, transaction: rt, isRecurringDef: true });
+      }
+    }
+
     this.totalResults = foundTransactions.length;
     this.searchResults = foundTransactions;
     this.updateSearchResults();

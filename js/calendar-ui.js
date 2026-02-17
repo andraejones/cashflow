@@ -172,7 +172,7 @@ class CalendarUI {
       if (dailyTotals.balance !== null) {
         currentBalance = dailyTotals.balance;
       } else {
-        currentBalance += dailyTotals.income - dailyTotals.expense;
+        currentBalance = this.calculationService.roundToCents(currentBalance + dailyTotals.income - dailyTotals.expense);
       }
     }
 
@@ -185,7 +185,7 @@ class CalendarUI {
       if (dailyTotals.balance !== null) {
         currentBalance = dailyTotals.balance;
       } else {
-        currentBalance += dailyTotals.income - dailyTotals.expense;
+        currentBalance = this.calculationService.roundToCents(currentBalance + dailyTotals.income - dailyTotals.expense);
       }
 
       // Track first crisis date (first day with balance ≤0)
@@ -247,10 +247,17 @@ class CalendarUI {
         : 0;
       if (dailyTotals.balance !== null) {
         runningBalance = dailyTotals.balance;
+        // Recalculate unsettled total from source data (Ending Balance doesn't settle expenses)
         runningUnsettledExpense = 0;
+        for (const u of allUnsettled) {
+          if (u.date <= dateString) {
+            runningUnsettledExpense += u.transaction.amount;
+          }
+        }
+        runningUnsettledExpense = this.calculationService.roundToCents(runningUnsettledExpense);
       } else {
-        runningBalance += dailyTotals.income - dailyTotals.expense;
-        runningUnsettledExpense += dailyTotals.unsettledExpense;
+        runningBalance = this.calculationService.roundToCents(runningBalance + dailyTotals.income - dailyTotals.expense);
+        runningUnsettledExpense = this.calculationService.roundToCents(runningUnsettledExpense + dailyTotals.unsettledExpense);
       }
 
       const balanceWithoutUnsettled = runningUnsettledExpense > 0

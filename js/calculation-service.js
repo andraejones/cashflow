@@ -99,10 +99,11 @@ class CalculationService {
     const lastMonthYear = endYear;
     const lastMonthMonth = endMonth;
 
-    if (lastMonthMonth === 12) {
-      allMonths.push(`${lastMonthYear + 1}-01`);
-    } else {
-      allMonths.push(`${lastMonthYear}-${String(lastMonthMonth + 1).padStart(2, "0")}`);
+    const nextMonth = lastMonthMonth === 12
+      ? `${lastMonthYear + 1}-01`
+      : `${lastMonthYear}-${String(lastMonthMonth + 1).padStart(2, "0")}`;
+    if (!allMonths.includes(nextMonth)) {
+      allMonths.push(nextMonth);
     }
     allMonths.sort((a, b) => {
       const [yearA, monthA] = a.split('-').map(Number);

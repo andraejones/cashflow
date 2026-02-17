@@ -470,8 +470,9 @@ class CloudSync {
     if (!this.autoSyncEnabled) {
       return;
     }
-    // Prevent scheduling new saves during an active sync
+    // Prevent scheduling new saves during an active sync, but remember the request
     if (this._isSyncing) {
+      this._pendingSaveAfterSync = true;
       return;
     }
 
@@ -1122,14 +1123,10 @@ class CloudSync {
 
       // Step 3: Store the new ETag and sync time
       const newETag = response.headers.get("ETag");
-      // Refresh ETag via HEAD so it matches future heartbeat GET checks
+      // Refresh ETag via GET so it matches future heartbeat GET checks
       // (GitHub may return different ETags for PATCH vs GET responses)
       try {
-        const headResp = await fetch(`https://api.github.com/gists/${gistId}`, {
-          method: 'HEAD',
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const refreshedETag = headResp.headers.get('ETag');
+        const { etag: refreshedETag } = await this._fetchGist(token, gistId, null);
         this._storeETag(refreshedETag || newETag);
       } catch (e) {
         this._storeETag(newETag);
@@ -1151,6 +1148,10 @@ class CloudSync {
     } finally {
       this._isSyncing = false;
       Utils.hideLoading();
+      if (this._pendingSaveAfterSync) {
+        this._pendingSaveAfterSync = false;
+        this.scheduleCloudSave();
+      }
     }
   }
 
@@ -1258,10 +1259,9 @@ class CloudSync {
           const mergedData = this._mergeData(localData, remoteData);
 
           // Only resync if merge actually produced different data than remote
-          const mergedJson = JSON.stringify(mergedData.transactions) +
-            JSON.stringify(mergedData.recurringTransactions);
-          const remoteJson = JSON.stringify(remoteData.transactions) +
-            JSON.stringify(remoteData.recurringTransactions);
+          const fieldsToCompare = ['transactions', 'recurringTransactions', 'skippedTransactions', 'debts', 'cashInfusions', 'monthlyNotes', 'movedTransactions', 'debtSnowballSettings'];
+          const mergedJson = fieldsToCompare.map(f => JSON.stringify(mergedData[f])).join('');
+          const remoteJson = fieldsToCompare.map(f => JSON.stringify(remoteData[f])).join('');
 
           if (mergedJson !== remoteJson) {
             dataToImport = mergedData;
