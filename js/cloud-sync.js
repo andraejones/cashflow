@@ -477,6 +477,8 @@ class CloudSync {
 
     clearTimeout(this.saveTimeout);
     this.showPendingMessage();
+    // Mark save time early so heartbeat checks during the delay won't false-positive
+    this._lastSaveTime = Date.now();
 
     this.saveTimeout = setTimeout(async () => {
       const { token, gistId } = await this.getCloudCredentialsAsync();
@@ -1120,7 +1122,18 @@ class CloudSync {
 
       // Step 3: Store the new ETag and sync time
       const newETag = response.headers.get("ETag");
-      this._storeETag(newETag);
+      // Refresh ETag via HEAD so it matches future heartbeat GET checks
+      // (GitHub may return different ETags for PATCH vs GET responses)
+      try {
+        const headResp = await fetch(`https://api.github.com/gists/${gistId}`, {
+          method: 'HEAD',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const refreshedETag = headResp.headers.get('ETag');
+        this._storeETag(refreshedETag || newETag);
+      } catch (e) {
+        this._storeETag(newETag);
+      }
       this._storeSyncTime();
       // Record save time for grace period (avoids false "remote changes" detection)
       this._lastSaveTime = Date.now();
