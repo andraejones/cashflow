@@ -990,6 +990,7 @@ class CloudSync {
       // Step 1: Check if remote has changed using ETag
       // Flush any pending debounced saves to ensure we export the latest data
       this.store.flushPendingSave();
+      clearTimeout(this.saveTimeout);   // cancel any queued auto-sync — we're saving now
 
       let dataToSave = {
         ...this.store.exportData(),
