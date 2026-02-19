@@ -133,7 +133,7 @@ class CalculationService {
       const isFirstMonth = index === 0;
       const daysInMonth = new Date(year, month, 0).getDate();
       for (let day = 1; day <= daysInMonth; day++) {
-        const dateString = Utils.formatDateString(new Date(year, month - 1, day));
+        const dateString = Utils.formatDateString(new Date(year, month - 1, day, 12, 0, 0));
 
         if (transactions[dateString]) {
           let balanceSet = false;

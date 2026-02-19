@@ -247,20 +247,27 @@ class PinProtection {
   // Synchronous encrypt for compatibility - stores as marker for async encryption
   encrypt(value) {
     if (!this.currentPin) return value;
-    // For synchronous calls, we need to handle this differently
-    // Store the value with a marker and encrypt asynchronously on next save
-    // For now, use the legacy method but mark for migration
-    const xor = Array.from(value).map((ch, i) =>
-      String.fromCharCode(ch.charCodeAt(0) ^ this.currentPin.charCodeAt(i % this.currentPin.length))
-    ).join("");
-    return "xor:" + this.encodeBase64(xor);
+    const bytes = new TextEncoder().encode(value);
+    const pinBytes = new TextEncoder().encode(this.currentPin);
+    const xored = bytes.map((b, i) => b ^ pinBytes[i % pinBytes.length]);
+    // Use Array.from to build the string correctly and avoid maximum call stack bug
+    const binaryString = Array.from(xored, byte => String.fromCharCode(byte)).join('');
+    return "xor2:" + btoa(binaryString);
   }
 
   // Synchronous decrypt for compatibility
   decrypt(value) {
     if (!this.currentPin) return value;
     try {
-      // Check for legacy XOR format (no prefix or "xor:" prefix)
+      // New byte-level XOR (emoji-safe)
+      if (value.startsWith("xor2:")) {
+        const raw = atob(value.slice(5));
+        const bytes = Uint8Array.from(raw, ch => ch.charCodeAt(0));
+        const pinBytes = new TextEncoder().encode(this.currentPin);
+        const xored = bytes.map((b, i) => b ^ pinBytes[i % pinBytes.length]);
+        return new TextDecoder().decode(xored);
+      }
+      // Legacy XOR format (no emoji support, kept for old data)
       if (value.startsWith("xor:")) {
         return this._decryptLegacyXOR(value.slice(4), this.currentPin);
       }
