@@ -120,7 +120,7 @@ class RecurringTransactionManager {
       endDate.getDate(),
       12, 0, 0
     );
-    return Math.floor((endLocal.getTime() - startLocal.getTime()) / (1000 * 60 * 60 * 24));
+    return Math.round((endLocal.getTime() - startLocal.getTime()) / (1000 * 60 * 60 * 24));
   }
 
   // Check if a year is a leap year

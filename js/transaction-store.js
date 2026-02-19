@@ -56,7 +56,7 @@ class TransactionStore {
 
       // If a save is in progress, queue this one
       if (this._saveInProgress) {
-        this._queuedSave = wasModified;
+        this._queuedSave = this._queuedSave || wasModified;
         return;
       }
 
