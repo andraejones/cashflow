@@ -8,18 +8,20 @@ Plan and monitor monthly cash movement and debts.
 
 ## Documentation status
 
-Updated for appVersion 2.0.0 on 2026-02-16 (source of truth: `js/transaction-store.js`).
+Updated for appVersion 2.0.0 on 2026-02-18 (source of truth: `js/transaction-store.js`).
 
 ## Features
 
-- Monthly calendar with daily totals and running balance.
-- One-off and recurring transactions (daily to yearly, custom intervals, business-day adjustments).
-- Unsettled expense tracking for one-time and recurring transactions with dual balance display (with/without unsettled).
+- Monthly calendar with daily totals and running balance; the lowest-balance day and first upcoming negative-balance day in the next 30 days are highlighted.
+- One-off and recurring transactions (daily to yearly, semi-monthly, custom intervals, day-specific rules like "first Monday of the month", business-day adjustments, variable/escalating amounts, optional end date or max-occurrence limit).
+- Recurring transaction occurrences can be rescheduled to a different date or skipped individually without affecting other occurrences. When editing a recurring transaction, choose to update only this occurrence, this and future occurrences, or all occurrences.
+- Unsettled expense tracking: mark one-time or recurring expenses as unsettled; they carry forward to today's view until resolved. Dual balance display (with/without unsettled) shown on each day. Older unsettled recurring expenses are auto-settled when a later occurrence is detected.
 - Hidden transactions (e.g. debt snowball generated) shown with visual distinction.
-- Debt snowball planner with minimum plus extra payment scheduling.
-- Search with advanced filters and CSV export.
+- Debt snowball planner with minimum-plus-extra payment scheduling, per-debt interest rate field, one-time cash infusions, and a "Convert to Debt" shortcut from any recurring expense.
+- Search with advanced filters, sort by date/amount/description, pagination (50 results per page), and CSV export.
+- Monthly summary shows projected minimum balance for the next 30 days.
 - Full data import and export (JSON).
-- Optional PIN lock with FaceID/TouchID biometric unlock and GitHub Gist cloud sync (handles truncated Gist files).
+- Optional PIN lock with FaceID/TouchID biometric unlock (120-second inactivity timeout) and GitHub Gist cloud sync with background change detection (handles truncated Gist files).
 
 ## Calendar star indicators
 
