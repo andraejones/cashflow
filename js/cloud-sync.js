@@ -1147,6 +1147,7 @@ class CloudSync {
         "error"
       );
     } finally {
+      this.clearPendingMessage();
       this._isSyncing = false;
       Utils.hideLoading();
       if (this._pendingSaveAfterSync) {
