@@ -72,10 +72,7 @@ class SearchUI {
       .getElementById("searchModal")
       .addEventListener("keydown", (event) => {
         if (event.key === "Escape") {
-          const modal = document.getElementById("searchModal");
-          modal.style.display = "none";
-          modal.setAttribute("aria-hidden", "true");
-          ModalManager.closeModal(modal);
+          this.hideSearchModal();
         }
       });
   }
@@ -100,12 +97,24 @@ class SearchUI {
     const modal = document.getElementById("searchModal");
     modal.style.display = "block";
     modal.setAttribute("aria-hidden", "false");
+    ModalManager.openModal(modal);
     document.getElementById("searchInput").value = "";
     this.clearSearch();
     setTimeout(() => {
       document.getElementById("searchInput").focus();
     }, 100);
     this.updateActionButtons();
+  }
+
+
+  hideSearchModal() {
+    const modal = document.getElementById("searchModal");
+    if (!modal) {
+      return;
+    }
+    modal.style.display = "none";
+    modal.setAttribute("aria-hidden", "true");
+    ModalManager.closeModal(modal);
   }
 
 
@@ -457,13 +466,13 @@ class SearchUI {
         resultDiv.appendChild(hiddenSpan);
       }
       resultDiv.addEventListener("click", () => {
-        document.getElementById("searchModal").style.display = "none";
+        this.hideSearchModal();
         this.transactionUI.showTransactionDetails(date);
       });
       resultDiv.addEventListener("keydown", (event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
-          document.getElementById("searchModal").style.display = "none";
+          this.hideSearchModal();
           this.transactionUI.showTransactionDetails(date);
         }
       });
