@@ -1595,6 +1595,9 @@ class RecurringTransactionManager {
           ...recurringTransaction.semiMonthlyDays,
         ];
       }
+      if (recurringTransaction.semiMonthlyLastDay) {
+        newRecurringTransaction.semiMonthlyLastDay = true;
+      }
 
       if (recurringTransaction.customInterval) {
         newRecurringTransaction.customInterval = {
@@ -1613,6 +1616,15 @@ class RecurringTransactionManager {
 
       if (recurringTransaction.settled !== undefined) {
         newRecurringTransaction.settled = recurringTransaction.settled;
+      }
+      if (recurringTransaction.debtId) {
+        newRecurringTransaction.debtId = recurringTransaction.debtId;
+      }
+      if (recurringTransaction.debtRole) {
+        newRecurringTransaction.debtRole = recurringTransaction.debtRole;
+      }
+      if (recurringTransaction.debtName) {
+        newRecurringTransaction.debtName = recurringTransaction.debtName;
       }
 
       if (recurringTransaction.endDate) {

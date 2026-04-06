@@ -13,6 +13,7 @@ class TransactionStore {
     this.debts = [];
     this.cashInfusions = [];
     this.monthlyNotes = {};
+    this.lastUpdated = null;
     this.debtSnowballSettings = {
       extraPayment: 0,
       autoGenerate: false,
@@ -190,6 +191,9 @@ class TransactionStore {
       const storedMovedTransactions = decrypt(
         this.storage.getItem("movedTransactions")
       );
+      const storedLastUpdated = decrypt(
+        this.storage.getItem("lastUpdated")
+      );
       const storedDeletedItems = decrypt(
         this.storage.getItem("deletedItems")
       );
@@ -297,6 +301,10 @@ class TransactionStore {
         }
       }
 
+      if (typeof storedLastUpdated === "string" && storedLastUpdated) {
+        this.lastUpdated = storedLastUpdated;
+      }
+
       // Load deleted items tracking for merge conflict resolution
       if (storedDeletedItems) {
         this._deletedItems = JSON.parse(storedDeletedItems);
@@ -326,6 +334,7 @@ class TransactionStore {
       this.skippedTransactions = {};
       this.debts = [];
       this.cashInfusions = [];
+      this.lastUpdated = null;
       this.debtSnowballSettings = {
         extraPayment: 0,
         autoGenerate: false,
@@ -393,6 +402,10 @@ class TransactionStore {
         return val;
       };
 
+      if (isDataModified || !this.lastUpdated) {
+        this.lastUpdated = new Date().toISOString();
+      }
+
       this.storage.setItem(
         "transactions",
         encrypt(JSON.stringify(this._filterPersistedTransactions(this.transactions)))
@@ -426,6 +439,10 @@ class TransactionStore {
         "movedTransactions",
         encrypt(JSON.stringify(this.movedTransactions))
       );
+      this.storage.setItem(
+        "lastUpdated",
+        encrypt(this.lastUpdated || "")
+      );
       // Prune old deleted items before saving
       this._pruneDeletedItems();
       this.storage.setItem(
@@ -457,6 +474,7 @@ class TransactionStore {
     this.cashInfusions = [];
     this.monthlyNotes = {};
     this.movedTransactions = {};
+    this.lastUpdated = null;
     this.debtSnowballSettings = {
       extraPayment: 0,
       autoGenerate: false,
@@ -1031,6 +1049,7 @@ class TransactionStore {
       monthlyNotes: this.monthlyNotes,
       debtSnowballSettings: this.debtSnowballSettings,
       _deletedItems: this._deletedItems,
+      lastUpdated: this.lastUpdated,
       lastExported: new Date().toISOString(),
       appVersion: "2.0.0"
     };
@@ -1063,7 +1082,8 @@ class TransactionStore {
       cashInfusions: this.cashInfusions,
       monthlyNotes: this.monthlyNotes,
       debtSnowballSettings: this.debtSnowballSettings,
-      _deletedItems: this._deletedItems
+      _deletedItems: this._deletedItems,
+      lastUpdated: this.lastUpdated
     };
 
     try {
@@ -1097,6 +1117,8 @@ class TransactionStore {
       };
       this.monthlyNotes = data.monthlyNotes || {};
       this.movedTransactions = data.movedTransactions || {};
+      this.lastUpdated =
+        typeof data.lastUpdated === "string" ? data.lastUpdated : this.lastUpdated;
 
       // Import deleted items tracking for merge conflict resolution
       this._deletedItems = data._deletedItems || {
@@ -1233,6 +1255,7 @@ class TransactionStore {
       this.monthlyNotes = backup.monthlyNotes;
       this.debtSnowballSettings = backup.debtSnowballSettings;
       this._deletedItems = backup._deletedItems;
+      this.lastUpdated = backup.lastUpdated;
       return false;
     }
   }

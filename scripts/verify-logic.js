@@ -34,7 +34,8 @@ const jsDir = path.join(__dirname, '../js');
 const files = [
   'transaction-store.js',
   'recurring-manager.js',
-  'calculation-service.js'
+  'calculation-service.js',
+  'cloud-sync.js'
 ];
 
 files.forEach(file => {
@@ -104,5 +105,85 @@ if (!cached || cached.length === 0) throw new Error("Recurring transactions not 
 const rentTxn = cached.find(item => item.transaction.description === 'Rent');
 if (!rentTxn) throw new Error("Rent transaction not found in next month");
 console.log("✅ Recurring transactions expanded");
+
+// TEST 4: Editing future recurring transactions preserves recurrence metadata
+console.log("TEST 4: Future Edit Preserves Recurrence Metadata");
+const metadataStore = new TransactionStore();
+metadataStore.resetData();
+const metadataRecurringManager = new RecurringTransactionManager(metadataStore);
+
+const recurringId = metadataStore.addRecurringTransaction({
+  id: "semi-last-day-recurring",
+  amount: 75,
+  type: "expense",
+  description: "Debt Minimum",
+  recurrence: "semi-monthly",
+  startDate: "2026-01-31",
+  semiMonthlyDays: [1, 31],
+  semiMonthlyLastDay: true,
+  debtId: "debt-1",
+  debtRole: "minimum",
+  debtName: "Visa",
+});
+
+metadataStore.addTransaction("2026-01-31", {
+  amount: 75,
+  type: "expense",
+  description: "Debt Minimum",
+  recurringId,
+  settled: true
+});
+
+const edited = metadataRecurringManager.editTransaction(
+  "2026-01-31",
+  0,
+  { amount: 80, type: "expense", description: "Updated Debt Minimum" },
+  "future"
+);
+
+if (!edited) throw new Error("Future recurring edit failed");
+
+const updatedRecurring = metadataStore
+  .getRecurringTransactions()
+  .find((rt) => rt.id !== recurringId);
+
+if (!updatedRecurring) throw new Error("New future recurring transaction was not created");
+if (updatedRecurring.semiMonthlyLastDay !== true) {
+  throw new Error("semiMonthlyLastDay was not preserved on future edit");
+}
+if (updatedRecurring.debtId !== "debt-1") {
+  throw new Error("debtId was not preserved on future edit");
+}
+if (updatedRecurring.debtRole !== "minimum") {
+  throw new Error("debtRole was not preserved on future edit");
+}
+if (updatedRecurring.debtName !== "Visa") {
+  throw new Error("debtName was not preserved on future edit");
+}
+console.log("✅ Future recurring edit keeps debt and semi-monthly metadata");
+
+// TEST 5: Cloud sync detects generic local changes via lastUpdated
+console.log("TEST 5: Cloud Sync Local Change Detection");
+const syncStore = new TransactionStore();
+syncStore.resetData();
+syncStore.addTransaction("2026-04-02", {
+  amount: 10,
+  type: "expense",
+  description: "Coffee"
+});
+syncStore.flushPendingSave();
+
+const cloudSync = new CloudSync(syncStore, () => {});
+cloudSync._lastSyncTime = new Date(Date.now() - 60000);
+
+if (!cloudSync._hasLocalChangesSinceSync(syncStore.exportData())) {
+  throw new Error("Cloud sync failed to detect recent local changes");
+}
+
+cloudSync._lastSyncTime = new Date(Date.now() + 60000);
+if (cloudSync._hasLocalChangesSinceSync(syncStore.exportData())) {
+  throw new Error("Cloud sync reported local changes after sync time");
+}
+console.log("✅ Cloud sync detects local changes using lastUpdated");
 
 console.log("ALL TESTS PASSED");
