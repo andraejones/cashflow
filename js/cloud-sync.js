@@ -13,10 +13,15 @@ class CloudSync {
     this._updateAvailable = false;
     this._lastSaveTime = null;
     this._isSyncing = false;
+    this._suppressAutoSyncSchedule = false;
 
     if (typeof this.store.registerSaveCallback === 'function') {
       this.store.registerSaveCallback((isDataModified) => {
-        if (this.autoSyncEnabled && isDataModified) {
+        if (
+          this.autoSyncEnabled &&
+          isDataModified &&
+          !this._suppressAutoSyncSchedule
+        ) {
           this.scheduleCloudSave();
         }
       });
@@ -54,6 +59,25 @@ class CloudSync {
       localStorage.setItem('local_last_sync', this._lastSyncTime.toISOString());
     } catch (e) {
       console.warn('Could not save sync time', e);
+    }
+  }
+
+  async _refreshStoredETag(token, gistId, fallbackETag = null) {
+    try {
+      const { etag } = await this._fetchGist(token, gistId, null);
+      this._storeETag(etag || fallbackETag);
+    } catch (error) {
+      this._storeETag(fallbackETag);
+    }
+  }
+
+  _importWithoutSchedulingCloudSave(data) {
+    this._suppressAutoSyncSchedule = true;
+    try {
+      return this.store.importData(data);
+    } finally {
+      this._suppressAutoSyncSchedule = false;
+      this.cancelPendingCloudSave();
     }
   }
 
@@ -966,6 +990,7 @@ class CloudSync {
             gistId = await this.createNewGist(token, data);
             Utils.showNotification(`New Gist created with ID: ${gistId}`);
             await this.setCloudCredentialsAsync(token, gistId);
+            await this._refreshStoredETag(token, gistId);
             this._storeSyncTime();
             // Record save time for grace period (avoids false "remote changes" detection)
             this._lastSaveTime = Date.now();
@@ -1031,7 +1056,7 @@ class CloudSync {
               this.store.cancelPendingSave();
 
               // Import merged data into local store (silently, without triggering another save)
-              this.store.importData(mergedData);
+              this._importWithoutSchedulingCloudSave(mergedData);
 
               // Update dataToSave with merged result
               dataToSave = {
@@ -1098,7 +1123,9 @@ class CloudSync {
             const newGistId = await this.createNewGist(token, dataToSave);
             Utils.showNotification(`New Gist created with ID: ${newGistId}`);
             await this.setCloudCredentials(token, newGistId);
+            await this._refreshStoredETag(token, newGistId);
             this._storeSyncTime();
+            this._lastSaveTime = Date.now();
             if (syncIndicator)
               syncIndicator.className = "cloud-sync-indicator synced";
             return;
@@ -1126,12 +1153,7 @@ class CloudSync {
       const newETag = response.headers.get("ETag");
       // Refresh ETag via GET so it matches future heartbeat GET checks
       // (GitHub may return different ETags for PATCH vs GET responses)
-      try {
-        const { etag: refreshedETag } = await this._fetchGist(token, gistId, null);
-        this._storeETag(refreshedETag || newETag);
-      } catch (e) {
-        this._storeETag(newETag);
-      }
+      await this._refreshStoredETag(token, gistId, newETag);
       this._storeSyncTime();
       // Record save time for grace period (avoids false "remote changes" detection)
       this._lastSaveTime = Date.now();
@@ -1274,7 +1296,7 @@ class CloudSync {
           }
         }
 
-        const success = this.store.importData(dataToImport);
+        const success = this._importWithoutSchedulingCloudSave(dataToImport);
 
         if (!success) {
           throw new Error("Invalid data format in cloud storage");
@@ -1340,6 +1362,13 @@ class CloudSync {
     }
 
     const lastSyncTime = this._lastSyncTime.getTime();
+
+    if (localData.lastUpdated) {
+      const lastUpdatedTime = new Date(localData.lastUpdated).getTime();
+      if (!isNaN(lastUpdatedTime) && lastUpdatedTime > lastSyncTime) {
+        return true;
+      }
+    }
 
     // Check transactions for modifications after last sync
     const checkTimestamp = (item) => {

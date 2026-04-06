@@ -131,7 +131,7 @@ class SearchUI {
     }
     let csvContent = "Date,Type,Amount,Description,Recurring\n";
 
-    this.searchResults.forEach(({ date, transaction }) => {
+    this.searchResults.forEach(({ date, transaction, isRecurringDef }) => {
       const formattedDate = date.split("-").join("/");
       const amount = transaction.amount.toFixed(2);
       const descriptionText =
@@ -140,7 +140,7 @@ class SearchUI {
         .replace(/"/g, '""')
         .replace(/[\r\n]+/g, " ");
       const type = transaction.type;
-      const recurring = transaction.recurringId ? "Yes" : "No";
+      const recurring = (transaction.recurringId || isRecurringDef) ? "Yes" : "No";
 
       csvContent += `${formattedDate},${type},${amount},"${description}",${recurring}\n`;
     });
@@ -364,7 +364,7 @@ class SearchUI {
     if (this.searchResults.length === 0) {
       searchResults.innerHTML =
         "No transactions found matching the search criteria.";
-      clearButton.disabled = true;
+      clearButton.disabled = false;
       exportButton.disabled = true;
       paginationControls.style.display = "none";
       return;
@@ -410,12 +410,13 @@ class SearchUI {
     }
     const pageResults = sortedResults.slice(startIdx, endIdx);
 
-    pageResults.forEach(({ date, transaction }) => {
+    pageResults.forEach(({ date, transaction, isRecurringDef }) => {
       const resultDiv = document.createElement("div");
       const [year, month, day] = date.split("-");
       const formattedDate = `${month}/${day}/${year}`;
       const amountText = `${transaction.type === "income" ? "+" : transaction.type === "balance" ? "=" : "-"
         }$${transaction.amount.toFixed(2)}`;
+      const isRecurring = !!transaction.recurringId || isRecurringDef === true;
 
       resultDiv.className = "search-result-item";
       if (transaction.hidden === true) {
@@ -439,7 +440,7 @@ class SearchUI {
         typeof transaction.description === "string" ? transaction.description : "";
       resultDiv.appendChild(descriptionSpan);
 
-      if (transaction.recurringId) {
+      if (isRecurring) {
         const recurringSpan = document.createElement("span");
         recurringSpan.className = "search-result-recurring";
         recurringSpan.textContent = "(Recurring)";
