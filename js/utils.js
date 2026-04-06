@@ -134,7 +134,7 @@ const Utils = {
     existingToasts.forEach((toast) => toast.remove());
 
     const toast = document.createElement("div");
-    toast.className = type === "success" ? "success-toast" : "error-toast";
+    toast.className = type === "error" ? "error-toast" : "success-toast";
     toast.textContent = message;
     // Add ARIA attributes for accessibility
     toast.setAttribute("role", "status");

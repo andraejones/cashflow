@@ -72,7 +72,10 @@ class SearchUI {
       .getElementById("searchModal")
       .addEventListener("keydown", (event) => {
         if (event.key === "Escape") {
-          document.getElementById("searchModal").style.display = "none";
+          const modal = document.getElementById("searchModal");
+          modal.style.display = "none";
+          modal.setAttribute("aria-hidden", "true");
+          ModalManager.closeModal(modal);
         }
       });
   }
