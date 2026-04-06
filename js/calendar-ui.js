@@ -456,6 +456,7 @@ class CalendarUI {
     }
     modal.style.display = "block";
     modal.setAttribute("aria-hidden", "false");
+    ModalManager.openModal(modal);
   }
 
 
@@ -491,6 +492,7 @@ class CalendarUI {
 
     modal.style.display = "block";
     modal.setAttribute("aria-hidden", "false");
+    ModalManager.openModal(modal);
     textarea.focus();
   }
 
@@ -499,6 +501,7 @@ class CalendarUI {
     if (!modal) return;
     modal.style.display = "none";
     modal.setAttribute("aria-hidden", "true");
+    ModalManager.closeModal(modal);
   }
 
   saveNotes() {

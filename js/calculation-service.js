@@ -254,10 +254,10 @@ class CalculationService {
       if (dailyTotals.balance !== null) {
         runningBalance = dailyTotals.balance;
       } else {
-        runningBalance += dailyTotals.income - dailyTotals.expense;
+        runningBalance = this.roundToCents(runningBalance + dailyTotals.income - dailyTotals.expense);
       }
     }
-    return this.roundToCents(runningBalance);
+    return runningBalance;
   }
 
   calculateMonthlySummary(year, month) {

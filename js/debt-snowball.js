@@ -173,6 +173,7 @@ class DebtSnowballUI {
     this.lastFocusedElement = document.activeElement;
     this.modal.style.display = "block";
     this.modal.setAttribute("aria-hidden", "false");
+    ModalManager.openModal(this.modal);
     this.refresh();
     const closeBtn = document.getElementById("debtSnowballClose");
     if (closeBtn) {
@@ -184,6 +185,7 @@ class DebtSnowballUI {
     if (!this.modal) return;
     this.modal.style.display = "none";
     this.modal.setAttribute("aria-hidden", "true");
+    ModalManager.closeModal(this.modal);
     this.hideDebtForm();
     this.hideCashInfusionForm();
     this.convertingFromRecurringId = null;
