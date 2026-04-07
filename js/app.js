@@ -103,6 +103,11 @@ class CashflowApp {
     }
     this._operationLock = true;
     try {
+      const { token, gistId } = await this.cloudSync.getCloudCredentialsAsync();
+      if (!token || !gistId) {
+        return true;
+      }
+
       // Check if remote has changed before doing full load
       const hasChanges = await this.cloudSync.checkForRemoteChanges();
 
@@ -206,8 +211,14 @@ class CashflowApp {
             if (success) {
               // Close any open modals to prevent stale DOM state
               document.querySelectorAll('.modal[style*="display: block"], .modal[style*="display:block"]').forEach(m => {
+                if (document.activeElement && m.contains(document.activeElement)) {
+                  document.activeElement.blur();
+                }
                 m.style.display = 'none';
                 m.setAttribute('aria-hidden', 'true');
+                if (window.ModalManager) {
+                  window.ModalManager.closeModal(m);
+                }
               });
               this.recurringManager.invalidateCache();
               this.calculationService.invalidateCache();

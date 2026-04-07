@@ -1025,7 +1025,7 @@ class DebtSnowballUI {
     return this.getDateFromString(occurrences[0].dateString);
   }
 
-  getDebtSummaries(cutoffDate = null) {
+  getHistoricalDebtSnapshot(cutoffDate = null) {
     const debts = this.store.getDebts();
     const transactions = this.store.getTransactions();
     const cashInfusions = this.store.getCashInfusions();
@@ -1034,33 +1034,151 @@ class DebtSnowballUI {
       : null;
     const roundToCents = (value) =>
       Math.round((Number(value) || 0) * 100) / 100;
-    return debts.map((debt) => {
-      let paid = 0;
-      for (const dateKey in transactions) {
-        if (cutoffDateString && dateKey >= cutoffDateString) {
-          continue;
-        }
-        transactions[dateKey].forEach((t) => {
-          if (t.debtId !== debt.id) {
-            return;
-          }
-          if (t.recurringId && this.recurringManager) {
-            if (this.recurringManager.isTransactionSkipped(dateKey, t.recurringId)) {
-              return;
-            }
-          }
-          if (t.type === "expense") {
-            paid = roundToCents(paid + t.amount);
-          }
+    const remainingByDebtId = {};
+    const paidByDebtId = {};
+    const debtNameById = {};
+    const eventsByDate = new Map();
+
+    const ensureDateBucket = (dateString) => {
+      if (!eventsByDate.has(dateString)) {
+        eventsByDate.set(dateString, {
+          transactions: [],
+          targetedInfusions: [],
+          autoInfusions: [],
         });
       }
-      cashInfusions.forEach((infusion) => {
-        if (infusion.targetDebtId !== debt.id) return;
-        if (!infusion.date) return;
-        if (cutoffDateString && infusion.date >= cutoffDateString) return;
-        paid = roundToCents(paid + (Number(infusion.amount) || 0));
+      return eventsByDate.get(dateString);
+    };
+
+    debts.forEach((debt) => {
+      remainingByDebtId[debt.id] = roundToCents(Number(debt.balance) || 0);
+      paidByDebtId[debt.id] = 0;
+      debtNameById[debt.id] = debt.name || "";
+    });
+
+    Object.keys(transactions).forEach((dateKey) => {
+      if (cutoffDateString && dateKey >= cutoffDateString) {
+        return;
+      }
+      transactions[dateKey].forEach((t) => {
+        if (!t.debtId || t.type !== "expense") {
+          return;
+        }
+        if (!Object.prototype.hasOwnProperty.call(remainingByDebtId, t.debtId)) {
+          return;
+        }
+        if (
+          t.recurringId &&
+          this.recurringManager &&
+          this.recurringManager.isTransactionSkipped(dateKey, t.recurringId)
+        ) {
+          return;
+        }
+        ensureDateBucket(dateKey).transactions.push(t);
       });
-      const remaining = roundToCents(Math.max(0, debt.balance - paid));
+    });
+
+    cashInfusions.forEach((infusion) => {
+      if (!infusion.date) return;
+      if (cutoffDateString && infusion.date >= cutoffDateString) return;
+      const amount = roundToCents(Number(infusion.amount) || 0);
+      if (amount <= 0) return;
+
+      const bucket = ensureDateBucket(infusion.date);
+      if (
+        infusion.targetDebtId &&
+        Object.prototype.hasOwnProperty.call(
+          remainingByDebtId,
+          infusion.targetDebtId
+        )
+      ) {
+        bucket.targetedInfusions.push({
+          debtId: infusion.targetDebtId,
+          amount,
+        });
+      } else {
+        bucket.autoInfusions.push({ amount });
+      }
+    });
+
+    const sortedDates = Array.from(eventsByDate.keys()).sort();
+    sortedDates.forEach((dateKey) => {
+      const bucket = eventsByDate.get(dateKey);
+      bucket.transactions.forEach((transaction) => {
+        const debtId = transaction.debtId;
+        const amount = roundToCents(Number(transaction.amount) || 0);
+        if (amount <= 0) {
+          return;
+        }
+        paidByDebtId[debtId] = roundToCents(paidByDebtId[debtId] + amount);
+        remainingByDebtId[debtId] = roundToCents(
+          Math.max(0, remainingByDebtId[debtId] - amount)
+        );
+      });
+
+      bucket.targetedInfusions.forEach((infusion) => {
+        const currentBalance = Number(remainingByDebtId[infusion.debtId]) || 0;
+        if (currentBalance <= 0) {
+          return;
+        }
+        const applied = roundToCents(
+          Math.min(currentBalance, Number(infusion.amount) || 0)
+        );
+        if (applied <= 0) {
+          return;
+        }
+        paidByDebtId[infusion.debtId] = roundToCents(
+          paidByDebtId[infusion.debtId] + applied
+        );
+        remainingByDebtId[infusion.debtId] = roundToCents(
+          currentBalance - applied
+        );
+      });
+
+      bucket.autoInfusions.forEach((infusion) => {
+        let remainingInfusion = roundToCents(Number(infusion.amount) || 0);
+        if (remainingInfusion <= 0) {
+          return;
+        }
+        const debtOrder = Object.keys(remainingByDebtId)
+          .filter((debtId) => remainingByDebtId[debtId] > 0)
+          .sort((leftId, rightId) => {
+            if (remainingByDebtId[leftId] !== remainingByDebtId[rightId]) {
+              return remainingByDebtId[leftId] - remainingByDebtId[rightId];
+            }
+            return debtNameById[leftId].localeCompare(debtNameById[rightId]);
+          });
+
+        debtOrder.forEach((debtId) => {
+          if (remainingInfusion <= 0) {
+            return;
+          }
+          const currentBalance = Number(remainingByDebtId[debtId]) || 0;
+          if (currentBalance <= 0) {
+            return;
+          }
+          const applied = roundToCents(
+            Math.min(currentBalance, remainingInfusion)
+          );
+          if (applied <= 0) {
+            return;
+          }
+          paidByDebtId[debtId] = roundToCents(paidByDebtId[debtId] + applied);
+          remainingByDebtId[debtId] = roundToCents(currentBalance - applied);
+          remainingInfusion = roundToCents(remainingInfusion - applied);
+        });
+      });
+    });
+
+    return { paidByDebtId, remainingByDebtId };
+  }
+
+  getDebtSummaries(cutoffDate = null) {
+    const debts = this.store.getDebts();
+    const snapshot = this.getHistoricalDebtSnapshot(cutoffDate);
+    return debts.map((debt) => {
+      const paid = Number(snapshot.paidByDebtId[debt.id]) || 0;
+      const remaining = Number(snapshot.remainingByDebtId[debt.id]) || 0;
       return {
         debt,
         paid,
@@ -1151,20 +1269,24 @@ class DebtSnowballUI {
     const today = new Date();
     const currentYear = today.getFullYear();
     const currentMonth = today.getMonth();
+    const projectionStartDate = new Date(
+      currentYear,
+      currentMonth,
+      today.getDate() + 1
+    );
+    const projectionStartDateString =
+      Utils.formatDateString(projectionStartDate);
     const viewIndex = this.getMonthIndex(viewYear, viewMonth);
     const currentIndex = this.getMonthIndex(currentYear, currentMonth);
-    // Always use current month as the base for projections to ensure consistency.
-    // For past months, we still project from current month but capture the
-    // actual historical balances separately for display purposes.
     const baseYear = currentYear;
     const baseMonth = currentMonth;
-    const baseDate = new Date(baseYear, baseMonth, 1);
+    const baseDate = projectionStartDate;
     const baseSummaries = this.getDebtSummaries(baseDate);
 
     // For past month views, get historical balances for display
     let historicalViewBalances = null;
     if (viewIndex < currentIndex) {
-      const viewDate = new Date(viewYear, viewMonth, 1);
+      const viewDate = new Date(viewYear, viewMonth + 1, 1);
       const historicalSummaries = this.getDebtSummaries(viewDate);
       historicalViewBalances = {};
       historicalSummaries.forEach(({ debt, remaining }) => {
@@ -1224,9 +1346,6 @@ class DebtSnowballUI {
     let month = baseMonth;
 
     for (let i = 0; i < maxMonths; i++) {
-      if (viewBalances === null && year === viewYear && month === viewMonth) {
-        viewBalances = { ...balances };
-      }
       const monthKey = `${year}-${String(month + 1).padStart(2, "0")}`;
       const monthIndex = this.getMonthIndex(year, month);
       const monthlyTotalsByDebtId = {};
@@ -1241,8 +1360,18 @@ class DebtSnowballUI {
           year,
           month
         );
+        const filteredOccurrences =
+          year === currentYear && month === currentMonth
+            ? occurrences.filter(
+              (occurrence) =>
+                occurrence.dateString >= projectionStartDateString
+            )
+            : occurrences;
         const totalPayment = roundToCents(
-          occurrences.reduce((sum, occurrence) => sum + occurrence.amount, 0)
+          filteredOccurrences.reduce(
+            (sum, occurrence) => sum + occurrence.amount,
+            0
+          )
         );
         monthlyTotalsByDebtId[debtId] = totalPayment;
       });
@@ -1293,7 +1422,14 @@ class DebtSnowballUI {
         : 0;
 
       // Calculate cash infusion amount for this month
-      const monthInfusions = infusionsByMonthKey[monthKey] || [];
+      const monthInfusions = (infusionsByMonthKey[monthKey] || []).filter(
+        (infusion) =>
+          !(
+            year === currentYear &&
+            month === currentMonth &&
+            infusion.date < projectionStartDateString
+          )
+      );
       let generalInfusionAmount = 0;
       const targetedInfusionsByDebtId = {};
       monthInfusions.forEach((infusion) => {
@@ -1353,6 +1489,9 @@ class DebtSnowballUI {
         monthInfo.monthlyTotalsByDebtId = monthlyTotalsByDebtId;
       }
       monthTargets[monthKey] = monthInfo;
+      if (viewBalances === null && year === viewYear && month === viewMonth) {
+        viewBalances = { ...balances };
+      }
 
       month += 1;
       if (month > 11) {
