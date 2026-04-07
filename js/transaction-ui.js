@@ -877,6 +877,32 @@ class TransactionUI {
 
     const transaction = transactions[date][index];
     const isRecurring = transaction.recurringId !== undefined;
+    const hasBalanceConflict = (targetDate) => {
+      const targetTransactions = transactions[targetDate] || [];
+      return targetTransactions.some((t, targetIndex) => {
+        if (t.type !== "balance") {
+          return false;
+        }
+        return !(targetDate === date && targetIndex === index);
+      });
+    };
+
+    if (type === "balance") {
+      if (isRecurring) {
+        Utils.showNotification(
+          "Recurring transactions cannot be changed to balance transactions.",
+          "error"
+        );
+        return;
+      }
+      if (hasBalanceConflict(newDate)) {
+        Utils.showNotification(
+          "Only one balance transaction is allowed per day.",
+          "error"
+        );
+        return;
+      }
+    }
 
     try {
       if (newDate === date) {

@@ -35,7 +35,8 @@ const files = [
   'transaction-store.js',
   'recurring-manager.js',
   'calculation-service.js',
-  'cloud-sync.js'
+  'cloud-sync.js',
+  'debt-snowball.js'
 ];
 
 files.forEach(file => {
@@ -185,5 +186,92 @@ if (cloudSync._hasLocalChangesSinceSync(syncStore.exportData())) {
   throw new Error("Cloud sync reported local changes after sync time");
 }
 console.log("✅ Cloud sync detects local changes using lastUpdated");
+
+// TEST 6: Debt summaries include auto-infusions before cutoff
+console.log("TEST 6: Debt Summaries Include Auto Infusions");
+const debtStore = new TransactionStore();
+debtStore.resetData();
+const debtRecurringManager = new RecurringTransactionManager(debtStore);
+const debtUI = Object.create(DebtSnowballUI.prototype);
+debtUI.store = debtStore;
+debtUI.recurringManager = debtRecurringManager;
+debtUI.daySpecificOptions = [];
+
+const debtOneId = debtStore.addDebt({
+  name: "Card A",
+  balance: 100,
+  minPayment: 10,
+  dueDay: 1,
+  recurrence: "monthly",
+  dueStartDate: "2026-03-01"
+});
+debtStore.addDebt({
+  name: "Card B",
+  balance: 200,
+  minPayment: 20,
+  dueDay: 1,
+  recurrence: "monthly",
+  dueStartDate: "2026-03-01"
+});
+debtStore.addCashInfusion({
+  name: "Windfall",
+  amount: 60,
+  date: "2026-03-10",
+  targetDebtId: null
+});
+
+const debtSummaries = debtUI.getDebtSummaries(new Date(2026, 3, 1));
+const debtOneSummary = debtSummaries.find((summary) => summary.debt.id === debtOneId);
+if (!debtOneSummary) throw new Error("Debt summary not found");
+if (debtOneSummary.remaining !== 40) {
+  throw new Error(`Expected auto infusion to reduce balance to 40, got ${debtOneSummary.remaining}`);
+}
+console.log("✅ Auto infusions are included in debt summaries");
+
+// TEST 7: Current month projection respects payments already made this month
+console.log("TEST 7: Current Month Projection Uses Completed Payments");
+const currentMonthStore = new TransactionStore();
+currentMonthStore.resetData();
+const currentMonthRecurringManager = new RecurringTransactionManager(currentMonthStore);
+const currentMonthDebtUI = Object.create(DebtSnowballUI.prototype);
+currentMonthDebtUI.store = currentMonthStore;
+currentMonthDebtUI.recurringManager = currentMonthRecurringManager;
+currentMonthDebtUI.daySpecificOptions = [];
+
+const now = new Date();
+const currentYear = now.getFullYear();
+const currentMonth = now.getMonth();
+const currentMonthKey = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`;
+const firstOfCurrentMonth = `${currentMonthKey}-01`;
+const currentDebtId = currentMonthStore.addDebt({
+  name: "Current Month Card",
+  balance: 100,
+  minPayment: 50,
+  dueDay: 1,
+  recurrence: "monthly",
+  dueStartDate: firstOfCurrentMonth
+});
+currentMonthStore.addTransaction(firstOfCurrentMonth, {
+  amount: 50,
+  type: "expense",
+  description: "Debt Payment: Current Month Card",
+  debtId: currentDebtId,
+  debtRole: "minimum"
+});
+
+const currentProjection = currentMonthDebtUI.calculateSnowballProjection(
+  currentYear,
+  currentMonth,
+  true
+);
+if (currentProjection.viewBalances[currentDebtId] !== 50) {
+  throw new Error(
+    `Expected current month projection balance 50 after completed payment, got ${currentProjection.viewBalances[currentDebtId]}`
+  );
+}
+if ((currentProjection.monthTargets[currentMonthKey]?.monthlyTotalsByDebtId?.[currentDebtId] || 0) !== 0) {
+  throw new Error("Current month projection still counts minimum payments that already occurred");
+}
+console.log("✅ Current month projection excludes completed payments");
 
 console.log("ALL TESTS PASSED");
