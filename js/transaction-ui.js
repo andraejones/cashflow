@@ -915,10 +915,14 @@ class TransactionUI {
           }
         }
 
+        const updatedFields = { amount, type, description };
+        if (type !== "expense") {
+          updatedFields.settled = undefined;
+        }
         this.recurringManager.editTransaction(
           date,
           index,
-          { amount, type, description },
+          updatedFields,
           editScope
         );
 
@@ -942,7 +946,7 @@ class TransactionUI {
             movedFrom: date,
             originalRecurringId: transaction.recurringId
           };
-          if (transaction.settled !== undefined) {
+          if (type === "expense" && transaction.settled !== undefined) {
             movedTransaction.settled = transaction.settled;
           }
           this.store.addTransaction(newDate, movedTransaction);
@@ -970,7 +974,7 @@ class TransactionUI {
               movedFrom: transaction.movedFrom,
               originalRecurringId: transaction.originalRecurringId
             };
-            if (transaction.settled !== undefined) {
+            if (type === "expense" && transaction.settled !== undefined) {
               reMovedTransaction.settled = transaction.settled;
             }
             this.store.addTransaction(newDate, reMovedTransaction);
@@ -979,8 +983,8 @@ class TransactionUI {
           // Regular one-time transaction
           this.store.deleteTransaction(date, index);
           const newTransaction = { amount, type, description };
-          // Preserve settled status for expenses
-          if (transaction.settled !== undefined) {
+          // Preserve settled status only when the new type is still expense
+          if (type === "expense" && transaction.settled !== undefined) {
             newTransaction.settled = transaction.settled;
           }
           this.store.addTransaction(newDate, newTransaction);

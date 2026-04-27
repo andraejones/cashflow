@@ -1447,6 +1447,26 @@ class RecurringTransactionManager {
         break;
 
       case "monthly":
+        if (rt.daySpecific) {
+          const parsed = this.parseDaySpecificData(rt.daySpecificData);
+          if (parsed) {
+            let y = startDate.getFullYear();
+            let m = startDate.getMonth();
+            const endY = beforeDate.getFullYear();
+            const endM = beforeDate.getMonth();
+            while (y < endY || (y === endY && m <= endM)) {
+              const occDate = this.getNthDayOfMonth(
+                y, m, parsed.dayOfWeek, parsed.occurrence
+              );
+              if (occDate && occDate >= startDate && occDate < beforeDate) {
+                count++;
+              }
+              m++;
+              if (m > 11) { m = 0; y++; }
+            }
+            break;
+          }
+        }
         count =
           (beforeDate.getFullYear() - startDate.getFullYear()) * 12 +
           (beforeDate.getMonth() - startDate.getMonth());

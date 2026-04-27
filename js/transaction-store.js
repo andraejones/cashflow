@@ -293,11 +293,8 @@ class TransactionStore {
         });
         if (hasStaleEntries) {
           console.log("Cleaned up stale movedTransactions entries");
-          // Save the cleaned data back to storage
-          this.storage.setItem(
-            "movedTransactions",
-            JSON.stringify(this.movedTransactions)
-          );
+          // Defer save so encryption (only available in saveData()) is applied
+          this._needsMigrationSave = true;
         }
       }
 
@@ -971,7 +968,7 @@ class TransactionStore {
     const results = [];
     Object.keys(this.transactions).forEach((date) => {
       this.transactions[date].forEach((t, index) => {
-        if (t.settled === false && t.type === "expense") {
+        if (t.settled === false && t.type === "expense" && t.hidden !== true) {
           if (t.recurringId) {
             const skippedIds = this.skippedTransactions[date];
             if (skippedIds && skippedIds.includes(t.recurringId)) {
