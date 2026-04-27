@@ -302,16 +302,6 @@ class CloudSync {
     return { token, gistId };
   }
 
-  async setCloudCredentials(token, gistId) {
-    if (token) {
-      const encryptedToken = await this.encryptValueAsync(token);
-      localStorage.setItem("github_token_encrypted", encryptedToken);
-    }
-    if (gistId) {
-      localStorage.setItem("gist_id", gistId);
-    }
-  }
-
   async setCloudCredentialsAsync(token, gistId) {
     if (token) {
       const encryptedToken = await this.encryptValueAsync(token);
@@ -1122,7 +1112,7 @@ class CloudSync {
             Utils.showNotification("Creating new Gist...");
             const newGistId = await this.createNewGist(token, dataToSave);
             Utils.showNotification(`New Gist created with ID: ${newGistId}`);
-            await this.setCloudCredentials(token, newGistId);
+            await this.setCloudCredentialsAsync(token, newGistId);
             await this._refreshStoredETag(token, newGistId);
             this._storeSyncTime();
             this._lastSaveTime = Date.now();

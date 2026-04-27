@@ -281,7 +281,7 @@ class CashflowApp {
 }
 document.addEventListener("DOMContentLoaded", async () => {
   window.pinProtection = new PinProtection();
-  const unlocked = await pinProtection.promptUnlock();
+  const unlocked = await window.pinProtection.promptUnlock();
   if (unlocked) {
     window.app = await CashflowApp.create(pinProtection);
   }
