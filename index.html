@@ -16,6 +16,25 @@
 
 <body>
   <div class="calendar" role="application" aria-label="Cashflow calendar">
+    <div class="app-toolbar" role="toolbar" aria-label="Application toolbar">
+      <div class="app-menu-wrapper">
+        <button id="menuButton" class="menu-btn" type="button" aria-label="Menu" aria-haspopup="true"
+          aria-expanded="false" aria-controls="calendarOptions">
+          <span class="menu-btn-icon" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </span>
+        </button>
+        <div id="calendarOptions" class="app-menu" role="menu" aria-hidden="true"></div>
+      </div>
+
+      <form id="topSearchForm" class="app-search" role="search" aria-label="Search transactions">
+        <span class="app-search-icon" aria-hidden="true">&#128269;</span>
+        <input type="search" id="topSearchInput" class="app-search-input"
+          placeholder="Search transactions..." aria-label="Search transactions"
+          autocomplete="off" />
+      </form>
+    </div>
+
     <div class="header" role="heading" aria-level="1">
       <button id="prevMonth" class="nav-btn" aria-label="Previous month">
         &#10094;
@@ -32,8 +51,6 @@
 
     <!-- ARIA live region for screen reader announcements -->
     <div id="ariaLiveRegion" class="sr-only" aria-live="polite" aria-atomic="true"></div>
-
-    <div id="calendarOptions" role="toolbar" aria-label="Calendar options"></div>
   </div>
 
   <div id="transactionModal" class="modal" role="dialog" aria-labelledby="modalDate" aria-hidden="true">
