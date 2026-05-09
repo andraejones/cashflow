@@ -383,15 +383,20 @@ class TransactionUI {
             transactionDiv.appendChild(skipBtn);
           }
 
-          // Add Settle/Unsettle button for expenses
+          // Add Settle/Unsettle button for expenses.
+          // `settled === false` is the only "unsettled" state; missing or `true` means settled.
           let settleBtn = null;
           if (normalizedType === "expense" && !isSkipped) {
+            const isCurrentlyUnsettled = t.settled === false;
             settleBtn = document.createElement("span");
             settleBtn.className = "settle-btn";
             settleBtn.setAttribute("role", "button");
             settleBtn.setAttribute("tabindex", "0");
-            settleBtn.setAttribute("aria-label", t.settled === false ? "Settle expense" : "Unsettle expense");
-            settleBtn.textContent = t.settled === false ? "Settle" : "Unsettle";
+            settleBtn.setAttribute(
+              "aria-label",
+              isCurrentlyUnsettled ? "Mark expense settled" : "Mark expense unsettled"
+            );
+            settleBtn.textContent = isCurrentlyUnsettled ? "Mark Settled" : "Mark Unsettled";
             transactionDiv.appendChild(settleBtn);
           }
 
@@ -532,9 +537,24 @@ class TransactionUI {
           }
 
           if (settleBtn) {
+            const txnId = t.id;
             const toggleSettled = () => {
-              const newSettled = t.settled === false ? true : false;
-              this.store.setTransactionSettled(date, index, newSettled);
+              // Resolve the current index from the store. The closure-captured index
+              // can become stale if applyRecurringTransactions reorders the array
+              // between render and click (e.g. when recurring instances re-expand).
+              const current = this.store.getTransactions()[date] || [];
+              let resolvedIndex = txnId
+                ? current.findIndex((x) => x.id === txnId)
+                : -1;
+              if (resolvedIndex === -1) {
+                resolvedIndex = index;
+              }
+              const target = current[resolvedIndex];
+              if (!target) {
+                return;
+              }
+              const newSettled = target.settled === false ? true : false;
+              this.store.setTransactionSettled(date, resolvedIndex, newSettled);
               this.showTransactionDetails(date);
               this._notifyChange();
               Utils.showNotification(newSettled ? "Transaction settled" : "Transaction unsettled");
