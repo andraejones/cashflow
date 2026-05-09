@@ -421,6 +421,16 @@ class CalendarUI {
         type="button"
         role="menuitem"
         class="calendar-option"
+        onclick="app.showRecentTransactions(); app.calendarUI.closeAppMenu();"
+        aria-haspopup="dialog"
+        aria-controls="recentTransactionsModal"
+      >
+        Recent Transactions
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        class="calendar-option"
         onclick="app.debtSnowball.showModal(); app.calendarUI.closeAppMenu();"
         aria-haspopup="dialog"
         aria-controls="debtSnowballModal"

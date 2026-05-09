@@ -145,6 +145,120 @@ class CashflowApp {
   }
 
 
+  showRecentTransactions() {
+    const modal = document.getElementById("recentTransactionsModal");
+    const list = document.getElementById("recentTransactionsList");
+    if (!modal || !list) return;
+
+    const transactions = this.store.getTransactions();
+    const items = [];
+    Object.keys(transactions).forEach((date) => {
+      transactions[date].forEach((t) => {
+        if (t.hidden === true) return;
+        // Only entries the user actually entered or modified — recurring
+        // expansions without a stored timestamp are derived data.
+        if (!t._lastModified) return;
+        items.push({ date, transaction: t });
+      });
+    });
+
+    items.sort((a, b) => {
+      const ta = new Date(a.transaction._lastModified || 0).getTime();
+      const tb = new Date(b.transaction._lastModified || 0).getTime();
+      return tb - ta;
+    });
+
+    const recent = items.slice(0, 25);
+
+    list.innerHTML = "";
+    if (recent.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "recent-transactions-empty";
+      empty.textContent = "No recent transactions.";
+      list.appendChild(empty);
+    } else {
+      recent.forEach(({ date, transaction }) => {
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "recent-transaction-row";
+        row.setAttribute("role", "listitem");
+
+        const sign = transaction.type === "balance" ? "=" :
+          transaction.type === "income" ? "+" : "-";
+        const amountText = `${sign}$${Number(transaction.amount).toFixed(2)}`;
+
+        const meta = document.createElement("span");
+        meta.className = "recent-transaction-meta";
+        meta.textContent = Utils.formatDisplayDate(date);
+
+        const amount = document.createElement("span");
+        amount.className = `recent-transaction-amount ${transaction.type}`;
+        amount.textContent = amountText;
+
+        const desc = document.createElement("span");
+        desc.className = "recent-transaction-desc";
+        const descText = typeof transaction.description === "string" ? transaction.description : "";
+        const recurringTag = transaction.recurringId ? " (Recurring)" : "";
+        const unsettledTag = transaction.type === "expense" && transaction.settled === false ? " (Unsettled)" : "";
+        desc.textContent = `${descText || "(no description)"}${recurringTag}${unsettledTag}`;
+
+        row.appendChild(meta);
+        row.appendChild(amount);
+        row.appendChild(desc);
+
+        row.addEventListener("click", () => {
+          this.openDayFromRecent(date);
+        });
+
+        list.appendChild(row);
+      });
+    }
+
+    modal.style.display = "block";
+    modal.setAttribute("aria-hidden", "false");
+    ModalManager.openModal(modal);
+
+    if (!this._recentEscHandler) {
+      this._recentEscHandler = (e) => {
+        if (e.key === "Escape") {
+          this.hideRecentTransactions();
+        }
+      };
+      document.addEventListener("keydown", this._recentEscHandler);
+    }
+  }
+
+
+  hideRecentTransactions() {
+    const modal = document.getElementById("recentTransactionsModal");
+    if (!modal) return;
+    modal.style.display = "none";
+    modal.setAttribute("aria-hidden", "true");
+    ModalManager.closeModal(modal);
+
+    if (this._recentEscHandler) {
+      document.removeEventListener("keydown", this._recentEscHandler);
+      this._recentEscHandler = null;
+    }
+  }
+
+
+  openDayFromRecent(dateString) {
+    this.hideRecentTransactions();
+    const [year, month] = dateString.split("-").map(Number);
+    const targetMonth = new Date(year, month - 1, 1);
+    const current = this.calendarUI.currentDate;
+    if (
+      targetMonth.getFullYear() !== current.getFullYear() ||
+      targetMonth.getMonth() !== current.getMonth()
+    ) {
+      this.calendarUI.currentDate = targetMonth;
+      this.calendarUI.generateCalendar();
+    }
+    this.transactionUI.showTransactionDetails(dateString);
+  }
+
+
   exportData() {
     try {
       this.cloudSync.cancelPendingCloudSave();

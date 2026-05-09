@@ -175,6 +175,15 @@
     </div>
   </div>
 
+  <div id="recentTransactionsModal" class="modal" role="dialog" aria-labelledby="recentTransactionsTitle" aria-hidden="true">
+    <div class="modal-content">
+      <span class="close" onclick="app.hideRecentTransactions()" aria-label="Close">&times;</span>
+      <h3 id="recentTransactionsTitle">Recent Transactions</h3>
+      <p class="recent-transactions-hint">Click a transaction to open its day and edit or delete it.</p>
+      <div id="recentTransactionsList" class="recent-transactions-list" role="list"></div>
+    </div>
+  </div>
+
   <div id="notesModal" class="modal" role="dialog" aria-labelledby="notesModalTitle" aria-hidden="true">
     <div class="modal-content notes-modal-content">
       <span class="close" onclick="app.calendarUI.hideNotesModal()" aria-label="Close">&times;</span>

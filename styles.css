@@ -430,6 +430,85 @@ h4 {
   justify-content: flex-end;
 }
 
+.recent-transactions-hint {
+  margin: 0 0 12px;
+  color: var(--muted-color);
+  font-size: 0.9rem;
+}
+
+.recent-transactions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.recent-transactions-empty {
+  margin: 12px 0 0;
+  color: var(--muted-color);
+  text-align: center;
+  font-style: italic;
+}
+
+.recent-transaction-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "meta amount"
+    "desc desc";
+  column-gap: 12px;
+  row-gap: 2px;
+  align-items: baseline;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  background-color: var(--surface-muted);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color 0.2s, border-color 0.2s;
+  font: inherit;
+  color: inherit;
+}
+
+.recent-transaction-row:hover,
+.recent-transaction-row:focus {
+  background-color: #fff8ee;
+  border-color: var(--accent-color);
+  outline: none;
+}
+
+.recent-transaction-meta {
+  grid-area: meta;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--muted-color);
+}
+
+.recent-transaction-amount {
+  grid-area: amount;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.recent-transaction-amount.expense {
+  color: var(--error-color-contrast);
+}
+
+.recent-transaction-amount.income {
+  color: var(--primary-strong);
+}
+
+.recent-transaction-amount.balance {
+  color: var(--ink-color);
+}
+
+.recent-transaction-desc {
+  grid-area: desc;
+  color: var(--ink-color);
+  font-size: 0.95rem;
+  word-break: break-word;
+}
+
 .app-toolbar {
   display: flex;
   align-items: center;
