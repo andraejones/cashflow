@@ -15,6 +15,10 @@ class PinProtection {
     this.credentialId = null;
     this.webAuthnInitPromise = null;
 
+    // Tracks how the user successfully unlocked this session ('biometric' | 'pin' | null).
+    // After an inactivity lock, re-unlock must use the same method.
+    this.lastUnlockMethod = null;
+
     // Encryption constants
     this.SALT_LENGTH = 16;
     this.IV_LENGTH = 12;
@@ -143,6 +147,7 @@ class PinProtection {
     this.credentialId = null;
     this.webAuthnEnabled = false;
     this.currentPin = "";
+    this.lastUnlockMethod = null;
     this.stopInactivityMonitoring();
   }
 
@@ -555,8 +560,14 @@ class PinProtection {
     // Ensure WebAuthn initialization is complete before checking
     await this.ensureWebAuthnInit();
 
-    // Try biometric authentication first if enabled
-    if (this.isWebAuthnEnabled()) {
+    // After an inactivity lock, require the same method used at the original sign-in.
+    // First-time unlock (lastUnlockMethod === null) keeps the legacy
+    // "biometric first, fall through to PIN" behavior.
+    const requireBiometric = this.lastUnlockMethod === "biometric" && this.isWebAuthnEnabled();
+    const tryBiometric = requireBiometric ||
+      (this.lastUnlockMethod === null && this.isWebAuthnEnabled());
+
+    if (tryBiometric) {
       try {
         const biometricResult = await this.authenticateWebAuthn();
         if (biometricResult) {
@@ -564,6 +575,7 @@ class PinProtection {
           const storedPin = await this.retrievePinForBiometrics();
           if (storedPin && await this.verifyPin(storedPin)) {
             this.currentPin = storedPin;
+            this.lastUnlockMethod = "biometric";
             this.isLocked = false;
             this.hideLockOverlay();
             this.startInactivityMonitoring();
@@ -576,11 +588,19 @@ class PinProtection {
           console.log("Stored PIN invalid, falling back to PIN entry");
         }
       } catch (error) {
-        // Biometric failed or was cancelled, fall through to PIN dialog
-        console.log("Biometric auth failed, falling back to PIN:", error.name);
+        // Biometric failed or was cancelled
+        console.log("Biometric auth failed:", error.name);
+      }
+
+      // If the user originally signed in with biometrics, do not fall through
+      // to PIN entry — keep prompting biometrics.
+      if (requireBiometric) {
+        return this.promptUnlock();
       }
     }
 
+    // PIN-based unlock path (also reached when biometric is unavailable on first
+    // unlock or when biometric stored PIN was invalid).
     const result = await this.showUnlockDialog(false);
 
     if (result === "reset") {
@@ -613,6 +633,7 @@ class PinProtection {
 
     if (await this.verifyPin(result)) {
       this.currentPin = result;
+      this.lastUnlockMethod = "pin";
       this.isLocked = false;
       this.hideLockOverlay();
       this.startInactivityMonitoring();
