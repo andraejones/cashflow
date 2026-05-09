@@ -93,15 +93,23 @@ class SearchUI {
   }
 
 
-  showSearchModal() {
+  showSearchModal(initialTerm = "") {
     const modal = document.getElementById("searchModal");
     modal.style.display = "block";
     modal.setAttribute("aria-hidden", "false");
     ModalManager.openModal(modal);
-    document.getElementById("searchInput").value = "";
+    const searchInput = document.getElementById("searchInput");
+    const term = typeof initialTerm === "string" ? initialTerm.trim() : "";
     this.clearSearch();
+    if (term) {
+      searchInput.value = term;
+      this.performSearch();
+    }
     setTimeout(() => {
-      document.getElementById("searchInput").focus();
+      searchInput.focus();
+      if (term) {
+        searchInput.select();
+      }
     }, 100);
     this.updateActionButtons();
   }

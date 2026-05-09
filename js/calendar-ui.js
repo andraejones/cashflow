@@ -58,7 +58,80 @@ class CalendarUI {
       calendarDays.addEventListener("click", this._boundDayClickHandler);
     }
 
+    this._initAppMenu();
+    this._initTopSearch();
+
     Utils.cleanUpHtmlArtifacts();
+  }
+
+
+  _initAppMenu() {
+    const button = document.getElementById("menuButton");
+    const menu = document.getElementById("calendarOptions");
+    if (!button || !menu) return;
+
+    button.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.toggleAppMenu();
+    });
+
+    document.addEventListener("click", (e) => {
+      if (!menu.classList.contains("is-open")) return;
+      if (menu.contains(e.target) || button.contains(e.target)) return;
+      this.closeAppMenu();
+    });
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && menu.classList.contains("is-open")) {
+        this.closeAppMenu();
+        button.focus();
+      }
+    });
+  }
+
+
+  toggleAppMenu() {
+    const menu = document.getElementById("calendarOptions");
+    if (!menu) return;
+    if (menu.classList.contains("is-open")) {
+      this.closeAppMenu();
+    } else {
+      this.openAppMenu();
+    }
+  }
+
+
+  openAppMenu() {
+    const button = document.getElementById("menuButton");
+    const menu = document.getElementById("calendarOptions");
+    if (!menu || !button) return;
+    menu.classList.add("is-open");
+    menu.setAttribute("aria-hidden", "false");
+    button.setAttribute("aria-expanded", "true");
+  }
+
+
+  closeAppMenu() {
+    const button = document.getElementById("menuButton");
+    const menu = document.getElementById("calendarOptions");
+    if (!menu || !button) return;
+    menu.classList.remove("is-open");
+    menu.setAttribute("aria-hidden", "true");
+    button.setAttribute("aria-expanded", "false");
+  }
+
+
+  _initTopSearch() {
+    const form = document.getElementById("topSearchForm");
+    const input = document.getElementById("topSearchInput");
+    if (!form || !input) return;
+
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const term = input.value.trim();
+      if (!window.app || !window.app.searchUI) return;
+      window.app.searchUI.showSearchModal(term);
+    });
   }
 
 
@@ -335,8 +408,9 @@ class CalendarUI {
       biometricsButton = `
       <button
         type="button"
+        role="menuitem"
         class="calendar-option"
-        onclick="app.calendarUI.toggleBiometrics()"
+        onclick="app.calendarUI.toggleBiometrics(); app.calendarUI.closeAppMenu();"
       >
         ${biometricsLabel}
       </button>`;
@@ -345,51 +419,46 @@ class CalendarUI {
     document.getElementById("calendarOptions").innerHTML = `
       <button
         type="button"
+        role="menuitem"
         class="calendar-option"
-        onclick="app.searchUI.showSearchModal()"
-        aria-haspopup="dialog"
-        aria-controls="searchModal"
-      >
-        Search
-      </button>
-      <button
-        type="button"
-        class="calendar-option"
-        onclick="app.debtSnowball.showModal()"
+        onclick="app.debtSnowball.showModal(); app.calendarUI.closeAppMenu();"
         aria-haspopup="dialog"
         aria-controls="debtSnowballModal"
       >
         Debt Snowball
       </button>
-      <button type="button" class="calendar-option" onclick="app.exportData()">
+      <button type="button" role="menuitem" class="calendar-option" onclick="app.exportData(); app.calendarUI.closeAppMenu();">
         Save to Device
       </button>
-      <button type="button" class="calendar-option" onclick="app.importData()">
+      <button type="button" role="menuitem" class="calendar-option" onclick="app.importData(); app.calendarUI.closeAppMenu();">
         Load from Device
       </button>
       <button
         type="button"
+        role="menuitem"
         class="calendar-option"
-        onclick="app.cloudSync.saveToCloud()"
+        onclick="app.cloudSync.saveToCloud(); app.calendarUI.closeAppMenu();"
       >
         Save to Cloud
       </button>
       <button
         type="button"
+        role="menuitem"
         class="calendar-option"
-        onclick="app.cloudSync.loadFromCloud()"
+        onclick="app.cloudSync.loadFromCloud(); app.calendarUI.closeAppMenu();"
       >
         Load from Cloud
       </button>
       <button
         type="button"
+        role="menuitem"
         class="calendar-option"
-        onclick="pinProtection.promptChangePin(app.store)"
+        onclick="pinProtection.promptChangePin(app.store); app.calendarUI.closeAppMenu();"
       >
         ${pinLabel}
       </button>
       ${biometricsButton}
-      <button type="button" class="calendar-option" onclick="app.resetData()">
+      <button type="button" role="menuitem" class="calendar-option" onclick="app.resetData(); app.calendarUI.closeAppMenu();">
         Reset
       </button>
     `;
