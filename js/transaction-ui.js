@@ -883,8 +883,13 @@ class TransactionUI {
     const description = descriptionElement.value;
     const newDate = document.getElementById(`edit-date-${date}-${index}`)?.value || date;
 
-    if (isNaN(amount) || amount <= 0) {
-      Utils.showNotification("Please enter a valid amount (must be greater than 0)", "error");
+    if (isNaN(amount)) {
+      Utils.showNotification("Please enter a valid amount", "error");
+      return;
+    }
+    // Balance transactions may be zero; income/expense must be > 0.
+    if (type !== "balance" && amount <= 0) {
+      Utils.showNotification("Income and expense amounts must be greater than 0", "error");
       return;
     }
 
@@ -1128,9 +1133,18 @@ class TransactionUI {
       const type = typeElement.value;
       const description = descriptionElement.value;
       const recurrence = recurrenceElement.value;
-      if (!date || isNaN(amount) || amount <= 0) {
+      if (!date || isNaN(amount)) {
         Utils.showNotification(
-          "Please enter a valid date and amount (must be greater than 0)",
+          "Please enter a valid date and amount",
+          "error"
+        );
+        return false;
+      }
+      // Balance transactions may be zero (e.g. account drained); income and
+      // expense must be greater than zero.
+      if (type !== "balance" && amount <= 0) {
+        Utils.showNotification(
+          "Income and expense amounts must be greater than 0",
           "error"
         );
         return false;

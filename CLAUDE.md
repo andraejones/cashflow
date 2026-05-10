@@ -12,6 +12,14 @@ CashFlow Calendar is an offline-first, single-page personal finance application 
 
 No npm, linting, or test commands exist. Testing is manual.
 
+## Build Number — MUST be updated before every commit and push
+
+`js/build.js` exports a single constant, `window.APP_BUILD`, that is rendered at the bottom of the dropdown menu so the user can see which compiled version of the app is running.
+
+**Workflow (LLMs included): immediately before staging a commit, overwrite `window.APP_BUILD` in `js/build.js` with the current local timestamp in the format `"YYYY-MM-DD HH:MM TZ"` (use the `date "+%Y-%m-%d %H:%M %Z"` shell command, or platform equivalent). Stage `js/build.js` along with the rest of the change and include it in the same commit that you push.**
+
+This applies to every commit, even doc-only or CSS-only changes — the visible build line is the user's only signal that a deploy went through. Do not skip it; do not amend an existing commit just to avoid bumping it (create a new commit instead).
+
 ## Architecture
 
 ### Script Load Order (Critical - Sequential Dependencies)
