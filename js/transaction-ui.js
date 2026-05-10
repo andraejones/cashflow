@@ -1174,14 +1174,9 @@ class TransactionUI {
               this.store.deleteTransaction(date, indices[i]);
             }
           }
-
-          // Auto-settle any unsettled transactions carried forward to this date
-          const unsettled = this.store.getUnsettledTransactions();
-          unsettled.forEach(({ date: uDate, index }) => {
-            if (uDate <= date) {
-              this.store.setTransactionSettled(uDate, index, true);
-            }
-          });
+          // Note: prior unsettled expenses are intentionally NOT auto-settled
+          // here. Settled state is owned by the user; use the carried-forward
+          // "Mark Settled" button to clear individual entries.
         }
 
         this.store.addTransaction(date, newTransaction);

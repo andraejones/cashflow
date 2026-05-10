@@ -290,7 +290,15 @@ class CalculationService {
       startingBalance = monthlyBalances[monthKey].startingBalance;
       endingBalance = monthlyBalances[monthKey].endingBalance;
     } else {
-      endingBalance = startingBalance + monthIncome - monthExpense;
+      // Defensive fallback: monthlyBalances[monthKey] should normally exist
+      // after updateMonthlyBalances; if not, carry the prior month's ending
+      // balance forward instead of pretending the year started at zero.
+      const prevMonthDate = new Date(year, month - 1, 1, 12, 0, 0);
+      const prevMonthKey = `${prevMonthDate.getFullYear()}-${String(prevMonthDate.getMonth() + 1).padStart(2, "0")}`;
+      if (monthlyBalances[prevMonthKey]) {
+        startingBalance = Number(monthlyBalances[prevMonthKey].endingBalance) || 0;
+      }
+      endingBalance = this.roundToCents(startingBalance + monthIncome - monthExpense);
     }
 
     const result = {
@@ -335,9 +343,12 @@ class CalculationService {
     // Track minimum balance from today through next 30 days
     let minBalance = runningBalance;
 
-    // Now iterate through the next 30 days (starting from tomorrow)
+    // Now iterate through the next 30 days (starting from tomorrow).
+    // Track which (year, month) pairs we've already expanded so we don't
+    // re-run applyRecurringTransactions on every day of the same month.
+    const expandedMonths = new Set();
     for (let i = 1; i <= 30; i++) {
-      const futureDate = new Date(todayYear, todayMonth, todayDay + i);
+      const futureDate = new Date(todayYear, todayMonth, todayDay + i, 12, 0, 0);
       const futureYear = futureDate.getFullYear();
       const futureMonth = futureDate.getMonth();
       const futureDay = futureDate.getDate();
@@ -346,8 +357,12 @@ class CalculationService {
       // The running balance carries over from the previous day, we just add income/expense for each day
       const dateString = `${futureYear}-${String(futureMonth + 1).padStart(2, "0")}-${String(futureDay).padStart(2, "0")}`;
 
-      // Make sure recurring transactions are applied for this month
-      this.recurringManager.applyRecurringTransactions(futureYear, futureMonth);
+      // Make sure recurring transactions are applied for this month — once per month.
+      const monthKey = `${futureYear}-${futureMonth}`;
+      if (!expandedMonths.has(monthKey)) {
+        this.recurringManager.applyRecurringTransactions(futureYear, futureMonth);
+        expandedMonths.add(monthKey);
+      }
 
       const dailyTotals = this.calculateDailyTotals(dateString);
 

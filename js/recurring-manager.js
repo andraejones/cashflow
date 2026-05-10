@@ -983,9 +983,19 @@ class RecurringTransactionManager {
       const monthsDifference =
         (startOfMonth.getFullYear() - startDate.getFullYear()) * 12 +
         (startOfMonth.getMonth() - startDate.getMonth());
+      // Compare against the start month's effective second day, not the
+      // viewing month's. When isLastDayOfMonthSpecial, the start month's
+      // second occurrence falls on its own last day.
+      const startMonthSecondDate = isLastDayOfMonthSpecial
+        ? new Date(
+            startDate.getFullYear(),
+            startDate.getMonth() + 1,
+            0
+          ).getDate()
+        : (rt.semiMonthlyDays ? rt.semiMonthlyDays[1] : 15);
       if (startDate.getDate() <= firstDate) {
         occurrenceCount = monthsDifference * 2;
-      } else if (startDate.getDate() <= secondDate) {
+      } else if (startDate.getDate() <= startMonthSecondDate) {
         occurrenceCount = monthsDifference * 2 - 1;
       } else {
         occurrenceCount = monthsDifference * 2 - 2;
@@ -1430,20 +1440,45 @@ class RecurringTransactionManager {
     const startDate = Utils.parseDateString(rt.startDate);
     let count = 0;
 
+    // Count of occurrences strictly before `beforeDate`, with index 0 = startDate.
+    // For day-stepped intervals, ceil(days/step) gives the right answer for both
+    // boundary days and non-boundary days. For month-stepped intervals, the count
+    // is the number of completed step-periods plus 1 if the anniversary in the
+    // current period has already passed (beforeDate.day > startDate.day).
+    const daysStep = (step) => {
+      const d = this.daysBetween(startDate, beforeDate);
+      if (d <= 0) return 0;
+      return Math.ceil(d / step);
+    };
+    const monthsStep = (step) => {
+      const monthsDiff =
+        (beforeDate.getFullYear() - startDate.getFullYear()) * 12 +
+        (beforeDate.getMonth() - startDate.getMonth());
+      if (monthsDiff < 0) return 0;
+      const k = Math.floor(monthsDiff / step);
+      const remainder = monthsDiff % step;
+      if (remainder !== 0) {
+        // Most recent anniversary is in a prior period — definitely passed
+        return k + 1;
+      }
+      // Anniversary is in the current period; counted only if it has passed
+      return k + (beforeDate.getDate() > startDate.getDate() ? 1 : 0);
+    };
+
     switch (rt.recurrence) {
       case "once":
         count = beforeDate > startDate ? 1 : 0;
         break;
       case "daily":
-        count = this.daysBetween(startDate, beforeDate);
+        count = Math.max(0, this.daysBetween(startDate, beforeDate));
         break;
 
       case "weekly":
-        count = Math.floor(this.daysBetween(startDate, beforeDate) / 7);
+        count = daysStep(7);
         break;
 
       case "bi-weekly":
-        count = Math.floor(this.daysBetween(startDate, beforeDate) / 14);
+        count = daysStep(14);
         break;
 
       case "monthly":
@@ -1467,71 +1502,63 @@ class RecurringTransactionManager {
             break;
           }
         }
-        count =
-          (beforeDate.getFullYear() - startDate.getFullYear()) * 12 +
-          (beforeDate.getMonth() - startDate.getMonth());
-        if (beforeDate.getDate() < startDate.getDate()) {
-          count--;
-        }
+        count = monthsStep(1);
         break;
 
       case "semi-monthly": {
-        // Calculate total months difference
-        const monthsDiff =
-          (beforeDate.getFullYear() - startDate.getFullYear()) * 12 +
-          (beforeDate.getMonth() - startDate.getMonth());
-
         const firstDay = rt.semiMonthlyDays ? rt.semiMonthlyDays[0] : 1;
         const secondDay = rt.semiMonthlyDays ? rt.semiMonthlyDays[1] : 15;
-        const effectiveSecondDay =
-          rt.semiMonthlyLastDay || secondDay === 31
-            ? new Date(beforeDate.getFullYear(), beforeDate.getMonth() + 1, 0).getDate()
-            : secondDay;
-
-        // Count occurrences in completed months (2 per month)
-        count = monthsDiff * 2;
-
-        // Adjust for start month partial - subtract occurrences that happened before startDate
-        if (startDate.getDate() > firstDay) {
-          count -= 1; // First occurrence was before start
-        }
-        if (startDate.getDate() > secondDay) {
-          count -= 1; // Second occurrence was before start
-        }
-
-        // Adjust for current month partial - subtract occurrences that haven't happened yet
-        if (beforeDate.getDate() < firstDay) {
-          count -= 2; // Neither occurrence has happened this month
-        } else if (beforeDate.getDate() < effectiveSecondDay) {
-          count -= 1; // Second occurrence hasn't happened yet
+        const isLastDay = rt.semiMonthlyLastDay || secondDay === 31;
+        const startMs = new Date(
+          startDate.getFullYear(),
+          startDate.getMonth(),
+          startDate.getDate(),
+          12, 0, 0
+        ).getTime();
+        const beforeMs = new Date(
+          beforeDate.getFullYear(),
+          beforeDate.getMonth(),
+          beforeDate.getDate(),
+          12, 0, 0
+        ).getTime();
+        let y = startDate.getFullYear();
+        let m = startDate.getMonth();
+        const endY = beforeDate.getFullYear();
+        const endM = beforeDate.getMonth();
+        while (y < endY || (y === endY && m <= endM)) {
+          const lastDayThisMonth = new Date(y, m + 1, 0).getDate();
+          const day1 = Math.min(firstDay, lastDayThisMonth);
+          const day2 = isLastDay
+            ? lastDayThisMonth
+            : Math.min(secondDay, lastDayThisMonth);
+          [day1, day2].forEach((d) => {
+            const occMs = new Date(y, m, d, 12, 0, 0).getTime();
+            if (occMs >= startMs && occMs < beforeMs) count++;
+          });
+          m++;
+          if (m > 11) { m = 0; y++; }
         }
         break;
       }
 
       case "quarterly":
-        count = Math.floor(
-          ((beforeDate.getFullYear() - startDate.getFullYear()) * 12 +
-            (beforeDate.getMonth() - startDate.getMonth())) /
-          3
-        );
+        count = monthsStep(3);
         break;
 
       case "semi-annual":
-        count = Math.floor(
-          ((beforeDate.getFullYear() - startDate.getFullYear()) * 12 +
-            (beforeDate.getMonth() - startDate.getMonth())) /
-          6
-        );
+        count = monthsStep(6);
         break;
 
       case "yearly":
         count = beforeDate.getFullYear() - startDate.getFullYear();
+        // The next anniversary in beforeDate's year is at (startDate.month, startDate.day);
+        // if (beforeDate.month, beforeDate.day) is past it, that anniversary has happened.
         if (
-          beforeDate.getMonth() < startDate.getMonth() ||
+          beforeDate.getMonth() > startDate.getMonth() ||
           (beforeDate.getMonth() === startDate.getMonth() &&
-            beforeDate.getDate() < startDate.getDate())
+            beforeDate.getDate() > startDate.getDate())
         ) {
-          count--;
+          count++;
         }
         break;
 
@@ -1539,19 +1566,11 @@ class RecurringTransactionManager {
         if (rt.customInterval) {
           const intervalValue = rt.customInterval.value || 1;
           if (rt.customInterval.unit === "days") {
-            count = Math.floor(
-              this.daysBetween(startDate, beforeDate) / intervalValue
-            );
+            count = daysStep(intervalValue);
           } else if (rt.customInterval.unit === "weeks") {
-            count = Math.floor(
-              this.daysBetween(startDate, beforeDate) /
-              (intervalValue * 7)
-            );
+            count = daysStep(intervalValue * 7);
           } else if (rt.customInterval.unit === "months") {
-            const monthsDiff =
-              (beforeDate.getFullYear() - startDate.getFullYear()) * 12 +
-              (beforeDate.getMonth() - startDate.getMonth());
-            count = Math.floor(monthsDiff / intervalValue);
+            count = monthsStep(intervalValue);
           }
         }
         break;
