@@ -471,6 +471,9 @@ class CalendarUI {
       <button type="button" role="menuitem" class="calendar-option" onclick="app.resetData(); app.calendarUI.closeAppMenu();">
         Reset
       </button>
+      <div class="app-menu-build" role="presentation" aria-label="Build timestamp">
+        Build ${window.APP_BUILD || "unknown"}
+      </div>
     `;
   }
 

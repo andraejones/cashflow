@@ -626,6 +626,16 @@ h4 {
   transform: none;
 }
 
+#calendarOptions.app-menu .app-menu-build {
+  margin-top: 4px;
+  padding: 8px 12px 4px;
+  border-top: 1px solid var(--border-color);
+  font-size: 0.78rem;
+  color: var(--muted-color);
+  text-align: center;
+  user-select: text;
+}
+
 .app-search {
   flex: 1 1 auto;
   display: flex;
