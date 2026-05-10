@@ -218,6 +218,21 @@ class CashflowApp {
     modal.setAttribute("aria-hidden", "false");
     ModalManager.openModal(modal);
 
+    if (!this._recentCloseBound) {
+      const closeBtn = document.getElementById("recentTransactionsClose");
+      if (closeBtn) {
+        const close = () => this.hideRecentTransactions();
+        closeBtn.addEventListener("click", close);
+        closeBtn.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            close();
+          }
+        });
+      }
+      this._recentCloseBound = true;
+    }
+
     if (!this._recentEscHandler) {
       this._recentEscHandler = (e) => {
         if (e.key === "Escape") {

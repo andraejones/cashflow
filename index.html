@@ -177,7 +177,7 @@
 
   <div id="recentTransactionsModal" class="modal" role="dialog" aria-labelledby="recentTransactionsTitle" aria-hidden="true">
     <div class="modal-content">
-      <span class="close" onclick="app.hideRecentTransactions()" aria-label="Close">&times;</span>
+      <span id="recentTransactionsClose" class="close" role="button" tabindex="0" aria-label="Close">&times;</span>
       <h3 id="recentTransactionsTitle">Recent Transactions</h3>
       <p class="recent-transactions-hint">Click a transaction to open its day and edit or delete it.</p>
       <div id="recentTransactionsList" class="recent-transactions-list" role="list"></div>
