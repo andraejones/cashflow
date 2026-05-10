@@ -889,7 +889,8 @@ class DebtSnowballUI {
   getDateFromString(dateString) {
     if (!this.isValidDateString(dateString)) return null;
     const parts = dateString.split("-").map(Number);
-    return new Date(parts[0], parts[1] - 1, parts[2]);
+    // Use noon to avoid DST shifts pushing the date across a midnight boundary.
+    return new Date(parts[0], parts[1] - 1, parts[2], 12, 0, 0);
   }
 
   formatMonthDay(date) {
@@ -1459,11 +1460,34 @@ class DebtSnowballUI {
         }
       });
 
+      // Apply auto-priority (general) infusions to smallest-balance debts.
+      // This runs regardless of applySnowball — infusions are real money the
+      // user is putting toward debt and shouldn't be discarded just because
+      // the user has the snowball strategy disabled.
+      if (generalInfusionAmount > 0) {
+        const order = Object.keys(balances)
+          .filter((id) => balances[id] > 0)
+          .sort((a, b) => balances[a] - balances[b]);
+        let remaining = roundToCents(generalInfusionAmount);
+        for (const debtId of order) {
+          if (remaining <= 0) break;
+          const currentBalance = Number(balances[debtId]) || 0;
+          if (currentBalance <= 0) continue;
+          const applied = roundToCents(Math.min(currentBalance, remaining));
+          if (applied <= 0) continue;
+          balances[debtId] = roundToCents(currentBalance - applied);
+          remaining = roundToCents(remaining - applied);
+          if (balances[debtId] === 0 && !payoffByDebtId[debtId]) {
+            payoffByDebtId[debtId] = { year, month };
+          }
+        }
+      }
+
       const allocation = this.calculateMonthlySnowballAllocation(
         balances,
         monthlyTotalsByDebtId,
         applySnowball,
-        baseExtraPayment + generalInfusionAmount,
+        baseExtraPayment,
         rolloverAmount
       );
       balances = { ...allocation.balancesAfterPayments };
