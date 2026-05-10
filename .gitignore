@@ -34,3 +34,7 @@ node_modules/
 cashflow_data_*.json
 *.bak
 *.tmp
+
+# Temp / scratch
+temp/
+tmp/
