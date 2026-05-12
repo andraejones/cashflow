@@ -619,7 +619,9 @@ class TransactionUI {
             settleBtn.textContent = "Settle";
             const doSettle = () => {
               if (isRecurringItem) {
-                // Recurring: settle in-place, mark as modified instance
+                // Recurring: move occurrence to the viewed date and settle there.
+                // Settling a carried-forward expense reflects when the money
+                // actually left the account, not the original scheduled date.
                 const transactions = this.store.getTransactions()[u.date] || [];
                 const currentIndex = transactions.findIndex(t =>
                   t.recurringId === u.transaction.recurringId && t.settled === false
@@ -629,7 +631,20 @@ class TransactionUI {
                   this.showTransactionDetails(date);
                   return;
                 }
-                this.store.setTransactionSettled(u.date, currentIndex, true);
+                const recId = u.transaction.recurringId;
+                this.store.deleteTransaction(u.date, currentIndex);
+                if (!this.recurringManager.isTransactionSkipped(u.date, recId)) {
+                  this.recurringManager.toggleSkipTransaction(u.date, recId);
+                }
+                this.store.moveTransaction(recId, u.date, date);
+                this.store.addTransaction(date, {
+                  amount: u.transaction.amount,
+                  type: u.transaction.type,
+                  description: u.transaction.description,
+                  settled: true,
+                  movedFrom: u.date,
+                  originalRecurringId: recId,
+                });
               } else {
                 // One-time: delete from original date, create settled copy on viewed date
                 const transactions = this.store.getTransactions()[u.date] || [];
