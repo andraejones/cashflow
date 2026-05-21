@@ -32,37 +32,6 @@ const ModalManager = {
     // Reset z-index to default
     modalElement.style.zIndex = '';
   },
-
-  // Get the topmost modal
-  getTopModal: function () {
-    return this._openModals.length > 0 ? this._openModals[this._openModals.length - 1] : null;
-  },
-
-  // Check if a modal is the topmost
-  isTopModal: function (modalElement) {
-    return this.getTopModal() === modalElement;
-  },
-
-  // Get count of open modals
-  getOpenCount: function () {
-    return this._openModals.length;
-  },
-
-  // Alias for openModal (for test compatibility)
-  register: function (modalElement) {
-    return this.openModal(modalElement);
-  },
-
-  // Alias for closeModal (for test compatibility)
-  unregister: function (modalElement) {
-    return this.closeModal(modalElement);
-  },
-
-  // Get the next z-index value for a new modal (always increasing)
-  getNextZIndex: function () {
-    this._zIndexCounter++;
-    return this._baseZIndex + (this._zIndexCounter * 10);
-  }
 };
 
 // Expose ModalManager globally for tests
@@ -361,28 +330,6 @@ const Utils = {
       setTimeout(() => {
         liveRegion.textContent = message;
       }, 50);
-    }
-  },
-
-  // Alias for showLoading (for test compatibility)
-  showLoadingOverlay: function (message) {
-    return this.showLoading(message);
-  },
-
-  // Alias for hideLoading (for test compatibility)
-  hideLoadingOverlay: function () {
-    return this.hideLoading();
-  },
-
-  // Alias for announceToScreenReader (for test compatibility)
-  announce: function (message) {
-    return this.announceToScreenReader(message);
-  },
-
-  // Add negative balance indicator class to an element
-  addNegativeIndicator: function (element) {
-    if (element) {
-      element.classList.add('negative-balance');
     }
   },
 

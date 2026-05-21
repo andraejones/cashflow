@@ -61,15 +61,6 @@ class TransactionUI {
   }
 
 
-  // Cleanup method to remove event listeners (call when destroying UI)
-  destroy() {
-    if (this._boundEscapeHandler) {
-      document.removeEventListener("keydown", this._boundEscapeHandler);
-      this._boundEscapeHandler = null;
-    }
-  }
-
-
   setupFocusTrap(modalId) {
     const modal = document.getElementById(modalId);
 
