@@ -135,16 +135,6 @@ class CalendarUI {
   }
 
 
-  // Cleanup method to remove event listeners
-  destroy() {
-    const calendarDays = document.getElementById("calendarDays");
-    if (calendarDays && this._boundDayClickHandler) {
-      calendarDays.removeEventListener("click", this._boundDayClickHandler);
-      this._boundDayClickHandler = null;
-    }
-  }
-
-
   generateCalendar() {
     const year = this.currentDate.getFullYear();
     const month = this.currentDate.getMonth();
@@ -252,6 +242,18 @@ class CalendarUI {
         currentBalance = this.calculationService.roundToCents(currentBalance + dailyTotals.income - dailyTotals.expense);
       }
     }
+
+    // Seed the minimum/crisis tracking with today itself. calculateMinimum()
+    // (the "Minimum" figure in the summary) measures from today through the
+    // next 30 days, so today must be a candidate here too — otherwise an
+    // already-negative today goes un-highlighted and the highlighted
+    // lowest-balance day can disagree with the displayed Minimum value.
+    if (currentBalance <= 0) {
+      firstCrisisDate = todayStr;
+      negativeBalanceDates.push(todayStr);
+    }
+    lowestBalance = currentBalance;
+    lowestBalanceDates = [todayStr];
 
     // Now iterate through the next 30 days to find the lowest
     for (let d = 1; d <= 30; d++) {

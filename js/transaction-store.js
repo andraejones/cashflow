@@ -128,17 +128,6 @@ class TransactionStore {
     };
   }
 
-  // Getter for debounce delay
-  get debounceDelay() {
-    return this._saveDebounceDelay;
-  }
-
-  // Getter to check if there's a pending save
-  get pendingSave() {
-    return !!this._saveDebounceTimer;
-  }
-
-
   registerSaveCallback(callback) {
     if (typeof callback === 'function') {
       this.onSaveCallbacks.push(callback);
@@ -607,10 +596,6 @@ class TransactionStore {
   }
 
 
-  getMovedTransactions() {
-    return this.movedTransactions;
-  }
-
   // Move a transaction from one date to another
   // For recurring transactions, this creates an exception for that specific occurrence
   moveTransaction(recurringId, fromDate, toDate) {
@@ -629,23 +614,6 @@ class TransactionStore {
 
     this.debouncedSave();
     return true;
-  }
-
-  // Check if a recurring transaction occurrence was moved from a specific date
-  getMoveInfoFromDate(recurringId, date) {
-    const key = `${recurringId}-${date}`;
-    return this.movedTransactions[key] || null;
-  }
-
-  // Check if there's a moved transaction TO this date
-  getMoveInfoToDate(date) {
-    const moves = [];
-    Object.values(this.movedTransactions).forEach(move => {
-      if (move.toDate === date) {
-        moves.push(move);
-      }
-    });
-    return moves;
   }
 
   // Cancel a move (restore transaction to original date)

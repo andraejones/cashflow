@@ -1006,11 +1006,6 @@ class DebtSnowballUI {
     }
   }
 
-  getRecurringDatesForMonth(recurringTransaction, year, month) {
-    return this.getRecurringOccurrencesForMonth(recurringTransaction, year, month)
-      .map((occurrence) => occurrence.dateString);
-  }
-
   getDebtDueDateForMonth(debt, year, month) {
     const recurringTemplate = this.buildDebtRecurringTransaction(debt);
     recurringTemplate.id =

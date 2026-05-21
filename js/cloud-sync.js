@@ -10,6 +10,12 @@ class CloudSync {
     this._lastKnownETag = null;
     this._lastSyncTime = null;
     this._heartbeatInterval = null;
+    // Monotonic token used to detect when an in-flight async startHeartbeat()
+    // has been superseded by a later start/stop (prevents leaked intervals and
+    // polling reviving after a lock).
+    this._heartbeatGen = 0;
+    // Guards against overlapping heartbeat ticks when a check outlives the interval.
+    this._heartbeatChecking = false;
     this._updateAvailable = false;
     this._lastSaveTime = null;
     this._isSyncing = false;
@@ -91,31 +97,6 @@ class CloudSync {
     } catch (e) {
       console.warn('Could not clear sync metadata', e);
     }
-  }
-
-
-  toggleAutoSync() {
-    this.autoSyncEnabled = !this.autoSyncEnabled;
-    try {
-      localStorage.setItem('auto_sync_enabled', this.autoSyncEnabled.toString());
-    } catch (e) {
-      console.warn('Could not save auto-sync setting', e);
-    }
-
-    if (!this.autoSyncEnabled) {
-      this.cancelPendingCloudSave();
-    }
-
-    return this.autoSyncEnabled;
-  }
-
-
-  isAutoSyncEnabled() {
-    return this.autoSyncEnabled;
-  }
-
-  isSyncInProgress() {
-    return this._isSyncing;
   }
 
 
@@ -237,53 +218,6 @@ class CloudSync {
       console.error("Token decryption error:", error);
       return null;
     }
-  }
-
-  // Synchronous legacy methods for backward compatibility
-  encryptValue(value) {
-    // For synchronous calls, use legacy method but will be migrated on next async save
-    try {
-      return btoa(value.split("").reverse().join(""));
-    } catch (e) {
-      // Handle non-ASCII characters
-      const utf8Bytes = new TextEncoder().encode(value);
-      const binary = String.fromCharCode(...utf8Bytes);
-      return btoa(binary.split("").reverse().join(""));
-    }
-  }
-
-  decryptValue(encryptedValue) {
-    // Handle both legacy and new formats
-    if (encryptedValue.startsWith("aes:")) {
-      // Can't decrypt async format synchronously - caller should use async method
-      console.warn("Attempting to decrypt AES format synchronously - use decryptValueAsync");
-      return null;
-    }
-    try {
-      return atob(encryptedValue).split("").reverse().join("");
-    } catch (error) {
-      console.error("Decryption error:", error);
-      return null;
-    }
-  }
-
-
-  getCloudCredentials() {
-    const encryptedToken = localStorage.getItem("github_token_encrypted");
-    // For synchronous access, handle both legacy and mark for async migration
-    let token = null;
-    if (encryptedToken) {
-      if (encryptedToken.startsWith("aes:")) {
-        // New format - need async decryption, return null for sync call
-        // Callers needing the token should use getCloudCredentialsAsync
-        token = null;
-      } else {
-        // Legacy format - decrypt synchronously
-        token = this.decryptValue(encryptedToken);
-      }
-    }
-    const gistId = localStorage.getItem("gist_id");
-    return { token, gistId };
   }
 
   async getCloudCredentialsAsync() {
@@ -902,21 +836,42 @@ class CloudSync {
   // Start periodic heartbeat to check for remote changes
   async startHeartbeat(intervalMs = 60000) {
     this.stopHeartbeat();
+    // Snapshot the generation after stopHeartbeat bumped it. If another
+    // startHeartbeat() or stopHeartbeat() runs while we await credentials,
+    // the generation changes and this (now-stale) call must bail — otherwise
+    // it would either leak an untracked interval or revive polling after a lock.
+    const myGen = this._heartbeatGen;
     const { token, gistId } = await this.getCloudCredentialsAsync();
     if (!token || !gistId) {
       return; // No credentials, don't start heartbeat
     }
+    if (myGen !== this._heartbeatGen) {
+      return; // Superseded by a newer start/stop while awaiting credentials
+    }
 
     this._heartbeatInterval = setInterval(async () => {
-      const hasChanges = await this.checkForRemoteChanges();
-      if (hasChanges === true) {
-        this._showUpdateAvailable();
+      // Skip if the previous tick's check is still running (e.g. slow network)
+      // so heartbeat requests can't pile up.
+      if (this._heartbeatChecking) {
+        return;
+      }
+      this._heartbeatChecking = true;
+      try {
+        const hasChanges = await this.checkForRemoteChanges();
+        if (hasChanges === true) {
+          this._showUpdateAvailable();
+        }
+      } finally {
+        this._heartbeatChecking = false;
       }
     }, intervalMs);
   }
 
   // Stop the heartbeat polling
   stopHeartbeat() {
+    // Invalidate any startHeartbeat() that is mid-await so it won't install an
+    // interval after we've stopped.
+    this._heartbeatGen++;
     if (this._heartbeatInterval) {
       clearInterval(this._heartbeatInterval);
       this._heartbeatInterval = null;

@@ -54,20 +54,6 @@ class RecurringTransactionManager {
     return monthStr;
   }
 
-  // Public wrapper for _getCacheKey
-  getCacheKey(year, month) {
-    return this._getCacheKey(year, month);
-  }
-
-  // Public method to check if a month is cached
-  isCached(year, month) {
-    if (!this._isCacheValid()) {
-      return false;
-    }
-    const cacheKey = this._getCacheKey(year, month);
-    return this.expansionCache.has(cacheKey);
-  }
-
   // Public method to get cached data for a month
   getCached(year, month) {
     const cacheKey = this._getCacheKey(year, month);
@@ -121,11 +107,6 @@ class RecurringTransactionManager {
       12, 0, 0
     );
     return Math.round((endLocal.getTime() - startLocal.getTime()) / (1000 * 60 * 60 * 24));
-  }
-
-  // Check if a year is a leap year
-  isLeapYear(year) {
-    return (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0);
   }
 
   // Adjust day for months with fewer days (handles Feb 29 in non-leap years, etc.)
