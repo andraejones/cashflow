@@ -568,12 +568,17 @@ class TransactionUI {
         modalTransactions.innerHTML = "<p>No transactions for this date.</p>";
       }
 
-      // Show carried-forward unsettled transactions on past/present dates
+      // Show carried-forward unsettled transactions on past/present dates.
+      // An Ending Balance on/before the viewed date reconciles everything dated
+      // on/before it, so those items are no longer "carried forward".
       const today = new Date();
       const todayString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
       if (date <= todayString) {
+        const reconAnchor = this.calculationService
+          ? this.calculationService.getReconciliationAnchor(date, { inclusive: true })
+          : null;
         const unsettled = this.store.getUnsettledTransactions().filter(
-          (u) => u.date < date
+          (u) => u.date < date && (reconAnchor === null || u.date > reconAnchor)
         );
         if (unsettled.length > 0) {
           const header = document.createElement("div");

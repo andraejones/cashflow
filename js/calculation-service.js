@@ -21,6 +21,29 @@ class CalculationService {
   }
 
 
+  // The date of the most recent Ending Balance ("reconciliation anchor")
+  // within the given bound, or null. An Ending Balance is authoritative: every
+  // unsettled expense dated on/before the anchor is treated as reconciled and
+  // no longer drags the displayed/running balance. Removing the Ending Balance
+  // removes the anchor, so those items resume dragging — nothing is mutated.
+  getReconciliationAnchor(boundaryDateString, { inclusive = false } = {}) {
+    const transactions = this.store.getTransactions();
+    let anchor = null;
+    for (const date in transactions) {
+      const withinBound = inclusive
+        ? date <= boundaryDateString
+        : date < boundaryDateString;
+      if (!withinBound) continue;
+      if (transactions[date].some((t) => t.type === "balance")) {
+        if (anchor === null || date > anchor) {
+          anchor = date;
+        }
+      }
+    }
+    return anchor;
+  }
+
+
   updateMonthlyBalances(viewedDate) {
     // Invalidate cache at the START to ensure fresh calculations
     this.invalidateCache();
@@ -124,10 +147,6 @@ class CalculationService {
     });
 
     let previousBalance = 0;
-    // Cumulative unsettled across the whole timeline so an Ending Balance
-    // anywhere can be interpreted as "current cash" and the running
-    // (after-clears) balance is `entered − unsettledThroughDate`.
-    let runningUnsettled = 0;
     allMonths.forEach((monthKey, index) => {
       const [year, month] = monthKey.split("-").map(Number);
       let monthIncome = 0;
@@ -148,29 +167,12 @@ class CalculationService {
               dailyBalance = t.amount;
             }
           });
-          // Tally this day's still-pending unsettled expenses (skipped
-          // recurring instances and hidden snowball-tracking entries
-          // don't count).
-          let dayUnsettled = 0;
-          transactions[dateString].forEach((t) => {
-            if (t.type !== "expense") return;
-            if (t.settled !== false) return;
-            if (t.hidden === true) return;
-            if (
-              t.recurringId &&
-              this.recurringManager.isTransactionSkipped(dateString, t.recurringId)
-            ) return;
-            dayUnsettled += t.amount;
-          });
-          runningUnsettled = this.roundToCents(runningUnsettled + dayUnsettled);
-
           if (balanceSet) {
-            // Model B: the entered Ending Balance represents the user's
-            // actual current cash on this day. Subtract the unsettled-
-            // through-today total so the stored monthly running balance
-            // (which downstream code treats as the after-clears figure)
-            // stays consistent.
-            dailyBalance = this.roundToCents(dailyBalance - runningUnsettled);
+            // An Ending Balance is a reconciliation anchor: the entered figure
+            // is the balance for the day, shown as-is. Unsettled expenses dated
+            // on/before it are considered reconciled; later unsettled items
+            // reduce subsequent days via normal expense subtraction.
+            dailyBalance = this.roundToCents(dailyBalance);
           }
           if (day === 1 && balanceSet) {
             firstDayBalance = dailyBalance;
@@ -276,21 +278,12 @@ class CalculationService {
     const summary = this.calculateMonthlySummary(year, month - 1);
     let runningBalance = summary.startingBalance;
 
-    // Track cumulative unsettled so balance days adjust correctly under
-    // Model B (entered Ending Balance = current cash).
-    const monthStartStr = `${year}-${String(month).padStart(2, "0")}-01`;
-    let runningUnsettled = 0;
-    this.store.getUnsettledTransactions().forEach((u) => {
-      if (u.date < monthStartStr) runningUnsettled += u.transaction.amount;
-    });
-    runningUnsettled = this.roundToCents(runningUnsettled);
-
     for (let d = 1; d <= day; d++) {
       const ds = `${year}-${String(month).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
       const dailyTotals = this.calculateDailyTotals(ds);
-      runningUnsettled = this.roundToCents(runningUnsettled + dailyTotals.unsettledExpense);
       if (dailyTotals.balance !== null) {
-        runningBalance = this.roundToCents(dailyTotals.balance - runningUnsettled);
+        // Ending Balance is a reconciliation anchor — shown as entered.
+        runningBalance = this.roundToCents(dailyTotals.balance);
       } else {
         runningBalance = this.roundToCents(runningBalance + dailyTotals.income - dailyTotals.expense);
       }
@@ -366,23 +359,15 @@ class CalculationService {
     const summary = this.calculateMonthlySummary(todayYear, todayMonth);
     let runningBalance = summary.startingBalance;
 
-    // Track cumulative unsettled so balance days follow Model B (entered
-    // Ending Balance is current cash; running balance = entered − unsettled).
-    const monthStartStr = `${todayYear}-${String(todayMonth + 1).padStart(2, "0")}-01`;
-    let runningUnsettled = 0;
-    this.store.getUnsettledTransactions().forEach((u) => {
-      if (u.date < monthStartStr) runningUnsettled += u.transaction.amount;
-    });
-    runningUnsettled = this.roundToCents(runningUnsettled);
-
-    // Calculate running balance up to and including today
+    // Calculate running balance up to and including today. An Ending Balance is
+    // a reconciliation anchor (shown as entered); unsettled expenses reduce the
+    // balance only via normal expense subtraction on their own day.
     for (let day = 1; day <= todayDay; day++) {
       const dateString = `${todayYear}-${String(todayMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
       const dailyTotals = this.calculateDailyTotals(dateString);
 
-      runningUnsettled = this.roundToCents(runningUnsettled + dailyTotals.unsettledExpense);
       if (dailyTotals.balance !== null) {
-        runningBalance = this.roundToCents(dailyTotals.balance - runningUnsettled);
+        runningBalance = this.roundToCents(dailyTotals.balance);
       } else {
         runningBalance = this.roundToCents(runningBalance + dailyTotals.income - dailyTotals.expense);
       }
@@ -414,9 +399,8 @@ class CalculationService {
 
       const dailyTotals = this.calculateDailyTotals(dateString);
 
-      runningUnsettled = this.roundToCents(runningUnsettled + dailyTotals.unsettledExpense);
       if (dailyTotals.balance !== null) {
-        runningBalance = this.roundToCents(dailyTotals.balance - runningUnsettled);
+        runningBalance = this.roundToCents(dailyTotals.balance);
       } else {
         runningBalance = this.roundToCents(runningBalance + dailyTotals.income - dailyTotals.expense);
       }
