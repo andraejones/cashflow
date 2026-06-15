@@ -188,12 +188,15 @@ class CalendarUI {
       calendarDays.appendChild(day);
     }
     let runningBalance = summary.startingBalance;
-    // Pre-compute unsettled expense carryover from prior months
-    let runningUnsettledExpense = 0;
+    // Pre-compute unsettled expense carryover from prior months. An Ending
+    // Balance reconciles everything dated on/before it, so only unsettled items
+    // after the most recent anchor before this month still carry in.
     const monthStartStr = Utils.formatDateString(new Date(year, month, 1));
     const allUnsettled = this.store.getUnsettledTransactions();
+    const carryAnchor = this.calculationService.getReconciliationAnchor(monthStartStr, { inclusive: false });
+    let runningUnsettledExpense = 0;
     for (const u of allUnsettled) {
-      if (u.date < monthStartStr) {
+      if (u.date < monthStartStr && (carryAnchor === null || u.date > carryAnchor)) {
         runningUnsettledExpense += u.transaction.amount;
       }
     }
@@ -219,25 +222,14 @@ class CalendarUI {
     const monthlyBalances = this.store.getMonthlyBalances();
     let currentBalance = monthlyBalances[todayMonthKey]?.startingBalance || 0;
 
-    // Track unsettled cumulatively so balance-day adjustments use the
-    // total still-pending amount as of each date (Model B: entered Ending
-    // Balance is current cash; the running figure subtracts unsettled).
-    const todayMonthStartStr = Utils.formatDateString(
-      new Date(today.getFullYear(), today.getMonth(), 1)
-    );
-    let runningUnsettled = 0;
-    for (const u of allUnsettled) {
-      if (u.date < todayMonthStartStr) runningUnsettled += u.transaction.amount;
-    }
-    runningUnsettled = this.calculationService.roundToCents(runningUnsettled);
-
-    // Calculate balance up through today
+    // Calculate balance up through today. An Ending Balance is shown as entered
+    // (reconciliation anchor); unsettled expenses reduce the balance only via
+    // normal expense subtraction, matching CalculationService.calculateMinimum.
     for (let d = 1; d <= today.getDate(); d++) {
       const dateStr = Utils.formatDateString(new Date(today.getFullYear(), today.getMonth(), d));
       const dailyTotals = this.calculationService.calculateDailyTotals(dateStr);
-      runningUnsettled = this.calculationService.roundToCents(runningUnsettled + dailyTotals.unsettledExpense);
       if (dailyTotals.balance !== null) {
-        currentBalance = this.calculationService.roundToCents(dailyTotals.balance - runningUnsettled);
+        currentBalance = this.calculationService.roundToCents(dailyTotals.balance);
       } else {
         currentBalance = this.calculationService.roundToCents(currentBalance + dailyTotals.income - dailyTotals.expense);
       }
@@ -261,9 +253,8 @@ class CalendarUI {
       const dateStr = Utils.formatDateString(checkDate);
       const dailyTotals = this.calculationService.calculateDailyTotals(dateStr);
 
-      runningUnsettled = this.calculationService.roundToCents(runningUnsettled + dailyTotals.unsettledExpense);
       if (dailyTotals.balance !== null) {
-        currentBalance = this.calculationService.roundToCents(dailyTotals.balance - runningUnsettled);
+        currentBalance = this.calculationService.roundToCents(dailyTotals.balance);
       } else {
         currentBalance = this.calculationService.roundToCents(currentBalance + dailyTotals.income - dailyTotals.expense);
       }
@@ -326,22 +317,12 @@ class CalendarUI {
         ? transactions[dateString].filter((t) => t.hidden !== true).length
         : 0;
       if (dailyTotals.balance !== null) {
-        // Re-sum carried-forward unsettled (Ending Balance doesn't settle expenses).
+        // Ending Balance is a reconciliation anchor: the entered figure is the
+        // balance for the day, shown as-is, and everything dated on/before it
+        // is treated as reconciled — so the carried-forward unsettled
+        // accumulator resets to zero (collapsing the dual-line display).
+        runningBalance = this.calculationService.roundToCents(dailyTotals.balance);
         runningUnsettledExpense = 0;
-        for (const u of allUnsettled) {
-          if (u.date <= dateString) {
-            runningUnsettledExpense += u.transaction.amount;
-          }
-        }
-        runningUnsettledExpense = this.calculationService.roundToCents(runningUnsettledExpense);
-        // Treat the entered Ending Balance as the user's actual current
-        // cash on this date (the upper "balance-without-unsettled" line).
-        // The lower "running balance" line is what they'd have once any
-        // still-pending unsettled items actually clear, so it equals
-        // entered minus the unsettled-to-date total.
-        runningBalance = this.calculationService.roundToCents(
-          dailyTotals.balance - runningUnsettledExpense
-        );
       } else {
         runningBalance = this.calculationService.roundToCents(runningBalance + dailyTotals.income - dailyTotals.expense);
         runningUnsettledExpense = this.calculationService.roundToCents(runningUnsettledExpense + dailyTotals.unsettledExpense);

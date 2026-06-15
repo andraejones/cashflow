@@ -920,10 +920,17 @@ class TransactionStore {
     }
 
     if (this.transactions[date] && this.transactions[date][index]) {
-      this.transactions[date][index].settled = isSettled;
-      this.transactions[date][index]._lastModified = new Date().toISOString();
-      if (this.transactions[date][index].recurringId) {
-        this.transactions[date][index].modifiedInstance = true;
+      const target = this.transactions[date][index];
+      target.settled = isSettled;
+      target._lastModified = new Date().toISOString();
+      if (target.recurringId) {
+        target.modifiedInstance = true;
+      }
+      // A persisted transaction (one-time, or a now-modified recurring
+      // instance) must carry a stable id, or the cloud merge (_mergeById)
+      // silently drops it and the settle/unsettle change is lost on sync.
+      if (!target.id) {
+        target.id = Utils.generateUniqueId();
       }
       this.debouncedSave();
       return true;
@@ -989,6 +996,12 @@ class TransactionStore {
           if (hasLaterOccurrence) {
             t.settled = true;
             t.modifiedInstance = true;
+            // Promoting an expansion to a persisted modified instance: it
+            // needs a stable id so the cloud merge keeps it (see
+            // setTransactionSettled / _mergeById).
+            if (!t.id) {
+              t.id = Utils.generateUniqueId();
+            }
             t._lastModified = new Date().toISOString();
             changed = true;
           }
