@@ -25,7 +25,6 @@ class TransactionStore {
       debts: [],
       cashInfusions: []
     };
-    this.activeDevices = {};
     this.onSaveCallbacks = [];
 
     // Debounce settings for batching rapid saves
@@ -187,9 +186,6 @@ class TransactionStore {
       const storedDeletedItems = decrypt(
         this.storage.getItem("deletedItems")
       );
-      const storedActiveDevices = decrypt(
-        this.storage.getItem("activeDevices")
-      );
 
       if (storedTransactions) {
         this.transactions = JSON.parse(storedTransactions);
@@ -298,12 +294,6 @@ class TransactionStore {
       // Load deleted items tracking for merge conflict resolution
       if (storedDeletedItems) {
         this._deletedItems = JSON.parse(storedDeletedItems);
-      }
-
-      if (storedActiveDevices) {
-        this.activeDevices = JSON.parse(storedActiveDevices);
-      } else {
-        this.activeDevices = {};
       }
 
       if (this.debts.length > 0 && this.recurringTransactions.length > 0) {
@@ -436,10 +426,6 @@ class TransactionStore {
         encrypt(JSON.stringify(this.movedTransactions))
       );
       this.storage.setItem(
-        "activeDevices",
-        encrypt(JSON.stringify(this.activeDevices))
-      );
-      this.storage.setItem(
         "lastUpdated",
         encrypt(this.lastUpdated || "")
       );
@@ -485,7 +471,6 @@ class TransactionStore {
       debts: [],
       cashInfusions: []
     };
-    this.activeDevices = {};
     this.saveData();
     return true;
   }
@@ -1042,7 +1027,6 @@ class TransactionStore {
       monthlyNotes: this.monthlyNotes,
       debtSnowballSettings: this.debtSnowballSettings,
       _deletedItems: this._deletedItems,
-      activeDevices: this.activeDevices,
       lastUpdated: this.lastUpdated,
       lastExported: new Date().toISOString(),
       appVersion: "2.0.0"
@@ -1077,7 +1061,6 @@ class TransactionStore {
       monthlyNotes: this.monthlyNotes,
       debtSnowballSettings: this.debtSnowballSettings,
       _deletedItems: this._deletedItems,
-      activeDevices: this.activeDevices,
       lastUpdated: this.lastUpdated
     };
 
@@ -1112,7 +1095,6 @@ class TransactionStore {
       };
       this.monthlyNotes = data.monthlyNotes || {};
       this.movedTransactions = data.movedTransactions || {};
-      this.activeDevices = data.activeDevices || {};
       this.lastUpdated =
         typeof data.lastUpdated === "string" ? data.lastUpdated : this.lastUpdated;
 
