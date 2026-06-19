@@ -46,33 +46,6 @@ class CloudSync {
     }
   }
 
-  // Helper to log GitHub API requests for rate limiting
-  _logApiRequest() {
-    try {
-      const historyStr = localStorage.getItem('api_request_history');
-      let history = historyStr ? JSON.parse(historyStr) : [];
-      const now = Date.now();
-      const oneHourAgo = now - 60 * 60 * 1000;
-      history = history.filter(time => time > oneHourAgo);
-      history.push(now);
-      localStorage.setItem('api_request_history', JSON.stringify(history));
-    } catch (e) {
-      console.warn('Could not log API request', e);
-    }
-  }
-
-  // Helper to get number of API requests in the last hour
-  _getApiRequestCount() {
-    try {
-      const historyStr = localStorage.getItem('api_request_history');
-      let history = historyStr ? JSON.parse(historyStr) : [];
-      const oneHourAgo = Date.now() - 60 * 60 * 1000;
-      return history.filter(time => time > oneHourAgo).length;
-    } catch (e) {
-      return 0;
-    }
-  }
-
   // Store ETag after successful fetch/save
   _storeETag(etag) {
     this._lastKnownETag = etag;
@@ -456,27 +429,6 @@ class CloudSync {
     // Mark save time early so heartbeat checks during the delay won't false-positive
     this._lastSaveTime = Date.now();
 
-    // Calculate dynamic delay based on API requests and active devices
-    const requests = this._getApiRequestCount();
-    
-    // Prune and count active devices
-    const oneHourAgo = Date.now() - 60 * 60 * 1000;
-    let activeUserCount = 0;
-    const activeDevices = this.store.activeDevices || {};
-    for (const [id, timestamp] of Object.entries(activeDevices)) {
-      if (new Date(timestamp).getTime() > oneHourAgo) {
-        activeUserCount++;
-      }
-    }
-    // Ensure we don't divide by zero
-    activeUserCount = Math.max(1, activeUserCount);
-    
-    // Calculate per-user limit and dynamic delay
-    const limitPerUser = 5000 / activeUserCount;
-    // Delay scales linearly up to 10000ms as requests approach the limit
-    const dynamicDelay = Math.min(10000, Math.max(0, (requests / limitPerUser) * 10000));
-    const delayToUse = Math.floor(dynamicDelay);
-
     this.saveTimeout = setTimeout(async () => {
       const { token, gistId } = await this.getCloudCredentialsAsync();
       if (!token || !gistId) {
@@ -488,7 +440,7 @@ class CloudSync {
         .finally(() => {
           this.clearPendingMessage();
         });
-    }, delayToUse);
+    }, 10000);
   }
 
 
@@ -528,7 +480,6 @@ class CloudSync {
 
   async createNewGist(token, data) {
     try {
-      this._logApiRequest();
       const response = await fetch("https://api.github.com/gists", {
         method: "POST",
         headers: {
@@ -718,25 +669,6 @@ class CloudSync {
     return localTime >= remoteTime ? local : remote;
   }
 
-  // Merge active devices, keep newest, prune older than 1 hour
-  _mergeActiveDevices(local, remote) {
-    const merged = {};
-    const oneHourAgo = Date.now() - 60 * 60 * 1000;
-    const allIds = new Set([
-      ...Object.keys(local || {}),
-      ...Object.keys(remote || {})
-    ]);
-    allIds.forEach(id => {
-      const localTime = local && local[id] ? new Date(local[id]).getTime() : 0;
-      const remoteTime = remote && remote[id] ? new Date(remote[id]).getTime() : 0;
-      const newestTime = Math.max(localTime, remoteTime);
-      if (newestTime > oneHourAgo) {
-        merged[id] = new Date(newestTime).toISOString();
-      }
-    });
-    return merged;
-  }
-
   // Main merge function - combines local and remote data
   _mergeData(localData, remoteData) {
     // Get deleted items lists
@@ -806,10 +738,6 @@ class CloudSync {
         localData.lastUpdated,
         remoteData.lastUpdated
       ),
-      activeDevices: this._mergeActiveDevices(
-        localData.activeDevices,
-        remoteData.activeDevices
-      ),
       // monthlyBalances are derived data - will be recalculated
       monthlyBalances: {},
       // Track deletions for future merges (full objects for deletedAt pruning)
@@ -832,7 +760,6 @@ class CloudSync {
       headers["If-None-Match"] = etag;
     }
 
-    this._logApiRequest();
     const response = await fetch(`https://api.github.com/gists/${gistId}`, {
       headers
     });
@@ -850,7 +777,6 @@ class CloudSync {
       return gistFile.content;
     }
     // File was truncated by GitHub API - fetch full content via raw_url
-    this._logApiRequest();
     const rawResponse = await fetch(gistFile.raw_url, {
       headers: { Authorization: `Bearer ${token}` }
     });
@@ -1036,13 +962,6 @@ class CloudSync {
       this.store.flushPendingSave();
       clearTimeout(this.saveTimeout);   // cancel any queued auto-sync — we're saving now
 
-      // Register this device as active
-      const deviceId = await this._getDeviceKey();
-      if (!this.store.activeDevices) {
-        this.store.activeDevices = {};
-      }
-      this.store.activeDevices[deviceId] = new Date().toISOString();
-
       let dataToSave = {
         ...this.store.exportData(),
         lastUpdated: new Date().toISOString(),
@@ -1117,7 +1036,6 @@ class CloudSync {
 
       // Step 2: Save the data (original or merged)
       Utils.showLoading("Saving to cloud...");
-      this._logApiRequest();
       const response = await fetch(`https://api.github.com/gists/${gistId}`, {
         method: "PATCH",
         headers: {
