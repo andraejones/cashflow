@@ -440,7 +440,7 @@ class CloudSync {
         .finally(() => {
           this.clearPendingMessage();
         });
-    }, 0); // 10000); // 10-second delay removed
+    }, 10000);
   }
 
 
