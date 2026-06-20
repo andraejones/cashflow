@@ -796,6 +796,11 @@ body.app-locked #calendarOptions {
   width: 100%;
 }
 
+.debt-remaining {
+  color: var(--muted-color);
+  font-style: italic;
+}
+
 .app-modal-reset-btn {
   margin-top: 8px;
   width: 100%;
