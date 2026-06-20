@@ -32,6 +32,9 @@ class DebtSnowballUI {
       "debtAdvancedRecurrenceOptions"
     );
     this.snowballExtraInput = document.getElementById("snowballExtraAmount");
+    this.snowballExtraStartInput = document.getElementById(
+      "snowballExtraStartMonth"
+    );
     this.snowballAutoCheckbox = document.getElementById("snowballAutoGenerate");
     this.planSummary = document.getElementById("snowballPlanSummary");
     this.planList = document.getElementById("snowballPlanList");
@@ -269,6 +272,9 @@ class DebtSnowballUI {
     const settings = this.store.getDebtSnowballSettings();
     if (this.snowballExtraInput) {
       this.snowballExtraInput.value = settings.extraPayment || 0;
+    }
+    if (this.snowballExtraStartInput) {
+      this.snowballExtraStartInput.value = settings.extraPaymentStartMonth || "";
     }
     if (this.snowballAutoCheckbox) {
       this.snowballAutoCheckbox.checked = settings.autoGenerate === true;
@@ -911,6 +917,25 @@ class DebtSnowballUI {
     return year * 12 + month;
   }
 
+  // Convert a "YYYY-MM" extra-payment start month into a comparable month index.
+  // Empty/invalid values return -Infinity so the extra payment applies from the
+  // start of the projection (no restriction).
+  parseExtraStartMonthIndex(startMonth) {
+    if (typeof startMonth !== "string") {
+      return -Infinity;
+    }
+    const match = startMonth.match(/^(\d{4})-(\d{2})$/);
+    if (!match) {
+      return -Infinity;
+    }
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    if (!year || month < 1 || month > 12) {
+      return -Infinity;
+    }
+    return this.getMonthIndex(year, month - 1);
+  }
+
   getRecurringOccurrencesForMonth(recurringTransaction, year, month) {
     if (!recurringTransaction?.startDate || !recurringTransaction?.recurrence) {
       return [];
@@ -1259,6 +1284,9 @@ class DebtSnowballUI {
     const debts = this.store.getDebts();
     const settings = this.store.getDebtSnowballSettings();
     const baseExtraPayment = Number(settings.extraPayment) || 0;
+    const extraStartIndex = this.parseExtraStartMonthIndex(
+      settings.extraPaymentStartMonth
+    );
     const applySnowball = includeExtra === true;
     const roundToCents = (value) =>
       Math.round((Number(value) || 0) * 100) / 100;
@@ -1478,11 +1506,16 @@ class DebtSnowballUI {
         }
       }
 
+      // Only apply the base extra payment once the user-selected start month
+      // is reached. Rollovers from paid-off debts still snowball regardless.
+      const effectiveExtraPayment =
+        monthIndex >= extraStartIndex ? baseExtraPayment : 0;
+
       const allocation = this.calculateMonthlySnowballAllocation(
         balances,
         monthlyTotalsByDebtId,
         applySnowball,
-        baseExtraPayment,
+        effectiveExtraPayment,
         rolloverAmount
       );
       balances = { ...allocation.balancesAfterPayments };
@@ -1497,7 +1530,7 @@ class DebtSnowballUI {
         targetDebtId: allocation.targetDebtId,
         snowballAmount: allocation.snowballAmount,
         rolloverAmount,
-        baseExtraPayment,
+        baseExtraPayment: effectiveExtraPayment,
         infusionAmount: generalInfusionAmount,
         targetedInfusions: targetedInfusionsByDebtId,
         inMonthRollover: allocation.inMonthRollover,
@@ -2039,7 +2072,7 @@ class DebtSnowballUI {
 
     const extraText = document.createElement("div");
     extraText.className = "debt-plan-extra";
-    const baseExtraPayment = Number(settings.extraPayment) || 0;
+    const baseExtraPayment = Number(monthInfo.baseExtraPayment) || 0;
     const snowballAmount = Number(monthInfo.snowballAmount) || 0;
     const rolloverAmount = Number(monthInfo.rolloverAmount) || 0;
     const inMonthRollover = Number(monthInfo.inMonthRollover) || 0;
@@ -2528,12 +2561,23 @@ class DebtSnowballUI {
   saveSnowballSettings() {
     const extraPayment = parseFloat(this.snowballExtraInput?.value || "0");
     const autoGenerate = this.snowballAutoCheckbox?.checked === true;
+    const extraPaymentStartMonth = (
+      this.snowballExtraStartInput?.value || ""
+    ).trim();
     if (isNaN(extraPayment) || extraPayment < 0) {
       Utils.showNotification("Extra payment must be 0 or greater", "error");
       return;
     }
+    if (
+      extraPaymentStartMonth &&
+      !/^\d{4}-\d{2}$/.test(extraPaymentStartMonth)
+    ) {
+      Utils.showNotification("Invalid extra payment start month", "error");
+      return;
+    }
     this.store.setDebtSnowballSettings({
       extraPayment,
+      extraPaymentStartMonth,
       autoGenerate,
     });
     Utils.showNotification("Snowball settings saved");
