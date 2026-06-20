@@ -247,6 +247,28 @@ class TransactionUI {
       const hasBalanceTransaction = transactions[date]?.some(
         (t) => t.type === "balance" && t.hidden !== true
       );
+
+      // For debt-payment transactions, compute each debt's remaining balance as
+      // of this day (after this day's payments) so it can be shown inline.
+      let debtRemainingByDebtId = null;
+      if (
+        transactions[date] &&
+        this.debtSnowballUI &&
+        typeof this.debtSnowballUI.getHistoricalDebtSnapshot === "function" &&
+        transactions[date].some((t) => t.debtId)
+      ) {
+        const parsedDate = Utils.parseDateString(date);
+        if (parsedDate) {
+          // The snapshot cutoff is exclusive, so use the next day to include
+          // payments made on the viewed day.
+          const cutoff = new Date(parsedDate);
+          cutoff.setDate(cutoff.getDate() + 1);
+          debtRemainingByDebtId =
+            this.debtSnowballUI.getHistoricalDebtSnapshot(cutoff)
+              .remainingByDebtId;
+        }
+      }
+
       if (transactions[date]) {
         let hasVisible = false;
         transactions[date].forEach((t, index) => {
@@ -334,6 +356,21 @@ class TransactionUI {
             const recurringText = ` (Recurring${recurrenceType ? " " + recurrenceType : ""
               }${additionalInfo})`;
             transactionDiv.appendChild(document.createTextNode(recurringText));
+          }
+
+          if (
+            t.debtId &&
+            debtRemainingByDebtId &&
+            Object.prototype.hasOwnProperty.call(
+              debtRemainingByDebtId,
+              t.debtId
+            )
+          ) {
+            const remaining = Number(debtRemainingByDebtId[t.debtId]) || 0;
+            const remainingSpan = document.createElement("span");
+            remainingSpan.className = "debt-remaining";
+            remainingSpan.textContent = ` (Remaining: $${remaining.toFixed(2)})`;
+            transactionDiv.appendChild(remainingSpan);
           }
 
           const editBtn = document.createElement("span");
