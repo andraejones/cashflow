@@ -16,6 +16,7 @@ class TransactionStore {
     this.lastUpdated = null;
     this.debtSnowballSettings = {
       extraPayment: 0,
+      extraPaymentStartMonth: "",
       autoGenerate: false,
     };
     // Track deleted item IDs for merge conflict resolution
@@ -259,6 +260,9 @@ class TransactionStore {
         const parsedSettings = JSON.parse(storedSnowballSettings);
         this.debtSnowballSettings = {
           extraPayment: Number(parsedSettings.extraPayment) || 0,
+          extraPaymentStartMonth: this.normalizeExtraStartMonth(
+            parsedSettings.extraPaymentStartMonth
+          ),
           autoGenerate: parsedSettings.autoGenerate === true,
         };
       }
@@ -323,6 +327,7 @@ class TransactionStore {
       this.lastUpdated = null;
       this.debtSnowballSettings = {
         extraPayment: 0,
+        extraPaymentStartMonth: "",
         autoGenerate: false,
       };
     }
@@ -463,6 +468,7 @@ class TransactionStore {
     this.lastUpdated = null;
     this.debtSnowballSettings = {
       extraPayment: 0,
+      extraPaymentStartMonth: "",
       autoGenerate: false,
     };
     this._deletedItems = {
@@ -690,6 +696,13 @@ class TransactionStore {
   }
 
 
+  // Normalize an extra-payment start month to a "YYYY-MM" string or "" (none).
+  normalizeExtraStartMonth(value) {
+    return typeof value === "string" && /^\d{4}-\d{2}$/.test(value)
+      ? value
+      : "";
+  }
+
   setDebtSnowballSettings(settings) {
     if (!settings || typeof settings !== "object") {
       console.error("Invalid settings for debt snowball");
@@ -698,6 +711,9 @@ class TransactionStore {
     this.debtSnowballSettings = {
       ...this.debtSnowballSettings,
       extraPayment: Number(settings.extraPayment) || 0,
+      extraPaymentStartMonth: this.normalizeExtraStartMonth(
+        settings.extraPaymentStartMonth
+      ),
       autoGenerate: settings.autoGenerate === true,
     };
     this.debouncedSave();
@@ -1091,6 +1107,9 @@ class TransactionStore {
       }));
       this.debtSnowballSettings = {
         extraPayment: Number(data.debtSnowballSettings?.extraPayment) || 0,
+        extraPaymentStartMonth: this.normalizeExtraStartMonth(
+          data.debtSnowballSettings?.extraPaymentStartMonth
+        ),
         autoGenerate: data.debtSnowballSettings?.autoGenerate === true,
       };
       this.monthlyNotes = data.monthlyNotes || {};
