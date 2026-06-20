@@ -1542,6 +1542,123 @@ class DebtSnowballUI {
     this.currentViewMonth = month;
   }
 
+  // Resolve the actual (business-day-adjusted) date of a debt's minimum payment
+  // in a given month, honoring its recurrence type. Used to anchor the recurring
+  // endDate to the real payment date so an adjusted payment (e.g. a due date
+  // shifted onto the next business day) is still retained, and the next month's
+  // payment is excluded. Returns the latest in-month occurrence; if the payment
+  // was adjusted across the month boundary, returns the spilled occurrence in
+  // the following month. Null if no occurrence can be resolved.
+  getMinimumPaymentPayoffDate(debt, payoffYear, payoffMonth) {
+    const template = this.buildDebtRecurringTransaction(debt);
+    template.id = template.id || debt.minRecurringId || debt.id || Utils.generateUniqueId();
+    // Ignore any cap so the payoff-month occurrence is always resolvable.
+    template.endDate = null;
+    template.maxOccurrences = null;
+
+    const inMonth = this.getRecurringOccurrencesForMonth(
+      template,
+      payoffYear,
+      payoffMonth
+    );
+    if (inMonth.length) {
+      return inMonth[inMonth.length - 1].dateString;
+    }
+    // No occurrence landed in the payoff month — a business-day adjustment may
+    // have pushed it into the next month. The spilled payment is that month's
+    // earliest occurrence.
+    let nextYear = payoffYear;
+    let nextMonth = payoffMonth + 1;
+    if (nextMonth > 11) {
+      nextMonth = 0;
+      nextYear += 1;
+    }
+    const inNext = this.getRecurringOccurrencesForMonth(
+      template,
+      nextYear,
+      nextMonth
+    );
+    if (inNext.length) {
+      return inNext[0].dateString;
+    }
+    return null;
+  }
+
+  // Compute the date a debt's minimum-payment recurring should stop expanding.
+  // The recurrence is ended at the debt's projected payoff so the minimum
+  // payment never appears after the debt is paid off. Any user-set debt.endDate
+  // still applies and wins if it is earlier.
+  computeMinimumPaymentEndDate(debt, payoff) {
+    const userEnd = debt && debt.endDate ? debt.endDate : null;
+    let payoffEnd = null;
+    if (payoff && typeof payoff.year === "number" && typeof payoff.month === "number") {
+      if (payoff.alreadyPaid === true) {
+        // Already at zero: end the month before "now" so no payment shows in the
+        // current or future months.
+        let endYear = payoff.year;
+        let endMonth = payoff.month - 1;
+        if (endMonth < 0) {
+          endMonth = 11;
+          endYear -= 1;
+        }
+        const lastDay = new Date(endYear, endMonth + 1, 0, 12, 0, 0);
+        payoffEnd = Utils.formatDateString(lastDay);
+      } else {
+        // Pays off during the projection: keep the payment that clears it,
+        // anchored to its real (possibly adjusted) date.
+        payoffEnd = this.getMinimumPaymentPayoffDate(
+          debt,
+          payoff.year,
+          payoff.month
+        );
+        if (!payoffEnd) {
+          const lastDay = new Date(payoff.year, payoff.month + 1, 0, 12, 0, 0);
+          payoffEnd = Utils.formatDateString(lastDay);
+        }
+      }
+    }
+    if (userEnd && payoffEnd) {
+      return userEnd < payoffEnd ? userEnd : payoffEnd;
+    }
+    return userEnd || payoffEnd || null;
+  }
+
+  // Keep each debt's minimum-payment recurring transaction ended at its
+  // projected payoff. Ending the recurrence (rather than deleting materialized
+  // instances) is durable: every consumer that re-expands recurring
+  // transactions — the calendar grid, the day-detail modal, balance
+  // calculations, search and CSV export — naturally stops generating the
+  // payment past payoff. Writes only when the value actually changes so this
+  // does not churn cloud sync, and invalidates the expansion cache so the next
+  // expansion reflects the new bound.
+  syncMinimumPaymentEndDates(payoffByDebtId) {
+    const recurrings = this.store.getRecurringTransactions();
+    let changed = false;
+    this.store.getDebts().forEach((debt) => {
+      if (!debt || !debt.minRecurringId) {
+        return;
+      }
+      const rt = recurrings.find((r) => r.id === debt.minRecurringId);
+      if (!rt) {
+        return;
+      }
+      const desired = this.computeMinimumPaymentEndDate(
+        debt,
+        payoffByDebtId ? payoffByDebtId[debt.id] : null
+      );
+      const current = rt.endDate ? rt.endDate : null;
+      if (current !== desired) {
+        rt.endDate = desired;
+        rt._lastModified = new Date().toISOString();
+        changed = true;
+      }
+    });
+    if (changed) {
+      this.recurringManager.invalidateCache();
+    }
+    return changed;
+  }
+
   prunePaidOffDebtMinimumPayments(year, month, payoffByDebtId) {
     const transactions = this.store.getTransactions();
     const monthPrefix = `${year}-${String(month + 1).padStart(2, "0")}-`;
@@ -2455,6 +2572,12 @@ class DebtSnowballUI {
       month,
       includeExtra
     );
+    // End each debt's minimum-payment recurrence at its projected payoff so the
+    // payment never expands past payoff on any surface (calendar, day modal,
+    // balances, search, CSV). Persisted locally; rides the next real sync.
+    if (this.syncMinimumPaymentEndDates(projection.payoffByDebtId)) {
+      this.store.saveData(false);
+    }
     const today = new Date();
     const currentIndex = this.getMonthIndex(today.getFullYear(), today.getMonth());
     const viewIndex = this.getMonthIndex(year, month);
