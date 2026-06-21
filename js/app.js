@@ -258,6 +258,113 @@ class CashflowApp {
   }
 
 
+  showAllocatedTransactions() {
+    const modal = document.getElementById("allocatedTransactionsModal");
+    const list = document.getElementById("allocatedTransactionsList");
+    if (!modal || !list) return;
+
+    const transactions = this.store.getTransactions();
+    const items = [];
+    Object.keys(transactions).forEach((date) => {
+      transactions[date].forEach((t) => {
+        if (t.hidden === true) return;
+        if (t.allocated !== true) return;
+        // Only entries the user actually entered or modified — recurring
+        // expansions without a stored timestamp are derived data.
+        if (!t._lastModified) return;
+        items.push({ date, transaction: t });
+      });
+    });
+
+    // Soonest to farthest by the transaction's own date.
+    items.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+
+    list.innerHTML = "";
+    if (items.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "recent-transactions-empty";
+      empty.textContent = "No allocated transactions.";
+      list.appendChild(empty);
+    } else {
+      items.forEach(({ date, transaction }) => {
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "recent-transaction-row";
+        row.setAttribute("role", "listitem");
+
+        const amountText = `-$${Number(transaction.amount).toFixed(2)}`;
+
+        const meta = document.createElement("span");
+        meta.className = "recent-transaction-meta";
+        meta.textContent = Utils.formatDisplayDate(date);
+
+        const amount = document.createElement("span");
+        amount.className = `recent-transaction-amount ${transaction.type}`;
+        amount.textContent = amountText;
+
+        const desc = document.createElement("span");
+        desc.className = "recent-transaction-desc";
+        const descText = typeof transaction.description === "string" ? transaction.description : "";
+        const recurringTag = transaction.recurringId ? " (Recurring)" : "";
+        desc.textContent = `${descText || "(no description)"}${recurringTag}`;
+
+        row.appendChild(meta);
+        row.appendChild(amount);
+        row.appendChild(desc);
+
+        row.addEventListener("click", () => {
+          this.hideAllocatedTransactions();
+          this.openDayFromRecent(date);
+        });
+
+        list.appendChild(row);
+      });
+    }
+
+    modal.style.display = "block";
+    modal.setAttribute("aria-hidden", "false");
+    ModalManager.openModal(modal);
+
+    if (!this._allocatedCloseBound) {
+      const closeBtn = document.getElementById("allocatedTransactionsClose");
+      if (closeBtn) {
+        const close = () => this.hideAllocatedTransactions();
+        closeBtn.addEventListener("click", close);
+        closeBtn.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            close();
+          }
+        });
+      }
+      this._allocatedCloseBound = true;
+    }
+
+    if (!this._allocatedEscHandler) {
+      this._allocatedEscHandler = (e) => {
+        if (e.key === "Escape") {
+          this.hideAllocatedTransactions();
+        }
+      };
+      document.addEventListener("keydown", this._allocatedEscHandler);
+    }
+  }
+
+
+  hideAllocatedTransactions() {
+    const modal = document.getElementById("allocatedTransactionsModal");
+    if (!modal) return;
+    modal.style.display = "none";
+    modal.setAttribute("aria-hidden", "true");
+    ModalManager.closeModal(modal);
+
+    if (this._allocatedEscHandler) {
+      document.removeEventListener("keydown", this._allocatedEscHandler);
+      this._allocatedEscHandler = null;
+    }
+  }
+
+
   openDayFromRecent(dateString) {
     this.hideRecentTransactions();
     const [year, month] = dateString.split("-").map(Number);

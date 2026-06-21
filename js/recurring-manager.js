@@ -1327,6 +1327,7 @@ class RecurringTransactionManager {
       }
       if (rt.type === "expense") {
         newTransaction.settled = rt.settled !== false;
+        newTransaction.allocated = rt.allocated === true;
       }
 
       transactions[dateString].push(newTransaction);
@@ -1636,6 +1637,9 @@ class RecurringTransactionManager {
 
       if (recurringTransaction.settled !== undefined) {
         newRecurringTransaction.settled = recurringTransaction.settled;
+      }
+      if (recurringTransaction.allocated !== undefined) {
+        newRecurringTransaction.allocated = recurringTransaction.allocated;
       }
       if (recurringTransaction.debtId) {
         newRecurringTransaction.debtId = recurringTransaction.debtId;
