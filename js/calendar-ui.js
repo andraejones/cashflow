@@ -316,6 +316,10 @@ class CalendarUI {
       const dateString = currentDateString;
       const dailyTotals =
         this.calculationService.calculateDailyTotals(dateString);
+      // Light-purple highlight for days containing an allocated expense.
+      if (dailyTotals.hasAllocated) {
+        day.classList.add("allocated-day");
+      }
       const transactions = this.store.getTransactions();
       const transactionCount = transactions[dateString]
         ? transactions[dateString].filter((t) => t.hidden !== true).length
@@ -434,6 +438,16 @@ class CalendarUI {
         aria-controls="recentTransactionsModal"
       >
         Recent Transactions
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        class="calendar-option"
+        onclick="app.showAllocatedTransactions(); app.calendarUI.closeAppMenu();"
+        aria-haspopup="dialog"
+        aria-controls="allocatedTransactionsModal"
+      >
+        Allocated
       </button>
       <button
         type="button"

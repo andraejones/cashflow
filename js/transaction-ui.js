@@ -56,6 +56,9 @@ class TransactionUI {
       this.updateRecurrenceOptions();
       this.updateSettledToggleVisibility();
     });
+    document.getElementById("transactionAllocate").addEventListener("change", () => {
+      this.syncAllocateState();
+    });
     this.setupFocusTrap("transactionModal");
     this.setupFocusTrap("searchModal");
   }
@@ -86,11 +89,25 @@ class TransactionUI {
 
 
   updateSettledToggleVisibility() {
-    const type = document.getElementById("transactionType").value;
-    const label = document.getElementById("settledToggleLabel");
-    if (label) {
-      label.style.display = (type === "expense") ? "" : "none";
+    const isExpense = document.getElementById("transactionType").value === "expense";
+    const toggleGroup = document.getElementById("toggleGroup");
+    if (toggleGroup) {
+      toggleGroup.style.display = isExpense ? "" : "none";
     }
+  }
+
+
+  // When "Allocate" is checked, settlement no longer applies: the Settled
+  // toggle is disabled (and saving forces settled=true so the expense subtracts
+  // like a normal cleared expense rather than being carried as unsettled).
+  syncAllocateState() {
+    const allocateCb = document.getElementById("transactionAllocate");
+    const settledCb = document.getElementById("transactionSettled");
+    const settledLabel = document.getElementById("settledToggleLabel");
+    if (!allocateCb || !settledCb || !settledLabel) return;
+    const allocated = allocateCb.checked;
+    settledCb.disabled = allocated;
+    settledLabel.classList.toggle("is-disabled", allocated);
   }
 
 
@@ -343,8 +360,12 @@ class TransactionUI {
           }
           amountSpan.style.opacity = isSkipped ? "0.5" : "1";
           const isUnsettled = normalizedType === "expense" && t.settled === false;
+          const isAllocated = normalizedType === "expense" && t.allocated === true;
           if (isUnsettled) {
             transactionDiv.classList.add("unsettled-transaction");
+          }
+          if (isAllocated) {
+            transactionDiv.classList.add("allocated-transaction");
           }
           let statusLabel = "";
           if (isSkipped) {
@@ -353,6 +374,8 @@ class TransactionUI {
             statusLabel = " (Hidden - Debt Snowball)";
           } else if (isUnsettled) {
             statusLabel = " (Unsettled)";
+          } else if (isAllocated) {
+            statusLabel = " (Allocated)";
           }
           amountSpan.textContent = `${sign}$${t.amount.toFixed(2)}${statusLabel}`;
           transactionDiv.appendChild(amountSpan);
@@ -1233,7 +1256,12 @@ class TransactionUI {
           description: description,
         };
         if (type === "expense") {
-          newTransaction.settled = document.getElementById("transactionSettled").checked;
+          const allocated = document.getElementById("transactionAllocate").checked;
+          newTransaction.allocated = allocated;
+          // Allocated expenses always count as cleared (never carried unsettled).
+          newTransaction.settled = allocated
+            ? true
+            : document.getElementById("transactionSettled").checked;
         }
         if (type === "balance") {
           const transactions = this.store.getTransactions();
@@ -1264,7 +1292,11 @@ class TransactionUI {
           recurrence: recurrence,
         };
         if (type === "expense") {
-          newRecurringTransaction.settled = document.getElementById("transactionSettled").checked;
+          const allocated = document.getElementById("transactionAllocate").checked;
+          newRecurringTransaction.allocated = allocated;
+          newRecurringTransaction.settled = allocated
+            ? true
+            : document.getElementById("transactionSettled").checked;
         }
         this.addAdvancedRecurringOptions(newRecurringTransaction);
 
@@ -1280,6 +1312,7 @@ class TransactionUI {
         };
         if (type === "expense") {
           firstInstance.settled = newRecurringTransaction.settled !== false;
+          firstInstance.allocated = newRecurringTransaction.allocated === true;
         }
 
         this.store.addTransaction(date, firstInstance);
@@ -1288,7 +1321,10 @@ class TransactionUI {
       document.getElementById("transactionDescription").value = "";
       document.getElementById("transactionRecurrence").value = "once";
       document.getElementById("transactionSettled").checked = true;
-      document.getElementById("settledToggleLabel").style.display = "none";
+      document.getElementById("transactionSettled").disabled = false;
+      document.getElementById("transactionAllocate").checked = false;
+      document.getElementById("settledToggleLabel").classList.remove("is-disabled");
+      document.getElementById("toggleGroup").style.display = "none";
       const advancedOptions = document.getElementById("advancedRecurrenceOptions");
       if (advancedOptions) {
         advancedOptions.remove();

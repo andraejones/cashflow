@@ -231,6 +231,7 @@ class CalculationService {
     let unsettledExpense = 0;
     let balance = null;
     let hasSkippedTransactions = false;
+    let hasAllocated = false;
 
     if (transactions[dateString]) {
       const dailyTransactions = transactions[dateString];
@@ -264,6 +265,9 @@ class CalculationService {
             if (t.settled === false) {
               unsettledExpense = this.roundToCents(unsettledExpense + t.amount);
             }
+            if (t.allocated === true) {
+              hasAllocated = true;
+            }
           }
         }
       });
@@ -275,6 +279,7 @@ class CalculationService {
       unsettledExpense: this.roundToCents(unsettledExpense),
       balance: balance !== null ? this.roundToCents(balance) : null,
       hasSkippedTransactions,
+      hasAllocated,
     };
     this._cachedDailyTotals[dateString] = result;
 
