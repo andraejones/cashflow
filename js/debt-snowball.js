@@ -10,6 +10,13 @@ const WEEKDAY_LABELS = [
   "Saturday",
 ];
 
+// How many months past the viewed/current month to materialize snowball
+// payments and minimum-payment adjustments. Forward balances and the
+// today-anchored 30-day Minimum are computed from materialized transactions,
+// so the snowball must be materialized across at least the same span (see
+// CalculationService.updateMonthlyBalances, which projects +6 months).
+const SNOWBALL_FORWARD_HORIZON = 6;
+
 class DebtSnowballUI {
   constructor(store, recurringManager, onUpdate) {
     this.store = store;
@@ -261,6 +268,11 @@ class DebtSnowballUI {
       typeof this.currentViewMonth === "number"
         ? this.currentViewMonth
         : today.getMonth();
+    // The plan preview always projects WITH the extra payment (includeExtra =
+    // true) so it shows the full snowball outcome, even when auto-generate is
+    // off and no snowball transactions are materialized on the calendar. This
+    // is intentional: the plan is advisory; the calendar reflects only what is
+    // actually scheduled (auto-generate on, or the Generate button used).
     const projection = this.calculateSnowballProjection(viewYear, viewMonth, true);
     this.renderDebts();
     this.renderCashInfusions();
@@ -413,21 +425,27 @@ class DebtSnowballUI {
     if (this.isValidDateString(candidate)) {
       return candidate;
     }
-    const today = Utils.formatDateString(new Date());
-    const january = Utils.formatDateString(
-      new Date(new Date().getFullYear(), 0, 1)
+    const now = new Date();
+    const today = Utils.formatDateString(now);
+    // Anchor the day-of-month to the CURRENT month (not January) when a debt
+    // has no explicit start date. A January anchor back-dates the minimum-
+    // payment recurrence and fabricates months of "paid" history for legacy or
+    // imported debts; the current month gives the same day-of-month without
+    // back-dating before today.
+    const monthStart = Utils.formatDateString(
+      new Date(now.getFullYear(), now.getMonth(), 1)
     );
     if (!debt) return today;
     const recurrence = debt.recurrence || "monthly";
     if (recurrence === "monthly" && typeof debt.dueDay === "number") {
-      return this.replaceDayInDateString(january, debt.dueDay);
+      return this.replaceDayInDateString(monthStart, debt.dueDay);
     }
     if (
       recurrence === "semi-monthly" &&
       Array.isArray(debt.semiMonthlyDays) &&
       debt.semiMonthlyDays.length
     ) {
-      return this.replaceDayInDateString(january, debt.semiMonthlyDays[0]);
+      return this.replaceDayInDateString(monthStart, debt.semiMonthlyDays[0]);
     }
     return today;
   }
@@ -1046,8 +1064,52 @@ class DebtSnowballUI {
     return this.getDateFromString(occurrences[0].dateString);
   }
 
+  // Ensure every past debt-payment occurrence is materialized before the
+  // snapshot reads "paid so far" from the transaction store. Debt minimum
+  // payments are recurring and expanded lazily as months are viewed; without
+  // this a debt whose schedule began before any rendered month reports too
+  // little paid (and an inflated remaining balance) until the user happens to
+  // navigate back. Expansion is cached, so repeat calls on a stable state are
+  // cheap. Bounded by a guard for safety against far-past start dates.
+  ensureDebtHistoryExpanded(cutoffDate = null) {
+    if (!this.recurringManager) return;
+    const recurrings = this.store
+      .getRecurringTransactions()
+      .filter((rt) => rt && rt.debtId && rt.startDate);
+    if (!recurrings.length) return;
+    let earliest = null;
+    recurrings.forEach((rt) => {
+      const start = Utils.parseDateString(rt.startDate);
+      if (start && (!earliest || start < earliest)) {
+        earliest = start;
+      }
+    });
+    if (!earliest) return;
+    const cutoff = cutoffDate instanceof Date ? cutoffDate : new Date();
+    let year = earliest.getFullYear();
+    let month = earliest.getMonth();
+    const endYear = cutoff.getFullYear();
+    const endMonth = cutoff.getMonth();
+    let guard = 0;
+    while (
+      (year < endYear || (year === endYear && month <= endMonth)) &&
+      guard < 1200
+    ) {
+      this.recurringManager.applyRecurringTransactions(year, month);
+      month += 1;
+      if (month > 11) {
+        month = 0;
+        year += 1;
+      }
+      guard += 1;
+    }
+  }
+
   getHistoricalDebtSnapshot(cutoffDate = null) {
     const debts = this.store.getDebts();
+    // Materialize past debt payments first so "paid"/"remaining" do not depend
+    // on which months happen to have been rendered this session.
+    this.ensureDebtHistoryExpanded(cutoffDate);
     const transactions = this.store.getTransactions();
     const cashInfusions = this.store.getCashInfusions();
     const cutoffDateString = cutoffDate
@@ -1280,7 +1342,7 @@ class DebtSnowballUI {
     };
   }
 
-  calculateSnowballProjection(viewYear, viewMonth, includeExtra = true) {
+  calculateSnowballProjection(viewYear, viewMonth, includeExtra = true, options = {}) {
     const debts = this.store.getDebts();
     const settings = this.store.getDebtSnowballSettings();
     const baseExtraPayment = Number(settings.extraPayment) || 0;
@@ -1288,6 +1350,14 @@ class DebtSnowballUI {
       settings.extraPaymentStartMonth
     );
     const applySnowball = includeExtra === true;
+    // Per-debt allocation breakdowns are normally captured only for the viewed
+    // month (that is all renderPlan needs). When materializing a forward window
+    // the caller passes captureThroughIndex so the breakdowns needed to write
+    // each future month's transactions are captured in a single projection run.
+    const captureThroughIndex =
+      typeof options.captureThroughIndex === "number"
+        ? options.captureThroughIndex
+        : null;
     const roundToCents = (value) =>
       Math.round((Number(value) || 0) * 100) / 100;
     const today = new Date();
@@ -1365,7 +1435,11 @@ class DebtSnowballUI {
     const monthTargets = {};
     let viewBalances = null;
     const baseIndex = this.getMonthIndex(baseYear, baseMonth);
-    const maxMonths = Math.max(600, viewIndex - baseIndex + 1);
+    const maxMonths = Math.max(
+      600,
+      viewIndex - baseIndex + 1,
+      captureThroughIndex !== null ? captureThroughIndex - baseIndex + 1 : 0
+    );
     let year = baseYear;
     let month = baseMonth;
 
@@ -1471,6 +1545,11 @@ class DebtSnowballUI {
         }
       });
 
+      // Cash infusions are external windfalls (e.g., a tax refund) applied
+      // straight to debt. They reduce the debt balance / accelerate payoff here
+      // but are intentionally NOT materialized as calendar expenses — they are
+      // not drawn from the tracked checking balance. (Contrast snowball extra
+      // payments, which are real outflows and DO appear on the calendar.)
       // Apply targeted infusions directly to specific debts
       Object.keys(targetedInfusionsByDebtId).forEach((debtId) => {
         const infusionAmount = targetedInfusionsByDebtId[debtId];
@@ -1535,7 +1614,12 @@ class DebtSnowballUI {
         targetedInfusions: targetedInfusionsByDebtId,
         inMonthRollover: allocation.inMonthRollover,
       };
-      if (year === viewYear && month === viewMonth) {
+      const isViewMonth = year === viewYear && month === viewMonth;
+      const inCaptureWindow =
+        captureThroughIndex !== null &&
+        monthIndex >= currentIndex &&
+        monthIndex <= captureThroughIndex;
+      if (isViewMonth || inCaptureWindow) {
         monthInfo.minPaidByDebtId = allocation.minPaidByDebtId;
         monthInfo.snowballPaidByDebtId = allocation.snowballPaidByDebtId;
         monthInfo.monthlyTotalsByDebtId = monthlyTotalsByDebtId;
@@ -2605,22 +2689,32 @@ class DebtSnowballUI {
     }
   }
 
-  ensureSnowballPaymentForMonth(year, month, force = false) {
+  ensureSnowballPaymentForMonth(year, month, force = false, opts = {}) {
     const settings = this.store.getDebtSnowballSettings() || {};
     const autoGenerate = settings.autoGenerate === true;
     const includeExtra = autoGenerate || force;
 
-    this.setCurrentViewMonth(year, month);
-    const projection = this.calculateSnowballProjection(
-      year,
-      month,
-      includeExtra
-    );
+    // When materializing a forward window (ensureSnowballPaymentsForHorizon),
+    // the caller supplies one shared projection and handles the view-month and
+    // plan-render side effects once, so this per-month call runs silently.
+    const sharedProjection = opts.projection || null;
+    const silent = opts.silent === true;
+
+    if (!silent) {
+      this.setCurrentViewMonth(year, month);
+    }
+    const projection =
+      sharedProjection ||
+      this.calculateSnowballProjection(year, month, includeExtra);
     // End each debt's minimum-payment recurrence at its projected payoff so the
     // payment never expands past payoff on any surface (calendar, day modal,
-    // balances, search, CSV). Persisted locally; rides the next real sync.
-    if (this.syncMinimumPaymentEndDates(projection.payoffByDebtId)) {
-      this.store.saveData(false);
+    // balances, search, CSV). Persisted locally; rides the next real sync. With
+    // a shared projection the caller has already synced end dates once for the
+    // whole window, so skip the redundant per-month sync.
+    if (!sharedProjection) {
+      if (this.syncMinimumPaymentEndDates(projection.payoffByDebtId)) {
+        this.store.saveData(false);
+      }
     }
     const today = new Date();
     const currentIndex = this.getMonthIndex(today.getFullYear(), today.getMonth());
@@ -2715,7 +2809,63 @@ class DebtSnowballUI {
       }
     }
 
-    this.renderPlan();
+    if (!silent) {
+      this.renderPlan();
+    }
+    return snowballAdded;
+  }
+
+  // Materialize snowball payments and minimum-payment adjustments for the viewed
+  // month AND the forward window that the balance walk spans, anchored at the
+  // current real month. Forward day balances (CalculationService projects +6
+  // months) and the today-anchored 30-day Minimum read materialized
+  // transactions, so without this the planned snowball spend stayed invisible
+  // until the user opened each month — the displayed Minimum could change just
+  // by navigating. One projection drives every month in the window.
+  ensureSnowballPaymentsForHorizon(viewYear, viewMonth, monthsAhead = SNOWBALL_FORWARD_HORIZON) {
+    const settings = this.store.getDebtSnowballSettings() || {};
+    const includeExtra = settings.autoGenerate === true;
+
+    const today = new Date();
+    const currentIndex = this.getMonthIndex(today.getFullYear(), today.getMonth());
+    const viewIndex = this.getMonthIndex(viewYear, viewMonth);
+    // Always start at the current real month so the today-anchored Minimum is
+    // stable; extend through the forward span of whichever month is later
+    // (viewed or current). Past months are never mutated (allowMutation guards
+    // inside ensureSnowballPaymentForMonth), so a past view collapses to the
+    // current-month-forward window.
+    const startIndex = currentIndex;
+    const endIndex = Math.max(viewIndex, currentIndex) + monthsAhead;
+
+    this.setCurrentViewMonth(viewYear, viewMonth);
+    const projection = this.calculateSnowballProjection(
+      viewYear,
+      viewMonth,
+      includeExtra,
+      { captureThroughIndex: endIndex }
+    );
+    // Sync minimum-payment end dates once for the whole window before
+    // materializing individual months (each month then skips the redundant sync).
+    if (this.syncMinimumPaymentEndDates(projection.payoffByDebtId)) {
+      this.store.saveData(false);
+    }
+
+    let snowballAdded = false;
+    for (let idx = startIndex; idx <= endIndex; idx++) {
+      const y = Math.floor(idx / 12);
+      const m = idx % 12;
+      if (
+        this.ensureSnowballPaymentForMonth(y, m, false, {
+          projection,
+          silent: true,
+        })
+      ) {
+        snowballAdded = true;
+      }
+    }
+
+    // Render the plan once, for the viewed month, from the shared projection.
+    this.renderPlan(projection);
     return snowballAdded;
   }
 }

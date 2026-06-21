@@ -167,7 +167,11 @@ class CalendarUI {
     }
     this.recurringManager.applyRecurringTransactions(year, month);
     if (this.debtSnowball) {
-      this.debtSnowball.ensureSnowballPaymentForMonth(year, month);
+      // Materialize the snowball for the viewed month AND the forward window the
+      // balance walk spans, so forward day balances and the today-anchored
+      // 30-day Minimum reflect planned snowball spend without the user having to
+      // open each future month.
+      this.debtSnowball.ensureSnowballPaymentsForHorizon(year, month);
     }
     this.calculationService.updateMonthlyBalances(this.currentDate);
     const summary = this.calculationService.calculateMonthlySummary(

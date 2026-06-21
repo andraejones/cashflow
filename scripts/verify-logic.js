@@ -274,4 +274,99 @@ if ((currentProjection.monthTargets[currentMonthKey]?.monthlyTotalsByDebtId?.[cu
 }
 console.log("✅ Current month projection excludes completed payments");
 
+// TEST 8: Paid/remaining do not depend on which past months were rendered.
+// A debt whose schedule began before any viewed month must still report all
+// past payments (getHistoricalDebtSnapshot expands history before reading it).
+console.log("TEST 8: Debt History Is Expanded Before Snapshotting");
+const historyStore = new TransactionStore();
+historyStore.resetData();
+const historyRecurringManager = new RecurringTransactionManager(historyStore);
+const historyUI = Object.create(DebtSnowballUI.prototype);
+historyUI.store = historyStore;
+historyUI.recurringManager = historyRecurringManager;
+historyUI.daySpecificOptions = [];
+
+const historyDebtId = historyStore.addDebt({
+  name: "Backdated Card",
+  balance: 1000,
+  minPayment: 100,
+  dueDay: 5,
+  recurrence: "monthly",
+  dueStartDate: "2026-01-05",
+});
+historyUI.ensureMinimumPaymentRecurring(
+  historyStore.getDebts().find((d) => d.id === historyDebtId)
+);
+// No months are pre-expanded. Cutoff = 2026-06-01 => Jan..May payments (5 x 100)
+// should be counted, leaving 1000 - 500 = 500 regardless of render history.
+const historySummary = historyUI
+  .getDebtSummaries(new Date(2026, 5, 1))
+  .find((s) => s.debt.id === historyDebtId);
+if (!historySummary) throw new Error("History debt summary not found");
+if (historySummary.paid !== 500 || historySummary.remaining !== 500) {
+  throw new Error(
+    `Expected paid 500 / remaining 500 from expanded history, got paid ${historySummary.paid} / remaining ${historySummary.remaining}`
+  );
+}
+console.log("✅ Past debt payments are counted without pre-rendering months");
+
+// TEST 9: The snowball is materialized across a forward window, not just the
+// viewed month, so forward balances and the 30-day Minimum (which read
+// materialized transactions) reflect planned snowball spend for months the user
+// has not opened.
+console.log("TEST 9: Snowball Materializes Across The Forward Horizon");
+const horizonStore = new TransactionStore();
+horizonStore.resetData();
+const horizonRecurringManager = new RecurringTransactionManager(horizonStore);
+const horizonUI = Object.create(DebtSnowballUI.prototype);
+horizonUI.store = horizonStore;
+horizonUI.recurringManager = horizonRecurringManager;
+horizonUI.daySpecificOptions = [];
+
+const horizonNow = new Date();
+const horizonY = horizonNow.getFullYear();
+const horizonM = horizonNow.getMonth();
+const horizonStart = `${horizonY}-${String(horizonM + 1).padStart(2, "0")}-15`;
+["Card X", "Card Y"].forEach((name) => {
+  const id = horizonStore.addDebt({
+    name,
+    balance: 5000,
+    minPayment: 50,
+    dueDay: 15,
+    recurrence: "monthly",
+    dueStartDate: horizonStart,
+  });
+  horizonUI.ensureMinimumPaymentRecurring(
+    horizonStore.getDebts().find((d) => d.id === id)
+  );
+});
+horizonStore.setDebtSnowballSettings({
+  extraPayment: 200,
+  extraPaymentStartMonth: "",
+  autoGenerate: true,
+});
+
+horizonRecurringManager.applyRecurringTransactions(horizonY, horizonM);
+horizonUI.ensureSnowballPaymentsForHorizon(horizonY, horizonM);
+
+// Two months ahead has not been "visited", yet its snowball must exist.
+const twoAhead = new Date(horizonY, horizonM + 2, 1);
+const twoAheadPrefix = `${twoAhead.getFullYear()}-${String(
+  twoAhead.getMonth() + 1
+).padStart(2, "0")}-`;
+const horizonTxns = horizonStore.getTransactions();
+let forwardSnowballCount = 0;
+Object.keys(horizonTxns).forEach((dk) => {
+  if (!dk.startsWith(twoAheadPrefix)) return;
+  horizonTxns[dk].forEach((t) => {
+    if (t.snowballGenerated === true) forwardSnowballCount += 1;
+  });
+});
+if (forwardSnowballCount === 0) {
+  throw new Error(
+    "Expected snowball payments materialized two months ahead without opening that month"
+  );
+}
+console.log("✅ Snowball is materialized for unopened forward months");
+
 console.log("ALL TESTS PASSED");

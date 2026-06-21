@@ -972,6 +972,12 @@ body.app-locked #calendarOptions {
   gap: 8px;
 }
 
+.debt-snowball-hint {
+  color: var(--muted-color);
+  font-size: 0.85rem;
+  margin: 0 0 10px;
+}
+
 .debt-plan-summary {
   font-weight: 600;
   margin-bottom: 6px;
