@@ -633,11 +633,27 @@ class TransactionStore {
     return false;
   }
 
+  // Return the move record for a recurring occurrence relocated FROM this date,
+  // or null. Lets the UI distinguish a payment that was authorized on its
+  // scheduled date but settled later (moved) from a genuinely skipped one.
+  getMoveForRecurring(recurringId, fromDate) {
+    if (!recurringId || !fromDate) {
+      return null;
+    }
+    return this.movedTransactions[`${recurringId}-${fromDate}`] || null;
+  }
+
   // Check if a date has any move anomaly (either moved from or moved to)
   hasMoveAnomaly(date) {
     // Check if any transaction was moved FROM this date
     for (const move of Object.values(this.movedTransactions)) {
       if (move.fromDate === date || move.toDate === date) {
+        // A forward move is an "authorized then cleared later" payment
+        // (see getMoveForRecurring / the "(Authorized)" label) — expected
+        // behavior, not an anomaly worth flagging with a star.
+        if (move.toDate > move.fromDate) {
+          continue;
+        }
         return true;
       }
     }

@@ -284,6 +284,15 @@ class TransactionUI {
           const isSkipped =
             isRecurring &&
             this.recurringManager.isTransactionSkipped(date, t.recurringId);
+          // A skipped occurrence that was relocated to a later date isn't truly
+          // "skipped" — it was authorized on its scheduled date and cleared/
+          // settled later (the settled copy lives on the move's toDate). Surface
+          // it as "Authorized" so the scheduled-date row reads correctly.
+          const moveRecord = isSkipped
+            ? this.store.getMoveForRecurring(t.recurringId, date)
+            : null;
+          const isAuthorizedLater =
+            !!moveRecord && moveRecord.toDate > date;
 
           let recurrenceType = "";
           let additionalInfo = "";
@@ -327,7 +336,9 @@ class TransactionUI {
                 : "-";
           const amountSpan = document.createElement("span");
           amountSpan.classList.add(normalizedType);
-          if (isSkipped) {
+          // Authorized rows stay grayed (opacity) but are not struck through —
+          // the payment happened, it just cleared on a later date.
+          if (isSkipped && !isAuthorizedLater) {
             amountSpan.classList.add("skipped");
           }
           amountSpan.style.opacity = isSkipped ? "0.5" : "1";
@@ -337,7 +348,7 @@ class TransactionUI {
           }
           let statusLabel = "";
           if (isSkipped) {
-            statusLabel = " (Skipped)";
+            statusLabel = isAuthorizedLater ? " (Authorized)" : " (Skipped)";
           } else if (isHidden) {
             statusLabel = " (Hidden - Debt Snowball)";
           } else if (isUnsettled) {

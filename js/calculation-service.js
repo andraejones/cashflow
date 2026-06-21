@@ -235,11 +235,19 @@ class CalculationService {
     if (transactions[dateString]) {
       const dailyTransactions = transactions[dateString];
 
-      hasSkippedTransactions = dailyTransactions.some(
-        (t) =>
-          t.recurringId &&
-          this.recurringManager.isTransactionSkipped(dateString, t.recurringId)
-      );
+      hasSkippedTransactions = dailyTransactions.some((t) => {
+        if (
+          !t.recurringId ||
+          !this.recurringManager.isTransactionSkipped(dateString, t.recurringId)
+        ) {
+          return false;
+        }
+        // A skipped occurrence that was moved to a later date is an
+        // "(Authorized)" payment that clears later, not a real skip — don't
+        // flag the day with a skip star.
+        const move = this.store.getMoveForRecurring(t.recurringId, dateString);
+        return !(move && move.toDate > dateString);
+      });
 
       dailyTransactions.forEach((t) => {
         const isSkipped =
