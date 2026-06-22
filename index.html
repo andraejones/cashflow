@@ -216,13 +216,21 @@
     </div>
   </div>
 
-  <div id="debtSnowballModal" class="modal" role="dialog" aria-labelledby="debtSnowballTitle" aria-modal="true"
-    aria-hidden="true">
-    <div class="modal-content debt-snowball-modal">
-      <button id="debtSnowballClose" class="debt-close" aria-label="Close" type="button">
-        &times;
-      </button>
-      <h3 id="debtSnowballTitle">Debt Snowball</h3>
+  <div id="debtSnowballView" class="app-view" role="region" aria-labelledby="debtSnowballTitle"
+    aria-hidden="true" style="display: none">
+    <div class="app-view-content debt-snowball-view">
+      <header class="app-view-header">
+        <button id="debtSnowballClose" class="app-view-back" type="button">
+          <span aria-hidden="true">&larr;</span> Back to Calendar
+        </button>
+        <h3 id="debtSnowballTitle">Debt Snowball</h3>
+      </header>
+
+      <div id="snowballHero" class="snowball-hero"></div>
+
+      <div class="snowball-workspace">
+        <!-- Inputs column: manage debts + cash infusions -->
+        <div class="snowball-col snowball-col-inputs">
 
       <div class="debt-snowball-section">
         <h4>Debts</h4>
@@ -255,12 +263,17 @@
             <input type="date" id="debtStartDate" />
             <label for="debtDueDay">Due Day</label>
             <input type="number" id="debtDueDay" min="1" max="31" />
-            <label for="debtDueDayPattern">Day pattern</label>
-            <select id="debtDueDayPattern"></select>
-            <label for="debtInterestRate">Interest Rate (%)</label>
-            <input type="number" id="debtInterestRate" step="0.01" min="0" />
           </div>
           <div id="debtAdvancedRecurrenceOptions" class="advanced-recurrence-options" style="display: none"></div>
+          <details class="debt-form-advanced">
+            <summary>Advanced options</summary>
+            <div class="debt-form-grid">
+              <label for="debtDueDayPattern">Day pattern</label>
+              <select id="debtDueDayPattern"></select>
+              <label for="debtInterestRate">Interest Rate (%)</label>
+              <input type="number" id="debtInterestRate" step="0.01" min="0" />
+            </div>
+          </details>
           <div class="debt-form-actions">
             <button id="saveDebtButton" class="primary-button">
               Save Debt
@@ -309,6 +322,10 @@
         </div>
       </div>
 
+        </div><!-- /snowball-col-inputs -->
+        <!-- Plan column: live payoff dashboard -->
+        <div class="snowball-col snowball-col-plan">
+
       <div class="debt-snowball-section">
         <h4>Plan</h4>
         <div class="debt-plan-controls">
@@ -332,6 +349,9 @@
         <div id="snowballPlanSummary"></div>
         <div id="snowballPlanList"></div>
       </div>
+
+        </div><!-- /snowball-col-plan -->
+      </div><!-- /snowball-workspace -->
     </div>
   </div>
 

@@ -23,7 +23,7 @@ class DebtSnowballUI {
     this.recurringManager = recurringManager;
     this.onUpdate = onUpdate;
     this.editingDebtId = null;
-    this.modal = document.getElementById("debtSnowballModal");
+    this.view = document.getElementById("debtSnowballView");
     this.debtList = document.getElementById("debtList");
     this.debtForm = document.getElementById("debtForm");
     this.debtFormTitle = document.getElementById("debtFormTitle");
@@ -43,6 +43,7 @@ class DebtSnowballUI {
       "snowballExtraStartMonth"
     );
     this.snowballAutoCheckbox = document.getElementById("snowballAutoGenerate");
+    this.heroEl = document.getElementById("snowballHero");
     this.planSummary = document.getElementById("snowballPlanSummary");
     this.planList = document.getElementById("snowballPlanList");
     this.lastFocusedElement = null;
@@ -70,7 +71,7 @@ class DebtSnowballUI {
   initEventListeners() {
     const closeBtn = document.getElementById("debtSnowballClose");
     if (closeBtn) {
-      closeBtn.addEventListener("click", () => this.hideModal());
+      closeBtn.addEventListener("click", () => this.hideView());
     }
     const addDebtButton = document.getElementById("addDebtButton");
     if (addDebtButton) {
@@ -125,8 +126,14 @@ class DebtSnowballUI {
       });
     }
     document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && this.modal?.style.display === "block") {
-        this.hideModal();
+      if (event.key === "Escape" && this.view?.style.display === "block") {
+        this.hideView();
+      }
+    });
+    // Browser/hardware Back closes the view (our pushed history entry is popped).
+    window.addEventListener("popstate", () => {
+      if (this.view && this.view.style.display === "block") {
+        this._hideViewDom();
       }
     });
 
@@ -159,10 +166,10 @@ class DebtSnowballUI {
   }
 
   setupFocusTrap() {
-    if (!this.modal) return;
-    this.modal.addEventListener("keydown", (event) => {
+    if (!this.view) return;
+    this.view.addEventListener("keydown", (event) => {
       if (event.key !== "Tab") return;
-      const focusableElements = this.modal.querySelectorAll(
+      const focusableElements = this.view.querySelectorAll(
         'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
       );
       if (!focusableElements.length) return;
@@ -178,24 +185,54 @@ class DebtSnowballUI {
     });
   }
 
-  showModal() {
-    if (!this.modal) return;
-    this.lastFocusedElement = document.activeElement;
-    this.modal.style.display = "block";
-    this.modal.setAttribute("aria-hidden", "false");
-    ModalManager.openModal(this.modal);
+  showView() {
+    if (!this.view) return;
+    const alreadyOpen = this.view.style.display === "block";
+    if (!alreadyOpen) {
+      this.lastFocusedElement = document.activeElement;
+    }
+    this.view.style.display = "block";
+    this.view.setAttribute("aria-hidden", "false");
+    this.view.scrollTop = 0;
     this.refresh();
+    // Push a history entry the first time we open so the browser/hardware Back
+    // button returns to the calendar instead of leaving the app entirely.
+    if (!alreadyOpen) {
+      this._viewHistoryActive = true;
+      try {
+        history.pushState({ cashflowView: "debtSnowball" }, "");
+      } catch (e) {
+        this._viewHistoryActive = false;
+      }
+    }
     const closeBtn = document.getElementById("debtSnowballClose");
     if (closeBtn) {
       closeBtn.focus();
     }
   }
 
-  hideModal() {
-    if (!this.modal) return;
-    this.modal.style.display = "none";
-    this.modal.setAttribute("aria-hidden", "true");
-    ModalManager.closeModal(this.modal);
+  hideView() {
+    if (!this.view) return;
+    if (this.view.style.display !== "block") return;
+    // If our pushed entry is the current history state, pop it so the back
+    // stack stays clean; the popstate handler then tears down the DOM.
+    // Otherwise (no live entry) hide directly.
+    if (
+      this._viewHistoryActive &&
+      history.state &&
+      history.state.cashflowView === "debtSnowball"
+    ) {
+      history.back();
+    } else {
+      this._hideViewDom();
+    }
+  }
+
+  _hideViewDom() {
+    if (!this.view) return;
+    this._viewHistoryActive = false;
+    this.view.style.display = "none";
+    this.view.setAttribute("aria-hidden", "true");
     this.hideDebtForm();
     this.hideCashInfusionForm();
     this.convertingFromRecurringId = null;
@@ -212,8 +249,8 @@ class DebtSnowballUI {
     // Track which recurring transaction we're converting
     this.convertingFromRecurringId = recurringTransaction.id;
 
-    // Open the modal
-    this.showModal();
+    // Open the snowball view
+    this.showView();
 
     // Build a debt-like object from the recurring transaction
     const debtFromRecurring = {
@@ -274,6 +311,7 @@ class DebtSnowballUI {
     // is intentional: the plan is advisory; the calendar reflects only what is
     // actually scheduled (auto-generate on, or the Generate button used).
     const projection = this.calculateSnowballProjection(viewYear, viewMonth, true);
+    this.renderHero(projection);
     this.renderDebts();
     this.renderCashInfusions();
     this.renderPlan(projection);
@@ -2108,6 +2146,140 @@ class DebtSnowballUI {
     });
   }
 
+  renderHero(projection) {
+    if (!this.heroEl) return;
+    this.heroEl.innerHTML = "";
+
+    const debts = this.store.getDebts();
+    const viewBalances = (projection && projection.viewBalances) || {};
+    const summaries = debts
+      .map((debt) => ({
+        debt,
+        remaining: Math.max(
+          0,
+          typeof viewBalances[debt.id] === "number"
+            ? viewBalances[debt.id]
+            : Number(debt.balance) || 0
+        ),
+      }))
+      .filter((summary) => summary.remaining > 0);
+
+    if (summaries.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "snowball-hero-empty";
+      empty.textContent =
+        debts.length === 0
+          ? "Add your first debt below to project your debt-free date."
+          : "🎉 Every debt is projected paid off.";
+      this.heroEl.appendChild(empty);
+      return;
+    }
+
+    const totalDebt = summaries.reduce((sum, s) => sum + s.remaining, 0);
+
+    // Projected debt-free date = the latest payoff among active debts. If any
+    // active debt never clears within the projection horizon it has no payoff
+    // entry, so the date is unknown (payments don't outrun interest).
+    let debtFreeIndex = -Infinity;
+    let debtFree = null;
+    let allHavePayoff = true;
+    summaries.forEach((s) => {
+      const payoff = projection.payoffByDebtId
+        ? projection.payoffByDebtId[s.debt.id]
+        : null;
+      if (!payoff) {
+        allHavePayoff = false;
+        return;
+      }
+      const idx = this.getMonthIndex(payoff.year, payoff.month);
+      if (idx > debtFreeIndex) {
+        debtFreeIndex = idx;
+        debtFree = payoff;
+      }
+    });
+
+    const baseIndex = this.getMonthIndex(
+      projection.baseYear,
+      projection.baseMonth
+    );
+    const monthsToGo =
+      allHavePayoff && debtFree ? Math.max(0, debtFreeIndex - baseIndex) : null;
+
+    const monthKey = `${projection.viewYear}-${String(
+      projection.viewMonth + 1
+    ).padStart(2, "0")}`;
+    const monthInfo =
+      (projection.monthTargets && projection.monthTargets[monthKey]) || {};
+    const snowballAmount = Number(monthInfo.snowballAmount) || 0;
+
+    const formatWhole = (value) =>
+      `$${Math.round(Number(value) || 0).toLocaleString("en-US")}`;
+
+    const makeCard = ({ label, value, sub, primary }) => {
+      const card = document.createElement("div");
+      card.className = primary
+        ? "snowball-hero-card snowball-hero-primary"
+        : "snowball-hero-card";
+      const labelEl = document.createElement("div");
+      labelEl.className = "snowball-hero-label";
+      labelEl.textContent = label;
+      const valueEl = document.createElement("div");
+      valueEl.className = "snowball-hero-value";
+      valueEl.textContent = value;
+      card.appendChild(labelEl);
+      card.appendChild(valueEl);
+      if (sub) {
+        const subEl = document.createElement("div");
+        subEl.className = "snowball-hero-sub";
+        subEl.textContent = sub;
+        card.appendChild(subEl);
+      }
+      return card;
+    };
+
+    let primaryValue;
+    let primarySub;
+    if (allHavePayoff && debtFree) {
+      primaryValue = this.formatMonthYear(debtFree.year, debtFree.month);
+      primarySub =
+        monthsToGo === 0
+          ? "Paid off this month"
+          : `${monthsToGo} month${monthsToGo === 1 ? "" : "s"} to go`;
+    } else {
+      primaryValue = "Not yet on track";
+      primarySub = "Payments don't cover all interest";
+    }
+    this.heroEl.appendChild(
+      makeCard({
+        label: "Projected debt-free",
+        value: primaryValue,
+        sub: primarySub,
+        primary: true,
+      })
+    );
+
+    this.heroEl.appendChild(
+      makeCard({
+        label: "Total debt",
+        value: formatWhole(totalDebt),
+        sub: `${summaries.length} debt${
+          summaries.length === 1 ? "" : "s"
+        } remaining`,
+      })
+    );
+
+    this.heroEl.appendChild(
+      makeCard({
+        label: "Snowball / month",
+        value: formatWhole(snowballAmount),
+        sub:
+          snowballAmount > 0
+            ? "Extra applied to your target"
+            : "Add an extra payment to speed this up",
+      })
+    );
+  }
+
   renderPlan(projection) {
     if (!this.planList || !this.planSummary) return;
     this.planList.innerHTML = "";
@@ -2195,18 +2367,67 @@ class DebtSnowballUI {
     });
 
     summariesByPayoff.forEach((summary, index) => {
+      const isTarget = summary.debt.id === target.debt.id;
       const item = document.createElement("div");
       item.className = "debt-plan-item";
-      if (summary.debt.id === target.debt.id) {
+      if (isTarget) {
         item.classList.add("debt-plan-target");
       }
       const payoff = projection.payoffByDebtId?.[summary.debt.id];
       const payoffLabel = payoff
         ? this.formatMonthYear(payoff.year, payoff.month)
         : "No payoff scheduled";
-      item.textContent = `${index + 1}. ${summary.debt.name} — Projected $${summary.remaining.toFixed(
-        2
-      )} — Paid off by ${payoffLabel}`;
+
+      const head = document.createElement("div");
+      head.className = "debt-plan-item-head";
+
+      const rank = document.createElement("span");
+      rank.className = "debt-plan-rank";
+      rank.textContent = index + 1;
+
+      const name = document.createElement("span");
+      name.className = "debt-plan-name";
+      name.textContent = summary.debt.name;
+      if (isTarget) {
+        const badge = document.createElement("span");
+        badge.className = "debt-plan-badge";
+        badge.textContent = "Target";
+        name.appendChild(badge);
+      }
+
+      const payoffSpan = document.createElement("span");
+      payoffSpan.className = "debt-plan-payoff";
+      payoffSpan.textContent = payoffLabel;
+
+      head.appendChild(rank);
+      head.appendChild(name);
+      head.appendChild(payoffSpan);
+      item.appendChild(head);
+
+      // Progress = how much of the original balance is projected paid off.
+      const original = Number(summary.debt.balance) || 0;
+      const paidFraction =
+        original > 0
+          ? Math.min(1, Math.max(0, (original - summary.remaining) / original))
+          : 0;
+      const progress = document.createElement("div");
+      progress.className = "debt-plan-progress";
+      const fill = document.createElement("div");
+      fill.className = "debt-plan-progress-fill";
+      fill.style.width = `${Math.round(paidFraction * 100)}%`;
+      progress.appendChild(fill);
+      item.appendChild(progress);
+
+      const figures = document.createElement("div");
+      figures.className = "debt-plan-figures";
+      figures.textContent =
+        original > 0
+          ? `$${summary.remaining.toFixed(2)} left of $${original.toFixed(
+              2
+            )} (${Math.round(paidFraction * 100)}% paid)`
+          : `$${summary.remaining.toFixed(2)} remaining`;
+      item.appendChild(figures);
+
       this.planList.appendChild(item);
     });
   }
@@ -2327,8 +2548,7 @@ class DebtSnowballUI {
     }
 
     this.hideCashInfusionForm();
-    this.renderCashInfusions();
-    this.renderPlan();
+    this.refresh();
     this.onUpdate();
   }
 
@@ -2357,8 +2577,7 @@ class DebtSnowballUI {
     }
     this.store.deleteCashInfusion(infusionId);
     Utils.showNotification("Cash infusion deleted");
-    this.renderCashInfusions();
-    this.renderPlan();
+    this.refresh();
     this.onUpdate();
   }
 
@@ -2668,7 +2887,7 @@ class DebtSnowballUI {
     if (autoGenerate) {
       this.generateSnowballForCurrentMonth(false);
     }
-    this.renderPlan();
+    this.refresh();
     this.onUpdate();
   }
 
@@ -2681,8 +2900,7 @@ class DebtSnowballUI {
     );
     if (snowballAdded) {
       Utils.showNotification("Snowball payment generated");
-      this.renderDebts();
-      this.renderPlan();
+      this.refresh();
       this.onUpdate();
     } else if (force) {
       Utils.showNotification("No snowball payment generated", "error");

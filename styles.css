@@ -701,6 +701,260 @@ h4 {
   z-index: 1000;
 }
 
+/* Full-screen view (e.g. Debt Snowball) — sits below modals so confirm
+   dialogs and toasts still layer on top of it. */
+.app-view {
+  display: none;
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  background: linear-gradient(135deg, #fdf7ef 0%, #e2f3ee 100%);
+  z-index: 500;
+}
+
+.app-view-content {
+  width: 90%;
+  max-width: 700px;
+  margin: 0 auto;
+  padding: 24px 0 48px;
+  padding-top: calc(24px + env(safe-area-inset-top));
+  padding-bottom: calc(48px + env(safe-area-inset-bottom));
+}
+
+.app-view-header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 10px 0;
+  background: rgba(253, 247, 239, 0.9);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-bottom: 1px solid rgba(31, 43, 42, 0.08);
+}
+
+.app-view-header h3 {
+  margin: 0;
+}
+
+.app-view-back {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px 10px;
+  margin-left: -10px;
+  border-radius: 999px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--primary-color);
+}
+
+.app-view-back:hover,
+.app-view-back:focus {
+  background-color: rgba(15, 122, 108, 0.12);
+}
+
+/* Debt snowball workspace ------------------------------------------------- */
+.app-view-content.debt-snowball-view {
+  max-width: 980px;
+}
+
+/* Hero: lead with the outcome (projected debt-free date) */
+.snowball-hero {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.snowball-hero-card {
+  flex: 1 1 150px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background-color: #fff;
+  box-shadow: var(--shadow-soft);
+}
+
+.snowball-hero-primary {
+  flex: 2 1 240px;
+  border: none;
+  color: #fff;
+  background: linear-gradient(135deg, #0f7a6c, #0b5e53);
+}
+
+.snowball-hero-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  opacity: 0.75;
+}
+
+.snowball-hero-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.15;
+  margin-top: 4px;
+}
+
+.snowball-hero-primary .snowball-hero-value {
+  font-size: 1.85rem;
+}
+
+.snowball-hero-sub {
+  font-size: 0.85rem;
+  margin-top: 4px;
+  opacity: 0.85;
+}
+
+.snowball-hero-empty {
+  flex: 1 1 100%;
+  padding: 18px 16px;
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-md);
+  background-color: var(--surface-muted);
+  color: var(--muted-color);
+  text-align: center;
+}
+
+/* Two-column workspace: inputs (left) | live plan (right) */
+.snowball-workspace {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+@media (min-width: 880px) {
+  .snowball-workspace {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 28px;
+  }
+}
+
+.snowball-col {
+  min-width: 0;
+}
+
+.snowball-col .debt-snowball-section:first-child {
+  margin-top: 0;
+}
+
+/* Plan as a scannable card list with progress bars */
+.debt-plan-item-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.debt-plan-rank {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background-color: var(--surface-muted);
+  color: var(--muted-color);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.debt-plan-target .debt-plan-rank {
+  background-color: var(--primary-color);
+  color: #fff;
+}
+
+.debt-plan-name {
+  flex: 1;
+  font-weight: 600;
+}
+
+.debt-plan-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background-color: var(--primary-color);
+  color: #fff;
+  vertical-align: middle;
+}
+
+.debt-plan-payoff {
+  flex: 0 0 auto;
+  font-size: 0.85rem;
+  color: var(--muted-color);
+}
+
+.debt-plan-progress {
+  height: 7px;
+  margin: 8px 0 6px;
+  border-radius: 999px;
+  background-color: rgba(31, 43, 42, 0.08);
+  overflow: hidden;
+}
+
+.debt-plan-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background-color: var(--primary-color);
+  transition: width 0.3s ease;
+}
+
+.debt-plan-figures {
+  font-size: 0.82rem;
+  color: var(--muted-color);
+}
+
+/* Progressive disclosure for less-used debt fields */
+.debt-form-advanced {
+  margin-top: 12px;
+}
+
+.debt-form-advanced > summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--primary-color);
+  padding: 4px 0;
+  list-style: none;
+}
+
+.debt-form-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.debt-form-advanced > summary::before {
+  content: "▸ ";
+  display: inline-block;
+  transition: transform 0.15s ease;
+}
+
+.debt-form-advanced[open] > summary::before {
+  content: "▾ ";
+}
+
+.debt-form-advanced > .debt-form-grid {
+  margin-top: 10px;
+}
+
 /* Lock overlay for inactivity timeout */
 .lock-overlay {
   display: none;
@@ -836,24 +1090,6 @@ body.app-locked #calendarOptions {
   justify-content: center;
 }
 
-.debt-close {
-  color: rgba(31, 43, 42, 0.5);
-  float: right;
-  font-size: 28px;
-  font-weight: 700;
-  cursor: pointer;
-  background: none;
-  border: none;
-  padding: 0;
-  line-height: 1;
-  border-radius: 999px;
-  width: 36px;
-  height: 36px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
 .modal-balance {
   font-size: 0.95em;
   font-weight: 600;
@@ -873,24 +1109,12 @@ body.app-locked #calendarOptions {
   background-color: rgba(15, 122, 108, 0.12);
 }
 
-.debt-close:hover,
-.debt-close:focus {
-  color: #1f2b2a;
-  text-decoration: none;
-  cursor: pointer;
-  background-color: rgba(15, 122, 108, 0.12);
-}
-
 #modalTransactions {
   margin-top: 20px;
 }
 
 #modalTransactions div {
   margin-bottom: 10px;
-}
-
-.debt-snowball-modal {
-  max-width: 700px;
 }
 
 .debt-snowball-section {
@@ -994,13 +1218,17 @@ body.app-locked #calendarOptions {
 }
 
 .debt-plan-item {
-  padding: 8px 0;
-  border-bottom: 1px solid rgba(31, 43, 42, 0.08);
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background-color: #fff;
+  box-shadow: var(--shadow-soft);
 }
 
 .debt-plan-target {
-  color: var(--primary-color);
-  font-weight: 600;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 1px var(--primary-color), var(--shadow-soft);
 }
 
 .cash-infusion-list {
@@ -1414,6 +1642,7 @@ body.app-locked #calendarOptions {
   border-radius: 5px;
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
   display: none;
+  z-index: 10000;
   animation: slideIn 0.3s ease-out;
 }
 
@@ -1427,6 +1656,7 @@ body.app-locked #calendarOptions {
   border-radius: 5px;
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
   display: none;
+  z-index: 10000;
   animation: slideIn 0.3s ease-out;
 }
 
@@ -1800,6 +2030,11 @@ body.app-locked #calendarOptions {
     padding: 15px;
     max-height: 90vh;
     overflow-y: auto;
+  }
+
+  .app-view-content {
+    width: 92%;
+    padding-top: calc(16px + env(safe-area-inset-top));
   }
 
   #transactionForm {

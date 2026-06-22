@@ -453,9 +453,8 @@ class CalendarUI {
         type="button"
         role="menuitem"
         class="calendar-option"
-        onclick="app.debtSnowball.showModal(); app.calendarUI.closeAppMenu();"
-        aria-haspopup="dialog"
-        aria-controls="debtSnowballModal"
+        onclick="app.debtSnowball.showView(); app.calendarUI.closeAppMenu();"
+        aria-controls="debtSnowballView"
       >
         Debt Snowball
       </button>

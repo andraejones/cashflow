@@ -782,14 +782,11 @@ class PinProtection {
       }
     }
 
-    // Close debtSnowballModal if it's open
-    const debtModal = document.getElementById("debtSnowballModal");
-    if (debtModal && debtModal.style.display === "block") {
-      debtModal.style.display = "none";
-      debtModal.setAttribute("aria-hidden", "true");
-      if (window.ModalManager) {
-        window.ModalManager.closeModal(debtModal);
-      }
+    // Close the debt snowball view if it's open
+    const debtView = document.getElementById("debtSnowballView");
+    if (debtView && debtView.style.display === "block") {
+      debtView.style.display = "none";
+      debtView.setAttribute("aria-hidden", "true");
     }
 
     // Close any other common modals
