@@ -38,6 +38,9 @@ class DebtSnowballUI {
     this.debtAdvancedOptions = document.getElementById(
       "debtAdvancedRecurrenceOptions"
     );
+    this.debtEndConditionOptions = document.getElementById(
+      "debtEndConditionOptions"
+    );
     this.snowballExtraInput = document.getElementById("snowballExtraAmount");
     this.snowballExtraStartInput = document.getElementById(
       "snowballExtraStartMonth"
@@ -350,6 +353,9 @@ class DebtSnowballUI {
     if (!this.debtRecurrenceInput || !this.debtAdvancedOptions) return;
     const recurrenceType = this.debtRecurrenceInput.value || "monthly";
     this.debtAdvancedOptions.innerHTML = "";
+    if (this.debtEndConditionOptions) {
+      this.debtEndConditionOptions.innerHTML = "";
+    }
 
     if (recurrenceType === "monthly") {
       this.toggleMonthlyFields(true);
@@ -359,6 +365,9 @@ class DebtSnowballUI {
 
     if (recurrenceType === "once") {
       this.debtAdvancedOptions.style.display = "none";
+      if (this.debtEndConditionOptions) {
+        this.debtEndConditionOptions.style.display = "none";
+      }
       return;
     }
 
@@ -370,7 +379,12 @@ class DebtSnowballUI {
     }
     Utils.buildBusinessDayOptions(this.debtAdvancedOptions, 'debt');
     Utils.buildVariableAmountOptions(this.debtAdvancedOptions, 'debt');
-    Utils.buildEndConditionOptions(this.debtAdvancedOptions, 'debt');
+    if (this.debtEndConditionOptions) {
+      this.debtEndConditionOptions.style.display = "block";
+      Utils.buildEndConditionOptions(this.debtEndConditionOptions, 'debt');
+    } else {
+      Utils.buildEndConditionOptions(this.debtAdvancedOptions, 'debt');
+    }
   }
 
   toggleMonthlyFields(show) {
@@ -717,6 +731,10 @@ class DebtSnowballUI {
     if (this.debtAdvancedOptions) {
       this.debtAdvancedOptions.innerHTML = "";
       this.debtAdvancedOptions.style.display = "none";
+    }
+    if (this.debtEndConditionOptions) {
+      this.debtEndConditionOptions.innerHTML = "";
+      this.debtEndConditionOptions.style.display = "none";
     }
   }
 
@@ -1856,6 +1874,72 @@ class DebtSnowballUI {
     return changed;
   }
 
+  // Remove debt minimum-payment instances that the recurrence would no longer
+  // generate: occurrences that fall outside the recurring's [startDate,endDate]
+  // window, or duplicate occurrences on the same date. These strand when a
+  // debt's recurrence window changes — Convert-to-Debt deriving a new start
+  // date, a due-date edit, or the payoff-driven endDate sync. Because the
+  // snowball engine flags every minimum it adjusts (zeroed/partial/hidden) with
+  // modifiedInstance, the recurring manager treats them as hand-edits and never
+  // deletes or regenerates them, so they persist with stale amounts before the
+  // start date or past payoff, corrupting "paid so far" and the balance walk.
+  // Scans all dates (strandings can sit far outside the materialized horizon)
+  // and runs once per render via ensureSnowballPaymentsForHorizon, which then
+  // re-expands and re-adjusts a clean set within the current window.
+  cleanupOrphanedDebtMinimums() {
+    const transactions = this.store.getTransactions();
+    const recurringById = new Map(
+      this.store.getRecurringTransactions().map((rt) => [rt.id, rt])
+    );
+    let changed = false;
+
+    Object.keys(transactions).forEach((dateKey) => {
+      const list = transactions[dateKey];
+      if (!Array.isArray(list)) {
+        return;
+      }
+      const seenOccurrences = new Set();
+      const filtered = list.filter((t) => {
+        if (t.debtRole !== "minimum" || !t.debtId || !t.recurringId) {
+          return true;
+        }
+        const rt = recurringById.get(t.recurringId);
+        if (!rt) {
+          // Recurrence definition is gone — orphaned instance.
+          changed = true;
+          return false;
+        }
+        // Compare on the scheduled occurrence (originalDate when a business-day
+        // adjustment moved the placed date), so legitimately shifted payments
+        // are judged by their real due date, not their landing date.
+        const occurrence = t.originalDate || dateKey;
+        if (
+          (rt.startDate && occurrence < rt.startDate) ||
+          (rt.endDate && occurrence > rt.endDate)
+        ) {
+          changed = true;
+          return false;
+        }
+        const occurrenceKey = `${t.recurringId}|${occurrence}`;
+        if (seenOccurrences.has(occurrenceKey)) {
+          changed = true;
+          return false;
+        }
+        seenOccurrences.add(occurrenceKey);
+        return true;
+      });
+      if (filtered.length !== list.length) {
+        if (filtered.length === 0) {
+          delete transactions[dateKey];
+        } else {
+          transactions[dateKey] = filtered;
+        }
+      }
+    });
+
+    return changed;
+  }
+
   adjustMinimumPaymentTransactions(year, month, minPaidByDebtId) {
     if (!minPaidByDebtId || typeof minPaidByDebtId !== "object") {
       return false;
@@ -1992,7 +2076,6 @@ class DebtSnowballUI {
     includeExtra
   ) {
     const transactions = this.store.getTransactions();
-    const monthPrefix = `${year}-${String(month + 1).padStart(2, "0")}-`;
     const expectedByDebtId = new Map();
     expectedPayments.forEach((payment) => {
       expectedByDebtId.set(payment.debtId, { ...payment, matched: false });
@@ -2001,10 +2084,11 @@ class DebtSnowballUI {
     let changed = false;
     let snowballAdded = false;
 
+    // Scan every date (not just this month's) so a snowball row that drifted
+    // into an adjacent month — e.g. a payoff payment pushed by a business-day
+    // adjustment — is still reconciled against monthKey instead of being left
+    // behind as a stray that double-counts.
     Object.keys(transactions).forEach((dateKey) => {
-      if (!dateKey.startsWith(monthPrefix)) {
-        return;
-      }
       const list = transactions[dateKey];
       const filtered = list.filter((t) => {
         const isSnowball =
@@ -2017,7 +2101,15 @@ class DebtSnowballUI {
           return false;
         }
         const expected = expectedByDebtId.get(t.debtId);
-        if (!expected || expected.dateString !== dateKey) {
+        // Drop rows that are no longer expected, drifted to the wrong date, or
+        // duplicate an expected payment we already matched. The last condition
+        // self-heals previously materialized duplicate snowball rows, which
+        // otherwise persist forever and double-count as real outflows.
+        if (
+          !expected ||
+          expected.dateString !== dateKey ||
+          expected.matched === true
+        ) {
           changed = true;
           return false;
         }
@@ -3056,6 +3148,13 @@ class DebtSnowballUI {
     const endIndex = Math.max(viewIndex, currentIndex) + monthsAhead;
 
     this.setCurrentViewMonth(viewYear, viewMonth);
+    // Self-heal stranded/duplicate minimum-payment instances before the
+    // projection reads "paid so far" or materializes anything, so balances and
+    // payoff dates are computed from a clean set.
+    if (this.cleanupOrphanedDebtMinimums()) {
+      this.recurringManager.invalidateCache();
+      this.store.saveData(false);
+    }
     const projection = this.calculateSnowballProjection(
       viewYear,
       viewMonth,
