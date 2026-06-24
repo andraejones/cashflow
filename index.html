@@ -66,7 +66,10 @@
           <option value="income">Income</option>
           <option value="balance">Balance</option>
         </select>
-        <input type="text" id="transactionDescription" placeholder="Description" aria-label="Transaction description" />
+        <div id="descriptionField" class="description-field">
+          <input type="text" id="transactionDescription" placeholder="Description" aria-label="Transaction description" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="descriptionSuggestions" />
+          <ul id="descriptionSuggestions" class="description-suggestions" role="listbox" aria-label="Previously used descriptions" hidden></ul>
+        </div>
         <div id="toggleGroup" class="toggle-group" style="display:none">
           <label id="settledToggleLabel" class="settled-toggle-label">
             <input type="checkbox" id="transactionSettled" checked />

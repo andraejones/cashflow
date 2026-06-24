@@ -38,19 +38,34 @@ class TransactionUI {
     const recurrenceSelect = document.getElementById("transactionRecurrence");
     const transactionDescription = document.getElementById("transactionDescription");
 
+    const descriptionField = document.getElementById("descriptionField");
     transactionType.addEventListener("change", () => {
       if (transactionType.value === "balance") {
         recurrenceSelect.value = "once";
         recurrenceSelect.style.display = "none";
         transactionDescription.value = "Ending Balance";
-        transactionDescription.style.display = "none";
+        if (descriptionField) descriptionField.style.display = "none";
+        this.closeDescriptionSuggestions();
       } else {
         recurrenceSelect.style.display = "";
-        transactionDescription.style.display = "";
+        if (descriptionField) descriptionField.style.display = "";
         transactionDescription.value = "";
         transactionDescription.placeholder = "Description";
       }
       this.updateSettledToggleVisibility();
+    });
+    transactionDescription.addEventListener("input", () => {
+      this.renderDescriptionSuggestions(transactionDescription.value);
+    });
+    transactionDescription.addEventListener("focus", () => {
+      this.renderDescriptionSuggestions(transactionDescription.value);
+    });
+    transactionDescription.addEventListener("keydown", (event) => {
+      this.handleDescriptionKeydown(event);
+    });
+    transactionDescription.addEventListener("blur", () => {
+      // Delay so a click on a suggestion registers before the list closes.
+      setTimeout(() => this.closeDescriptionSuggestions(), 120);
     });
     document.getElementById("transactionRecurrence").addEventListener("change", () => {
       this.updateRecurrenceOptions();
@@ -91,6 +106,175 @@ class TransactionUI {
     });
   }
 
+
+  populateDescriptionSuggestions() {
+    // Build a usage-ranked list of past one-time transaction descriptions
+    // (excludes recurring/snowball entries and "Ending Balance"). The dropdown
+    // is filtered to the top 5 matches as the user types.
+    const counts = new Map();
+    const transactions = this.store.getTransactions();
+    Object.values(transactions).forEach((dayTransactions) => {
+      (dayTransactions || []).forEach((t) => {
+        // Skip expanded recurring instances and debt/snowball payments —
+        // only genuine one-time entries the user typed themselves.
+        if (t.recurringId || t.debtId) return;
+        const description = (t.description || "").trim();
+        if (!description || description === "Ending Balance") return;
+        const key = description.toLowerCase();
+        const existing = counts.get(key);
+        if (existing) {
+          existing.count += 1;
+        } else {
+          counts.set(key, { description, count: 1 });
+        }
+      });
+    });
+
+    this._descriptionSuggestions = Array.from(counts.values()).sort(
+      (a, b) => b.count - a.count || a.description.localeCompare(b.description)
+    );
+    this._activeSuggestionIndex = -1;
+  }
+
+  renderDescriptionSuggestions(query) {
+    const list = document.getElementById("descriptionSuggestions");
+    const input = document.getElementById("transactionDescription");
+    if (!list || !input) return;
+
+    const term = (query || "").trim().toLowerCase();
+    const all = this._descriptionSuggestions || [];
+    // Hide an exact match — no point suggesting what's already fully typed.
+    const matches = all
+      .filter((entry) => {
+        const value = entry.description.toLowerCase();
+        return term ? value.includes(term) && value !== term : true;
+      })
+      .slice(0, 5);
+
+    this._activeSuggestionIndex = -1;
+    input.removeAttribute("aria-activedescendant");
+    list.innerHTML = "";
+
+    if (matches.length === 0) {
+      this.closeDescriptionSuggestions();
+      return;
+    }
+
+    matches.forEach((entry, index) => {
+      const item = document.createElement("li");
+      item.className = "description-suggestion";
+      item.id = `descriptionSuggestion-${index}`;
+      item.setAttribute("role", "option");
+      item.dataset.value = entry.description;
+
+      const label = document.createElement("span");
+      label.className = "suggestion-label";
+      this.appendHighlightedText(label, entry.description, term);
+      item.appendChild(label);
+
+      // mousedown (not click) so it fires before the input's blur handler.
+      item.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        this.applyDescriptionSuggestion(entry.description);
+      });
+
+      list.appendChild(item);
+    });
+
+    list.hidden = false;
+    input.setAttribute("aria-expanded", "true");
+  }
+
+  // Renders `text` into `parent`, wrapping the portion matching `term` in a
+  // highlighted span so the user sees why each suggestion matched.
+  appendHighlightedText(parent, text, term) {
+    if (!term) {
+      parent.textContent = text;
+      return;
+    }
+    const matchStart = text.toLowerCase().indexOf(term);
+    if (matchStart === -1) {
+      parent.textContent = text;
+      return;
+    }
+    const before = text.slice(0, matchStart);
+    const match = text.slice(matchStart, matchStart + term.length);
+    const after = text.slice(matchStart + term.length);
+    if (before) parent.appendChild(document.createTextNode(before));
+    const strong = document.createElement("span");
+    strong.className = "suggestion-match";
+    strong.textContent = match;
+    parent.appendChild(strong);
+    if (after) parent.appendChild(document.createTextNode(after));
+  }
+
+  applyDescriptionSuggestion(value) {
+    const input = document.getElementById("transactionDescription");
+    if (input) {
+      input.value = value;
+      input.focus();
+    }
+    this.closeDescriptionSuggestions();
+  }
+
+  closeDescriptionSuggestions() {
+    const list = document.getElementById("descriptionSuggestions");
+    const input = document.getElementById("transactionDescription");
+    if (list) {
+      list.hidden = true;
+      list.innerHTML = "";
+    }
+    if (input) {
+      input.setAttribute("aria-expanded", "false");
+      input.removeAttribute("aria-activedescendant");
+    }
+    this._activeSuggestionIndex = -1;
+  }
+
+  handleDescriptionKeydown(event) {
+    const list = document.getElementById("descriptionSuggestions");
+    if (!list || list.hidden) return;
+    const items = Array.from(list.children);
+    if (items.length === 0) return;
+
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        this.moveActiveSuggestion(1, items);
+        break;
+      case "ArrowUp":
+        event.preventDefault();
+        this.moveActiveSuggestion(-1, items);
+        break;
+      case "Enter":
+        if (this._activeSuggestionIndex >= 0) {
+          event.preventDefault();
+          this.applyDescriptionSuggestion(
+            items[this._activeSuggestionIndex].dataset.value
+          );
+        }
+        break;
+      case "Escape":
+        // Keep the modal open; just dismiss the suggestion list.
+        event.stopPropagation();
+        this.closeDescriptionSuggestions();
+        break;
+      default:
+        break;
+    }
+  }
+
+  moveActiveSuggestion(delta, items) {
+    const input = document.getElementById("transactionDescription");
+    const count = items.length;
+    items.forEach((item) => item.classList.remove("is-active"));
+    this._activeSuggestionIndex =
+      (this._activeSuggestionIndex + delta + count) % count;
+    const active = items[this._activeSuggestionIndex];
+    active.classList.add("is-active");
+    active.scrollIntoView({ block: "nearest" });
+    if (input) input.setAttribute("aria-activedescendant", active.id);
+  }
 
   updateSettledToggleVisibility() {
     const isExpense = document.getElementById("transactionType").value === "expense";
@@ -299,7 +483,11 @@ class TransactionUI {
         return;
       }
 
+      const descriptionFieldEl = document.getElementById("descriptionField");
+      if (descriptionFieldEl) descriptionFieldEl.style.display = "";
       transactionDescriptionInput.style.display = "";
+      this.populateDescriptionSuggestions();
+      this.closeDescriptionSuggestions();
       transactionDate.value = date;
       const formattedDate = Utils.formatDisplayDate(date);
 
