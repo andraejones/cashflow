@@ -505,6 +505,11 @@ class TransactionUI {
 
           // Add Settle/Unsettle button for expenses.
           // `settled === false` is the only "unsettled" state; missing or `true` means settled.
+          // Allocated (one-time) expenses are always settled, so the settle
+          // toggle is meaningless for them — repurpose it as "Close Out", which
+          // deletes the allocation after confirmation. Regular expenses keep
+          // the Mark Settled/Unsettled toggle.
+          const isCloseOut = isAllocated && !isRecurring;
           let settleBtn = null;
           if (normalizedType === "expense" && !isSkipped) {
             const isCurrentlyUnsettled = t.settled === false;
@@ -512,11 +517,16 @@ class TransactionUI {
             settleBtn.className = "settle-btn";
             settleBtn.setAttribute("role", "button");
             settleBtn.setAttribute("tabindex", "0");
-            settleBtn.setAttribute(
-              "aria-label",
-              isCurrentlyUnsettled ? "Mark expense settled" : "Mark expense unsettled"
-            );
-            settleBtn.textContent = isCurrentlyUnsettled ? "Mark Settled" : "Mark Unsettled";
+            if (isCloseOut) {
+              settleBtn.setAttribute("aria-label", "Close out allocation");
+              settleBtn.textContent = "Close Out";
+            } else {
+              settleBtn.setAttribute(
+                "aria-label",
+                isCurrentlyUnsettled ? "Mark expense settled" : "Mark expense unsettled"
+              );
+              settleBtn.textContent = isCurrentlyUnsettled ? "Mark Settled" : "Mark Unsettled";
+            }
             transactionDiv.appendChild(settleBtn);
           }
 
@@ -656,7 +666,43 @@ class TransactionUI {
             });
           }
 
-          if (settleBtn) {
+          if (settleBtn && isCloseOut) {
+            const txnId = t.id;
+            const closeOutAmount = t.amount;
+            const closeOutDesc = descriptionText;
+            const closeOut = async () => {
+              const descPart = closeOutDesc ? `${closeOutDesc} – ` : "";
+              const shouldClose = await Utils.showModalConfirm(
+                `Close out this allocation?\n\n${descPart}-$${Number(closeOutAmount).toFixed(2)}\n\nThis removes the allocation.`,
+                "Close Out Allocation",
+                { confirmText: "Close Out", cancelText: "Cancel" }
+              );
+              if (!shouldClose) {
+                return;
+              }
+              // Allocations roll forward, so resolve the current location by id
+              // rather than the closure-captured date/index.
+              const loc = txnId ? this.store.findTransactionById(txnId) : null;
+              if (loc) {
+                this.store.deleteTransaction(loc.date, loc.index);
+              } else if (this.store.getTransactions()[date]?.[index]) {
+                this.store.deleteTransaction(date, index);
+              } else {
+                Utils.showNotification("Allocation no longer exists", "error");
+                return;
+              }
+              this.showTransactionDetails(date);
+              this._notifyChange();
+              Utils.showNotification("Allocation closed out");
+            };
+            settleBtn.addEventListener("click", closeOut);
+            settleBtn.addEventListener("keydown", (event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                closeOut();
+              }
+            });
+          } else if (settleBtn) {
             const txnId = t.id;
             const toggleSettled = () => {
               // Resolve the current index from the store. The closure-captured index

@@ -1176,6 +1176,77 @@ class TransactionStore {
   }
 
 
+  // Locate a transaction by id across all dates. Allocations roll forward day
+  // by day, so callers that hold only an id (e.g. the Close Out button) must
+  // resolve the current date/index rather than assume a fixed one.
+  findTransactionById(id) {
+    if (!id) return null;
+    const dates = Object.keys(this.transactions);
+    for (let d = 0; d < dates.length; d++) {
+      const arr = this.transactions[dates[d]];
+      const idx = arr.findIndex((x) => x.id === id);
+      if (idx !== -1) {
+        return { date: dates[d], index: idx, transaction: arr[idx] };
+      }
+    }
+    return null;
+  }
+
+
+  // Allocations are rolling reserved cushions: once an allocation's date
+  // reaches today (or earlier) and it still holds a balance, it moves to
+  // tomorrow so it stays one day ahead of the current day. Future-dated
+  // allocations wait until time catches up; fully-drawn ($0) allocations
+  // freeze in place (the user clears them with Close Out). The id is preserved
+  // so any expenses drawing from the allocation stay linked.
+  rollForwardAllocations() {
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    const tomorrowStr = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, "0")}-${String(tomorrow.getDate()).padStart(2, "0")}`;
+
+    const moves = [];
+    Object.keys(this.transactions).forEach((date) => {
+      if (date > todayStr) return;
+      this.transactions[date].forEach((t) => {
+        if (
+          t.allocated === true &&
+          t.type === "expense" &&
+          !t.recurringId &&
+          this._roundCents(t.amount) > 0
+        ) {
+          moves.push({ fromDate: date, id: t.id, transaction: t });
+        }
+      });
+    });
+
+    if (moves.length === 0) {
+      return false;
+    }
+
+    moves.forEach(({ fromDate, id, transaction }) => {
+      const arr = this.transactions[fromDate];
+      if (!arr) return;
+      const idx = id
+        ? arr.findIndex((x) => x.id === id)
+        : arr.indexOf(transaction);
+      if (idx === -1) return;
+      arr.splice(idx, 1);
+      if (arr.length === 0) {
+        delete this.transactions[fromDate];
+      }
+      transaction._lastModified = new Date().toISOString();
+      if (!this.transactions[tomorrowStr]) {
+        this.transactions[tomorrowStr] = [];
+      }
+      this.transactions[tomorrowStr].push(transaction);
+    });
+
+    this.debouncedSave();
+    return true;
+  }
+
+
   exportData() {
     return {
       transactions: this._filterPersistedTransactions(this.transactions),
