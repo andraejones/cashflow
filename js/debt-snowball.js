@@ -1326,12 +1326,20 @@ class DebtSnowballUI {
     });
   }
 
+  // Lump-sum accumulation model: the snowball extra is NEVER applied to any
+  // debt's principal monthly (some lenders treat overpayments as pre-payments,
+  // crediting future installments instead of reducing principal). Instead each
+  // debt pays only its minimum, the extra accumulates into a carried "fund", and
+  // a debt is paid off in full the first month the fund can cover its remaining
+  // balance. `incomingFund` is the fund carried in from prior months;
+  // `fundBalanceEnd` is what carries forward.
   calculateMonthlySnowballAllocation(
     balances,
     monthlyTotalsByDebtId,
     applySnowball,
     baseExtraPayment,
-    rolloverAmount
+    rolloverAmount,
+    incomingFund
   ) {
     const roundToCents = (value) =>
       Math.round((Number(value) || 0) * 100) / 100;
@@ -1360,40 +1368,42 @@ class DebtSnowballUI {
       .sort((leftId, rightId) => balancesAfterMin[leftId] - balancesAfterMin[rightId]);
     const targetDebtId = debtOrder.length ? debtOrder[0] : null;
 
-    const snowballPaidByDebtId = {};
-    let remainingSnowball = applySnowball
+    // This month's contribution to the set-aside fund: base extra + freed-up
+    // minimums of already-paid-off debts (rolloverAmount) + any same-month
+    // leftover when a minimum overshot its remaining balance (inMonthRollover).
+    const fundContribution = applySnowball
       ? roundToCents(
         (Number(baseExtraPayment) || 0) +
         (Number(rolloverAmount) || 0) +
         inMonthRollover
       )
       : 0;
+    let fund = roundToCents((Number(incomingFund) || 0) + fundContribution);
+
+    // Cascade payoff: clear debts smallest-first whenever the accumulated fund
+    // can cover the next target's remaining balance. debtOrder is ascending, so
+    // once the fund can't cover the current target it can't cover any later one.
+    const epsilon = 0.005;
+    const lumpSumPaidByDebtId = {};
     const balancesAfterPayments = { ...balancesAfterMin };
-
-    debtOrder.forEach((debtId) => {
-      if (remainingSnowball <= 0) return;
-      const remainingBalance = Number(balancesAfterPayments[debtId]) || 0;
-      if (remainingBalance <= 0) return;
-      const applied = roundToCents(Math.min(remainingBalance, remainingSnowball));
-      if (applied <= 0) return;
-      snowballPaidByDebtId[debtId] = applied;
-      balancesAfterPayments[debtId] = roundToCents(Math.max(0, remainingBalance - applied));
-      remainingSnowball = roundToCents(remainingSnowball - applied);
-    });
-
-    const snowballAmount = roundToCents(
-      Object.values(snowballPaidByDebtId).reduce(
-        (sum, amount) => sum + (Number(amount) || 0),
-        0
-      )
-    );
+    if (applySnowball && fund > 0) {
+      for (const debtId of debtOrder) {
+        const remainingBalance = Number(balancesAfterPayments[debtId]) || 0;
+        if (remainingBalance <= 0) continue;
+        if (fund + epsilon < remainingBalance) break;
+        lumpSumPaidByDebtId[debtId] = roundToCents(remainingBalance);
+        balancesAfterPayments[debtId] = 0;
+        fund = roundToCents(fund - remainingBalance);
+      }
+    }
 
     return {
       minPaidByDebtId,
-      snowballPaidByDebtId,
+      lumpSumPaidByDebtId,
       balancesAfterPayments,
       targetDebtId,
-      snowballAmount,
+      fundContribution,
+      fundBalanceEnd: fund,
       inMonthRollover,
     };
   }
@@ -1498,6 +1508,9 @@ class DebtSnowballUI {
     );
     let year = baseYear;
     let month = baseMonth;
+    // Snowball extra accumulates into this fund across months and is spent only
+    // when it can pay a debt off in full (see calculateMonthlySnowballAllocation).
+    let snowballFund = 0;
 
     for (let i = 0; i < maxMonths; i++) {
       const monthKey = `${year}-${String(month + 1).padStart(2, "0")}`;
@@ -1651,9 +1664,11 @@ class DebtSnowballUI {
         monthlyTotalsByDebtId,
         applySnowball,
         effectiveExtraPayment,
-        rolloverAmount
+        rolloverAmount,
+        snowballFund
       );
       balances = { ...allocation.balancesAfterPayments };
+      snowballFund = allocation.fundBalanceEnd;
 
       Object.keys(balances).forEach((debtId) => {
         if (balances[debtId] === 0 && !payoffByDebtId[debtId]) {
@@ -1663,7 +1678,8 @@ class DebtSnowballUI {
 
       const monthInfo = {
         targetDebtId: allocation.targetDebtId,
-        snowballAmount: allocation.snowballAmount,
+        fundContribution: allocation.fundContribution,
+        fundBalanceEnd: allocation.fundBalanceEnd,
         rolloverAmount,
         baseExtraPayment: effectiveExtraPayment,
         infusionAmount: generalInfusionAmount,
@@ -1677,7 +1693,7 @@ class DebtSnowballUI {
         monthIndex <= captureThroughIndex;
       if (isViewMonth || inCaptureWindow) {
         monthInfo.minPaidByDebtId = allocation.minPaidByDebtId;
-        monthInfo.snowballPaidByDebtId = allocation.snowballPaidByDebtId;
+        monthInfo.lumpSumPaidByDebtId = allocation.lumpSumPaidByDebtId;
         monthInfo.monthlyTotalsByDebtId = monthlyTotalsByDebtId;
       }
       monthTargets[monthKey] = monthInfo;
@@ -2113,7 +2129,7 @@ class DebtSnowballUI {
           changed = true;
           return false;
         }
-        const expectedDescription = `Snowball Payment: ${expected.debtName}`;
+        const expectedDescription = `Snowball Payoff: ${expected.debtName}`;
         if (Math.abs(Number(t.amount) - expected.amount) > epsilon) {
           t.amount = expected.amount;
           changed = true;
@@ -2142,7 +2158,7 @@ class DebtSnowballUI {
         const transaction = {
           amount: expected.amount,
           type: "expense",
-          description: `Snowball Payment: ${expected.debtName}`,
+          description: `Snowball Payoff: ${expected.debtName}`,
           debtId: expected.debtId,
           debtRole: "snowball",
           debtName: expected.debtName,
@@ -2302,7 +2318,7 @@ class DebtSnowballUI {
     ).padStart(2, "0")}`;
     const monthInfo =
       (projection.monthTargets && projection.monthTargets[monthKey]) || {};
-    const snowballAmount = Number(monthInfo.snowballAmount) || 0;
+    const fundContribution = Number(monthInfo.fundContribution) || 0;
 
     const formatWhole = (value) =>
       `$${Math.round(Number(value) || 0).toLocaleString("en-US")}`;
@@ -2362,11 +2378,11 @@ class DebtSnowballUI {
 
     this.heroEl.appendChild(
       makeCard({
-        label: "Snowball / month",
-        value: formatWhole(snowballAmount),
+        label: "Set aside / month",
+        value: formatWhole(fundContribution),
         sub:
-          snowballAmount > 0
-            ? "Extra applied to your target"
+          fundContribution > 0
+            ? "Saved toward your next payoff"
             : "Add an extra payment to speed this up",
       })
     );
@@ -2424,13 +2440,15 @@ class DebtSnowballUI {
     const extraText = document.createElement("div");
     extraText.className = "debt-plan-extra";
     const baseExtraPayment = Number(monthInfo.baseExtraPayment) || 0;
-    const snowballAmount = Number(monthInfo.snowballAmount) || 0;
+    const fundContribution = Number(monthInfo.fundContribution) || 0;
+    const fundBalanceEnd = Number(monthInfo.fundBalanceEnd) || 0;
     const rolloverAmount = Number(monthInfo.rolloverAmount) || 0;
     const inMonthRollover = Number(monthInfo.inMonthRollover) || 0;
-    // The breakdown must reconcile with the "Snowball payment this month" total,
-    // which is the materialized calendar outflow. Cash infusions are applied
-    // straight to debt and are NOT part of that outflow, so they are shown
-    // separately in the cash-infusion list, not folded in here.
+    // The extra is NEVER paid to a debt monthly; it accumulates into a fund and
+    // pays a debt off in full when it can. The breakdown is what's set aside this
+    // month; the fund balance is the running total carried toward the next payoff.
+    // Cash infusions are applied straight to debt and are shown separately in the
+    // cash-infusion list, not folded in here.
     const breakdownParts = [`Base $${baseExtraPayment.toFixed(2)}`];
     if (rolloverAmount > 0) {
       breakdownParts.push(`Rollovers $${rolloverAmount.toFixed(2)}`);
@@ -2438,9 +2456,9 @@ class DebtSnowballUI {
     if (inMonthRollover > 0) {
       breakdownParts.push(`Same-month $${inMonthRollover.toFixed(2)}`);
     }
-    extraText.textContent = `Snowball payment this month: $${snowballAmount.toFixed(
+    extraText.textContent = `Set aside this month: $${fundContribution.toFixed(
       2
-    )} (${breakdownParts.join(" + ")})`;
+    )} (${breakdownParts.join(" + ")}) — fund balance $${fundBalanceEnd.toFixed(2)}`;
     this.planSummary.appendChild(extraText);
 
     const summariesByPayoff = [...summaries].sort((a, b) => {
@@ -3054,7 +3072,10 @@ class DebtSnowballUI {
 
     const monthInfo = projection.monthTargets?.[monthKey] || {};
     const minPaidByDebtId = monthInfo.minPaidByDebtId || {};
-    const snowballPaidByDebtId = monthInfo.snowballPaidByDebtId || {};
+    // Lump-sum accumulation model: a debt is paid off in full in a single month
+    // (when the accumulated fund can cover it), so most months have no entry and
+    // a payoff month has exactly one entry per cleared debt.
+    const lumpSumPaidByDebtId = monthInfo.lumpSumPaidByDebtId || {};
     const monthlyTotalsByDebtId = monthInfo.monthlyTotalsByDebtId || {};
     const inMonthRollover = Number(monthInfo.inMonthRollover) || 0;
 
@@ -3078,8 +3099,8 @@ class DebtSnowballUI {
               debtsById
             )
             : null;
-        Object.keys(snowballPaidByDebtId).forEach((debtId) => {
-          const amount = Number(snowballPaidByDebtId[debtId]) || 0;
+        Object.keys(lumpSumPaidByDebtId).forEach((debtId) => {
+          const amount = Number(lumpSumPaidByDebtId[debtId]) || 0;
           if (amount <= 0) {
             return;
           }
