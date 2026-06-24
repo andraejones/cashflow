@@ -369,4 +369,49 @@ if (forwardSnowballCount === 0) {
 }
 console.log("✅ Snowball is materialized for unopened forward months");
 
+// TEST 10: Cash-infusion allocation starts its projection at the infusion's
+// own month, not earlier. The previous component-wise min(year)/min(month)
+// could start the projection months early when the earliest infusion was in a
+// prior year with a later month than "today", over-compounding simulated
+// interest so an infusion that should pay off a small debt and overflow to the
+// next was instead fully consumed by the first debt.
+console.log("TEST 10: Infusion Allocation Projection Starts At Infusion Month");
+const RealDate = Date;
+const FIXED_TODAY = new RealDate(2026, 5, 15, 12, 0, 0); // 2026-06-15
+class FrozenDate extends RealDate {
+  constructor(...args) {
+    if (args.length === 0) { super(FIXED_TODAY.getTime()); } else { super(...args); }
+  }
+  static now() { return FIXED_TODAY.getTime(); }
+}
+global.Date = FrozenDate;
+try {
+  const infStore = new TransactionStore();
+  infStore.resetData();
+  const infRm = new RecurringTransactionManager(infStore);
+  const infUI = Object.create(DebtSnowballUI.prototype);
+  infUI.store = infStore;
+  infUI.recurringManager = infRm;
+  infUI.daySpecificOptions = [];
+
+  const smallId = infStore.addDebt({ name: "Small", balance: 98, minPayment: 0, dueDay: 1, recurrence: "monthly", dueStartDate: "2025-01-01", interestRate: 24 });
+  const bigId = infStore.addDebt({ name: "Big", balance: 500, minPayment: 0, dueDay: 1, recurrence: "monthly", dueStartDate: "2025-01-01", interestRate: 24 });
+  // Earliest infusion is in a prior year (2025) with month (Sept) after today's month (June).
+  infStore.addCashInfusion({ name: "Windfall", amount: 100, date: "2025-09-01", targetDebtId: null });
+  infStore.flushPendingSave();
+
+  const allocations = infUI.calculateInfusionAllocations();
+  const infId = infStore.getCashInfusions()[0].id;
+  const toSmall = (allocations[infId] && allocations[infId][smallId]) || 0;
+  const toBig = (allocations[infId] && allocations[infId][bigId]) || 0;
+  if (!(toBig > 0) || toSmall >= 100) {
+    throw new Error(
+      `Projection started too early: infusion put ${toSmall} on Small / ${toBig} on Big (expected Small < 100 with a small overflow to Big)`
+    );
+  }
+  console.log("✅ Infusion projection starts at the infusion's month, not earlier");
+} finally {
+  global.Date = RealDate;
+}
+
 console.log("ALL TESTS PASSED");
