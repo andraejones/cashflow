@@ -460,13 +460,36 @@ class CloudSync {
       pendingSpan.style.marginLeft = "10px";
       pendingSpan.style.fontSize = "0.8em";
       pendingSpan.style.color = "#666";
+      pendingSpan.style.cursor = "pointer";
+      pendingSpan.setAttribute("role", "button");
+      pendingSpan.setAttribute("tabindex", "0");
+      pendingSpan.addEventListener("click", () => this.saveNowFromPending());
+      pendingSpan.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          this.saveNowFromPending();
+        }
+      });
       if (currentMonth) {
         currentMonth.appendChild(pendingSpan);
       }
     }
 
     pendingSpan.textContent = "⌛";
-    pendingSpan.title = "Cloud sync pending";
+    pendingSpan.title = "Cloud sync pending — tap to save now";
+  }
+
+  // Force an immediate cloud save when the user taps the pending hourglass,
+  // cancelling the debounced timer so we don't fire a second redundant save.
+  saveNowFromPending() {
+    clearTimeout(this.saveTimeout);
+    this.clearPendingMessage();
+    this.saveToCloud().catch((err) =>
+      console.error("Cloud save failed:", err)
+    );
+    if (window.app && window.app.calendarUI) {
+      window.app.calendarUI.closeAppMenu();
+    }
   }
 
 
