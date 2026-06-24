@@ -2383,6 +2383,9 @@ class DebtSnowballUI {
       projection = this.calculateSnowballProjection(viewYear, viewMonth, true);
     }
     const viewBalances = projection.viewBalances || {};
+    const monthKey = `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}`;
+    const monthInfo = projection.monthTargets?.[monthKey] || {};
+    const targetDebtId = monthInfo.targetDebtId;
     const summaries = this.store
       .getDebts()
       .map((debt) => ({
@@ -2394,23 +2397,23 @@ class DebtSnowballUI {
             : Number(debt.balance) || 0
         ),
       }))
-      .filter((summary) => summary.remaining > 0);
+      // Keep debts that still carry a balance at month end, plus the debt this
+      // month's snowball actually targets even when the snowball clears it this
+      // month (remaining 0). Otherwise the targeted debt drops out and the
+      // "Current target" line falls back to the next surviving debt, wrongly
+      // attributing this month's payment to a debt it isn't paying down yet.
+      .filter(
+        (summary) => summary.remaining > 0 || summary.debt.id === targetDebtId
+      );
 
     if (summaries.length === 0) {
       this.planSummary.textContent = "No active debts to target.";
       return;
     }
-    const monthKey = `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}`;
-    const monthInfo = projection.monthTargets?.[monthKey] || {};
-    const targetDebtId = monthInfo.targetDebtId;
-    const fallbackTarget = [...summaries].sort(
-      (a, b) => a.remaining - b.remaining
-    )[0];
     const target =
-      targetDebtId &&
-        summaries.find((summary) => summary.debt.id === targetDebtId)
-        ? summaries.find((summary) => summary.debt.id === targetDebtId)
-        : fallbackTarget;
+      (targetDebtId &&
+        summaries.find((summary) => summary.debt.id === targetDebtId)) ||
+      [...summaries].sort((a, b) => a.remaining - b.remaining)[0];
     const summaryText = document.createElement("div");
     summaryText.className = "debt-plan-summary";
     const viewLabel = this.formatMonthYear(viewYear, viewMonth);
