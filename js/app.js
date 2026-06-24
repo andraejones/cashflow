@@ -141,6 +141,7 @@ class CashflowApp {
       return;
     }
     this.store.autoSettleExpiredRecurring();
+    this.store.rollForwardAllocations();
     this.calendarUI.generateCalendar();
   }
 

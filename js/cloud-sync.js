@@ -568,7 +568,36 @@ class CloudSync {
       }
     });
 
-    return merged;
+    // A transaction id must live at exactly one date. Rolling allocations move
+    // a transaction to a new date while keeping its id, so a not-yet-synced
+    // peer can leave the same id under two dates after the per-date merge.
+    // Keep the copy with the newest _lastModified (the most recent move) and
+    // drop the stale duplicates. Items without ids are left untouched.
+    const newestDateById = new Map();
+    Object.keys(merged).forEach(date => {
+      merged[date].forEach(t => {
+        if (!t.id) return;
+        const time = new Date(t._lastModified || 0).getTime();
+        const prev = newestDateById.get(t.id);
+        if (!prev || time > prev.time) {
+          newestDateById.set(t.id, { date, time });
+        }
+      });
+    });
+
+    const deduped = {};
+    Object.keys(merged).forEach(date => {
+      const list = merged[date].filter(t => {
+        if (!t.id) return true;
+        const newest = newestDateById.get(t.id);
+        return newest && newest.date === date;
+      });
+      if (list.length > 0) {
+        deduped[date] = list;
+      }
+    });
+
+    return deduped;
   }
 
   // Merge skipped transactions (date -> array of recurring IDs)
