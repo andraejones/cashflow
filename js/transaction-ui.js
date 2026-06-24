@@ -144,6 +144,14 @@ class TransactionUI {
     const input = document.getElementById("transactionDescription");
     if (!list || !input) return;
 
+    // Autocomplete is turned off for allocations — they aren't everyday
+    // expenses and shouldn't be matched against the suggestion list.
+    const allocateCb = document.getElementById("transactionAllocate");
+    if (allocateCb && allocateCb.checked) {
+      this.closeDescriptionSuggestions();
+      return;
+    }
+
     const term = (query || "").trim().toLowerCase();
     const all = this._descriptionSuggestions || [];
     // Hide an exact match — no point suggesting what's already fully typed.
@@ -345,6 +353,8 @@ class TransactionUI {
   // When "Allocate" is checked, settlement no longer applies: the Settled
   // toggle is disabled (and saving forces settled=true so the expense subtracts
   // like a normal cleared expense rather than being carried as unsettled).
+  // Allocations are also inherently one-time, so the recurrence select is
+  // forced to "once" and hidden, and the description autocomplete is suppressed.
   syncAllocateState() {
     const allocateCb = document.getElementById("transactionAllocate");
     const settledCb = document.getElementById("transactionSettled");
@@ -353,6 +363,27 @@ class TransactionUI {
     const allocated = allocateCb.checked;
     settledCb.disabled = allocated;
     settledLabel.classList.toggle("is-disabled", allocated);
+
+    const recurrenceSelect = document.getElementById("transactionRecurrence");
+    if (recurrenceSelect) {
+      if (allocated) {
+        if (recurrenceSelect.value !== "once") {
+          recurrenceSelect.value = "once";
+          this.updateRecurrenceOptions();
+        }
+        recurrenceSelect.style.display = "none";
+      } else {
+        // Restore the recurrence select unless the type still hides it (balance).
+        const type = document.getElementById("transactionType");
+        if (!type || type.value !== "balance") {
+          recurrenceSelect.style.display = "";
+        }
+      }
+    }
+
+    if (allocated) {
+      this.closeDescriptionSuggestions();
+    }
   }
 
 
@@ -447,7 +478,22 @@ class TransactionUI {
     const transactionDescription = document.getElementById("transactionDescription");
     if (transactionDescription) transactionDescription.value = "";
     const transactionRecurrence = document.getElementById("transactionRecurrence");
-    if (transactionRecurrence) transactionRecurrence.value = "once";
+    if (transactionRecurrence) {
+      transactionRecurrence.value = "once";
+      // Allocate may have hidden the recurrence select — restore it for next open.
+      transactionRecurrence.style.display = "";
+    }
+
+    // Clear the Allocate toggle so its hidden-recurrence / autocomplete-off
+    // state doesn't linger into the next time the add form opens.
+    const transactionAllocate = document.getElementById("transactionAllocate");
+    if (transactionAllocate) {
+      transactionAllocate.checked = false;
+      transactionAllocate.disabled = false;
+    }
+    const allocateToggleLabel = document.getElementById("allocateToggleLabel");
+    if (allocateToggleLabel) allocateToggleLabel.classList.remove("is-disabled");
+    this.syncAllocateState();
 
     const advancedOptions = document.getElementById("advancedRecurrenceOptions");
     if (advancedOptions) {
