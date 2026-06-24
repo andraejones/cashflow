@@ -118,6 +118,9 @@ class TransactionUI {
         // Skip expanded recurring instances and debt/snowball payments —
         // only genuine one-time entries the user typed themselves.
         if (t.recurringId || t.debtId) return;
+        // Allocations are set-aside buckets, not everyday expenses — keep them
+        // out of the quick-input suggestion list.
+        if (t.allocated === true) return;
         const description = (t.description || "").trim();
         if (!description || description === "Ending Balance") return;
         const key = description.toLowerCase();
@@ -1389,6 +1392,11 @@ class TransactionUI {
           // Preserve settled status only when the new type is still expense
           if (type === "expense" && transaction.settled !== undefined) {
             newTransaction.settled = transaction.settled;
+          }
+          // Preserve allocation-bucket status across the move so an allocated
+          // item doesn't degrade into a plain expense at the new date.
+          if (type === "expense" && transaction.allocated === true) {
+            newTransaction.allocated = true;
           }
           // Preserve an allocation draw across the move (delete refunded the
           // bucket; add re-debits it at the new date/amount).
