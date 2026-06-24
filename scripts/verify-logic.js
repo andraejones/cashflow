@@ -313,7 +313,9 @@ console.log("✅ Past debt payments are counted without pre-rendering months");
 // TEST 9: The snowball is materialized across a forward window, not just the
 // viewed month, so forward balances and the 30-day Minimum (which read
 // materialized transactions) reflect planned snowball spend for months the user
-// has not opened.
+// has not opened. Under the lump-sum model a debt's payoff lands in a single
+// month, so the balances below are tuned so the fund (extra $200/mo) clears a
+// debt exactly two months ahead.
 console.log("TEST 9: Snowball Materializes Across The Forward Horizon");
 const horizonStore = new TransactionStore();
 horizonStore.resetData();
@@ -330,7 +332,7 @@ const horizonStart = `${horizonY}-${String(horizonM + 1).padStart(2, "0")}-15`;
 ["Card X", "Card Y"].forEach((name) => {
   const id = horizonStore.addDebt({
     name,
-    balance: 5000,
+    balance: 700,
     minPayment: 50,
     dueDay: 15,
     recurrence: "monthly",
