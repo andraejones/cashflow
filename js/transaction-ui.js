@@ -58,6 +58,10 @@ class TransactionUI {
     });
     document.getElementById("transactionAllocate").addEventListener("change", () => {
       this.syncAllocateState();
+      this.updateDrawAllocationVisibility();
+    });
+    document.getElementById("transactionDrawAllocation").addEventListener("change", () => {
+      this.syncDrawState();
     });
     this.setupFocusTrap("transactionModal");
     this.setupFocusTrap("searchModal");
@@ -94,6 +98,60 @@ class TransactionUI {
     if (toggleGroup) {
       toggleGroup.style.display = isExpense ? "" : "none";
     }
+    this.updateDrawAllocationVisibility();
+  }
+
+
+  // Shows the "Draw from allocation" dropdown for one-time, non-allocated
+  // expenses and (re)populates it with each allocation's remaining balance.
+  // Hidden when there are no allocations to draw from.
+  updateDrawAllocationVisibility() {
+    const select = document.getElementById("transactionDrawAllocation");
+    if (!select) return;
+    const type = document.getElementById("transactionType").value;
+    const recurrence = document.getElementById("transactionRecurrence").value;
+    const allocateCb = document.getElementById("transactionAllocate");
+    const isAllocated = allocateCb && allocateCb.checked;
+
+    // Drawing only applies to one-time expenses that aren't themselves
+    // allocations.
+    const applicable = type === "expense" && recurrence === "once" && !isAllocated;
+    if (!applicable) {
+      select.style.display = "none";
+      select.value = "";
+      this.syncDrawState();
+      return;
+    }
+
+    const previous = select.value;
+    const allocations = this.store.getAllocations();
+    select.innerHTML = '<option value="">No allocation draw</option>';
+    allocations.forEach((a) => {
+      const option = document.createElement("option");
+      option.value = a.id;
+      option.textContent = `${a.description} — $${a.remaining.toFixed(2)} left`;
+      select.appendChild(option);
+    });
+    select.value = previous && allocations.some((a) => a.id === previous) ? previous : "";
+    select.style.display = allocations.length > 0 ? "" : "none";
+    this.syncDrawState();
+  }
+
+
+  // Selecting an allocation to draw from and the "Allocate" checkbox are
+  // mutually exclusive — an allocation can't draw from another.
+  syncDrawState() {
+    const select = document.getElementById("transactionDrawAllocation");
+    const allocateCb = document.getElementById("transactionAllocate");
+    const allocateLabel = document.getElementById("allocateToggleLabel");
+    if (!select || !allocateCb || !allocateLabel) return;
+    const drawing = select.value !== "";
+    if (drawing && allocateCb.checked) {
+      allocateCb.checked = false;
+      this.syncAllocateState();
+    }
+    allocateCb.disabled = drawing;
+    allocateLabel.classList.toggle("is-disabled", drawing);
   }
 
 
@@ -834,6 +892,10 @@ class TransactionUI {
           balanceOption.title = "";
         }
       }
+      // Populate the "Draw from allocation" dropdown with current bucket
+      // balances for this open of the add form.
+      this.updateDrawAllocationVisibility();
+
       modal.style.display = "block";
       modal.setAttribute("aria-hidden", "false");
       ModalManager.openModal(modal);
@@ -1094,6 +1156,11 @@ class TransactionUI {
           if (type === "expense" && transaction.settled !== undefined) {
             newTransaction.settled = transaction.settled;
           }
+          // Preserve an allocation draw across the move (delete refunded the
+          // bucket; add re-debits it at the new date/amount).
+          if (type === "expense" && transaction.drawsFromAllocationId) {
+            newTransaction.drawsFromAllocationId = transaction.drawsFromAllocationId;
+          }
           this.store.addTransaction(newDate, newTransaction);
         }
 
@@ -1262,6 +1329,14 @@ class TransactionUI {
           newTransaction.settled = allocated
             ? true
             : document.getElementById("transactionSettled").checked;
+          // A non-allocated one-time expense may draw from an allocation; the
+          // store debits the bucket and records drawAmount.
+          if (!allocated) {
+            const drawId = document.getElementById("transactionDrawAllocation").value;
+            if (drawId) {
+              newTransaction.drawsFromAllocationId = drawId;
+            }
+          }
         }
         if (type === "balance") {
           const transactions = this.store.getTransactions();
@@ -1323,7 +1398,12 @@ class TransactionUI {
       document.getElementById("transactionSettled").checked = true;
       document.getElementById("transactionSettled").disabled = false;
       document.getElementById("transactionAllocate").checked = false;
+      document.getElementById("transactionAllocate").disabled = false;
       document.getElementById("settledToggleLabel").classList.remove("is-disabled");
+      document.getElementById("allocateToggleLabel").classList.remove("is-disabled");
+      const drawSelect = document.getElementById("transactionDrawAllocation");
+      drawSelect.value = "";
+      drawSelect.style.display = "none";
       document.getElementById("toggleGroup").style.display = "none";
       const advancedOptions = document.getElementById("advancedRecurrenceOptions");
       if (advancedOptions) {

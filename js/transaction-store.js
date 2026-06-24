@@ -737,6 +737,110 @@ class TransactionStore {
   }
 
 
+  _roundCents(value) {
+    return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+  }
+
+  // Allocations are one-time `allocated:true` expenses that act as set-aside
+  // "buckets". Each allocation's `amount` IS its remaining balance, so spending
+  // against it simply shrinks that amount. Returns the buckets a regular
+  // expense can draw from, soonest first.
+  getAllocations() {
+    const result = [];
+    Object.keys(this.transactions).forEach((date) => {
+      this.transactions[date].forEach((t) => {
+        if (
+          t.allocated === true &&
+          t.type === "expense" &&
+          !t.recurringId &&
+          t.hidden !== true &&
+          t.id
+        ) {
+          result.push({
+            id: t.id,
+            date,
+            description:
+              typeof t.description === "string" && t.description
+                ? t.description
+                : "(no description)",
+            remaining: this._roundCents(t.amount),
+          });
+        }
+      });
+    });
+    result.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    return result;
+  }
+
+  _findAllocationById(id) {
+    if (!id) return null;
+    const dates = Object.keys(this.transactions);
+    for (let d = 0; d < dates.length; d++) {
+      const arr = this.transactions[dates[d]];
+      for (let i = 0; i < arr.length; i++) {
+        const t = arr[i];
+        if (
+          t.id === id &&
+          t.allocated === true &&
+          t.type === "expense" &&
+          !t.recurringId
+        ) {
+          return t;
+        }
+      }
+    }
+    return null;
+  }
+
+  // Debit the linked allocation by as much of the expense as it can cover.
+  // Overflow (spend > remaining) drains the allocation to 0 and leaves the
+  // excess as normal spending. Stores drawAmount for exact reversal later.
+  _applyAllocationDraw(transaction) {
+    if (
+      !transaction ||
+      transaction.type !== "expense" ||
+      !transaction.drawsFromAllocationId
+    ) {
+      return;
+    }
+    const allocation = this._findAllocationById(
+      transaction.drawsFromAllocationId
+    );
+    if (!allocation) {
+      // Allocation no longer exists — drop the dangling link.
+      delete transaction.drawsFromAllocationId;
+      delete transaction.drawAmount;
+      return;
+    }
+    const remaining = Math.max(0, this._roundCents(allocation.amount));
+    const draw = this._roundCents(
+      Math.min(remaining, Math.max(0, Number(transaction.amount) || 0))
+    );
+    transaction.drawAmount = draw;
+    allocation.amount = this._roundCents(allocation.amount - draw);
+    allocation._lastModified = new Date().toISOString();
+  }
+
+  // Refund a previously-applied draw back to its allocation.
+  _reverseAllocationDraw(transaction) {
+    if (
+      !transaction ||
+      !transaction.drawsFromAllocationId ||
+      !transaction.drawAmount
+    ) {
+      return;
+    }
+    const allocation = this._findAllocationById(
+      transaction.drawsFromAllocationId
+    );
+    if (allocation) {
+      allocation.amount = this._roundCents(
+        allocation.amount + transaction.drawAmount
+      );
+      allocation._lastModified = new Date().toISOString();
+    }
+  }
+
   addTransaction(date, transaction) {
     if (!date || !transaction) {
       console.error("Invalid date or transaction data");
@@ -753,6 +857,13 @@ class TransactionStore {
     }
     transaction._lastModified = new Date().toISOString();
 
+    // If this expense draws from an allocation, debit that allocation now and
+    // record how much was actually drawn (so the draw can be reversed exactly
+    // when the expense is later edited, moved, or deleted).
+    if (transaction.drawsFromAllocationId) {
+      this._applyAllocationDraw(transaction);
+    }
+
     this.transactions[date].push(transaction);
     this.debouncedSave();
     return transaction.id;
@@ -767,13 +878,28 @@ class TransactionStore {
 
     if (this.transactions[date] && this.transactions[date][index]) {
       // Preserve existing ID, update timestamp
-      const existingId = this.transactions[date][index].id;
-      this.transactions[date][index] = {
-        ...this.transactions[date][index],
+      const existing = this.transactions[date][index];
+      const existingId = existing.id;
+      const merged = {
+        ...existing,
         ...updatedTransaction,
         id: existingId || Utils.generateUniqueId(),
         _lastModified: new Date().toISOString(),
       };
+
+      // Reconcile any allocation draw: refund the old draw, then re-debit based
+      // on the merged amount/target. Covers amount edits (re-draws the new
+      // amount) and type changes away from expense (drops the link entirely).
+      this._reverseAllocationDraw(existing);
+      if (merged.type === "expense" && merged.drawsFromAllocationId) {
+        delete merged.drawAmount;
+        this._applyAllocationDraw(merged);
+      } else {
+        delete merged.drawsFromAllocationId;
+        delete merged.drawAmount;
+      }
+
+      this.transactions[date][index] = merged;
       this.debouncedSave();
       return true;
     }
@@ -794,6 +920,9 @@ class TransactionStore {
         // Track deleted ID for merge conflict resolution (with timestamp for pruning)
         this._deletedItems.transactions.push({ id: deletedTxn.id, deletedAt: Date.now() });
       }
+
+      // Refund any allocation this expense was drawing from before removing it.
+      this._reverseAllocationDraw(deletedTxn);
 
       this.transactions[date].splice(index, 1);
 
