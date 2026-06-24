@@ -2427,11 +2427,11 @@ class DebtSnowballUI {
     const snowballAmount = Number(monthInfo.snowballAmount) || 0;
     const rolloverAmount = Number(monthInfo.rolloverAmount) || 0;
     const inMonthRollover = Number(monthInfo.inMonthRollover) || 0;
-    const infusionAmount = Number(monthInfo.infusionAmount) || 0;
+    // The breakdown must reconcile with the "Snowball payment this month" total,
+    // which is the materialized calendar outflow. Cash infusions are applied
+    // straight to debt and are NOT part of that outflow, so they are shown
+    // separately in the cash-infusion list, not folded in here.
     const breakdownParts = [`Base $${baseExtraPayment.toFixed(2)}`];
-    if (infusionAmount > 0) {
-      breakdownParts.push(`Infusions $${infusionAmount.toFixed(2)}`);
-    }
     if (rolloverAmount > 0) {
       breakdownParts.push(`Rollovers $${rolloverAmount.toFixed(2)}`);
     }
@@ -2812,10 +2812,18 @@ class DebtSnowballUI {
     if (!earliestDate) return {};
 
     const today = new Date();
-    const startYear = Math.min(earliestDate.getFullYear(), today.getFullYear());
-    const startMonth = startYear === earliestDate.getFullYear()
-      ? Math.min(earliestDate.getMonth(), today.getMonth())
-      : (startYear < earliestDate.getFullYear() ? today.getMonth() : earliestDate.getMonth());
+    // Start the projection at the earlier of the first infusion's month and the
+    // current month, compared as absolute year-month indices. Component-wise
+    // min(year)/min(month) is wrong when the two dates fall in different years
+    // (e.g. earliest 2025-11, today 2026-06 would yield 2025-06): it can start
+    // the projection before the first infusion and over-compound simulated
+    // interest, skewing each infusion's allocation breakdown.
+    const startIndex = Math.min(
+      this.getMonthIndex(earliestDate.getFullYear(), earliestDate.getMonth()),
+      this.getMonthIndex(today.getFullYear(), today.getMonth())
+    );
+    const startYear = Math.floor(startIndex / 12);
+    const startMonth = startIndex % 12;
 
     const endYear = latestDate ? latestDate.getFullYear() : today.getFullYear();
     const endMonth = latestDate ? latestDate.getMonth() : today.getMonth();
