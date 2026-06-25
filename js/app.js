@@ -266,17 +266,51 @@ class CashflowApp {
     const list = document.getElementById("allocatedTransactionsList");
     if (!modal || !list) return;
 
+    // Materialize a forward horizon so each recurring allocation's next upcoming
+    // instance exists to be listed, even for series whose next period falls in a
+    // month the calendar hasn't rendered yet (e.g. annual buckets months out).
+    const now = new Date();
+    const HORIZON_MONTHS = 12;
+    for (let i = 0; i <= HORIZON_MONTHS; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+      this.recurringManager.applyRecurringTransactions(d.getFullYear(), d.getMonth());
+    }
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+
     const transactions = this.store.getTransactions();
     const items = [];
+    // Recurring series already represented by an upcoming entered/modified
+    // instance — don't also append a derived "next" row for them.
+    const upcomingRecurringIds = new Set();
+    // Soonest upcoming derived (un-modified) instance per recurring series.
+    const nextRecurring = new Map();
     Object.keys(transactions).forEach((date) => {
       transactions[date].forEach((t) => {
         if (t.hidden === true) return;
         if (t.allocated !== true) return;
-        // Only entries the user actually entered or modified — recurring
-        // expansions without a stored timestamp are derived data.
-        if (!t._lastModified) return;
-        items.push({ date, transaction: t });
+        if (t._lastModified) {
+          // Entries the user actually entered or modified.
+          items.push({ date, transaction: t });
+          if (t.recurringId && date >= todayStr) {
+            upcomingRecurringIds.add(t.recurringId);
+          }
+          return;
+        }
+        // Derived recurring expansion (no stored timestamp): hold only the very
+        // next upcoming instance of each series as a candidate.
+        if (!t.recurringId || date < todayStr) return;
+        const existing = nextRecurring.get(t.recurringId);
+        if (!existing || date < existing.date) {
+          nextRecurring.set(t.recurringId, { date, transaction: t });
+        }
       });
+    });
+
+    // Append each recurring series' next upcoming bucket unless an upcoming
+    // entered/modified instance of that series is already shown.
+    nextRecurring.forEach((entry, recurringId) => {
+      if (upcomingRecurringIds.has(recurringId)) return;
+      items.push(entry);
     });
 
     // Soonest to farthest by the transaction's own date.
