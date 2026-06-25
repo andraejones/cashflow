@@ -15,7 +15,7 @@ class TransactionStore {
     this.monthlyNotes = {};
     this.lastUpdated = null;
     this.debtSnowballSettings = {
-      extraPayment: 0,
+      dailyFloor: 0,
       extraPaymentStartMonth: "",
       autoGenerate: false,
     };
@@ -259,7 +259,7 @@ class TransactionStore {
       if (storedSnowballSettings) {
         const parsedSettings = JSON.parse(storedSnowballSettings);
         this.debtSnowballSettings = {
-          extraPayment: Number(parsedSettings.extraPayment) || 0,
+          dailyFloor: Number(parsedSettings.dailyFloor) || 0,
           extraPaymentStartMonth: this.normalizeExtraStartMonth(
             parsedSettings.extraPaymentStartMonth
           ),
@@ -326,7 +326,7 @@ class TransactionStore {
       this.cashInfusions = [];
       this.lastUpdated = null;
       this.debtSnowballSettings = {
-        extraPayment: 0,
+        dailyFloor: 0,
         extraPaymentStartMonth: "",
         autoGenerate: false,
       };
@@ -467,7 +467,7 @@ class TransactionStore {
     this.movedTransactions = {};
     this.lastUpdated = null;
     this.debtSnowballSettings = {
-      extraPayment: 0,
+      dailyFloor: 0,
       extraPaymentStartMonth: "",
       autoGenerate: false,
     };
@@ -726,7 +726,7 @@ class TransactionStore {
     }
     this.debtSnowballSettings = {
       ...this.debtSnowballSettings,
-      extraPayment: Number(settings.extraPayment) || 0,
+      dailyFloor: Number(settings.dailyFloor) || 0,
       extraPaymentStartMonth: this.normalizeExtraStartMonth(
         settings.extraPaymentStartMonth
       ),
@@ -1322,7 +1322,7 @@ class TransactionStore {
         targetDebtId: infusion.targetDebtId || null,
       }));
       this.debtSnowballSettings = {
-        extraPayment: Number(data.debtSnowballSettings?.extraPayment) || 0,
+        dailyFloor: Number(data.debtSnowballSettings?.dailyFloor) || 0,
         extraPaymentStartMonth: this.normalizeExtraStartMonth(
           data.debtSnowballSettings?.extraPaymentStartMonth
         ),
