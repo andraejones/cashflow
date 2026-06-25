@@ -988,6 +988,19 @@ class DebtSnowballUI {
     return `${monthLabel} ${year}`;
   }
 
+  // Full payoff date when the day-by-day projection pinned an exact day
+  // (e.g. "September 14, 2026"); falls back to "Month Year" when only the
+  // month is known (already-paid debts, monthly history snapshots).
+  formatPayoffDate(payoff) {
+    if (!payoff) return "";
+    const monthYear = this.formatMonthYear(payoff.year, payoff.month);
+    if (!monthYear || typeof payoff.day !== "number") {
+      return monthYear;
+    }
+    const monthLabel = Utils.MONTH_LABELS[payoff.month] || "";
+    return `${monthLabel} ${payoff.day}, ${payoff.year}`;
+  }
+
   getMonthIndex(year, month) {
     return year * 12 + month;
   }
@@ -1226,8 +1239,59 @@ class DebtSnowballUI {
       }
     });
 
+    // Forward interest accrual — keeps this snapshot consistent with the
+    // daily-floor projection (calculateProjection), which accrues each debt's
+    // monthly interest from the projection start. Interest is never materialized
+    // as a transaction, so without this the inline "Remaining" (principal only)
+    // would understate the balance and never reconcile with the
+    // interest-inclusive snowball payoff amounts. Accrual only begins at the
+    // projection start (tomorrow) and only when a cutoff beyond it is requested,
+    // so past/today figures and null-cutoff callers are unchanged.
+    const todayNow = new Date();
+    const projectionStart = new Date(
+      todayNow.getFullYear(),
+      todayNow.getMonth(),
+      todayNow.getDate() + 1
+    );
+    const projectionStartString = Utils.formatDateString(projectionStart);
+    const monthIndexOf = (date) => date.getFullYear() * 12 + date.getMonth();
+    const firstAccrualMonthIndex = monthIndexOf(projectionStart);
+    let accruedThroughIndex = firstAccrualMonthIndex - 1;
+    // The day a month's interest posts: the projection start for the partial
+    // first month, otherwise the first of the month (matching the projection,
+    // which accrues on the first projected day it sees in each month).
+    const accrualDayString = (monthIndex) => {
+      const firstOfMonth = new Date(
+        Math.floor(monthIndex / 12),
+        monthIndex % 12,
+        1
+      );
+      const day = firstOfMonth > projectionStart ? firstOfMonth : projectionStart;
+      return Utils.formatDateString(day);
+    };
+    const accrueForwardThroughMonth = (targetMonthIndex) => {
+      while (accruedThroughIndex < targetMonthIndex) {
+        accruedThroughIndex += 1;
+        debts.forEach((debt) => {
+          const balance = Number(remainingByDebtId[debt.id]) || 0;
+          const rate = Number(debt.interestRate) || 0;
+          if (balance <= 0 || rate <= 0) return;
+          const interest = roundToCents((balance * rate) / 1200);
+          if (interest <= 0) return;
+          remainingByDebtId[debt.id] = roundToCents(balance + interest);
+        });
+      }
+    };
+
     const sortedDates = Array.from(eventsByDate.keys()).sort();
     sortedDates.forEach((dateKey) => {
+      // Post each forward month's interest before that month's payments.
+      if (cutoffDateString && dateKey >= projectionStartString) {
+        const parsed = Utils.parseDateString(dateKey);
+        if (parsed) {
+          accrueForwardThroughMonth(monthIndexOf(parsed));
+        }
+      }
       const bucket = eventsByDate.get(dateKey);
       bucket.transactions.forEach((transaction) => {
         const debtId = transaction.debtId;
@@ -1294,6 +1358,20 @@ class DebtSnowballUI {
         });
       });
     });
+
+    // Top up interest through the cutoff for months with no events of their own
+    // (e.g. a mid-month cutoff after a quiet month). Accrue the cutoff month only
+    // if its interest posts before the cutoff; earlier forward months always do.
+    if (cutoffDateString && projectionStartString < cutoffDateString) {
+      const cutoffMonthIndex = monthIndexOf(cutoffDate);
+      const target =
+        accrualDayString(cutoffMonthIndex) < cutoffDateString
+          ? cutoffMonthIndex
+          : cutoffMonthIndex - 1;
+      if (target >= firstAccrualMonthIndex) {
+        accrueForwardThroughMonth(target);
+      }
+    }
 
     return { paidByDebtId, remainingByDebtId };
   }
@@ -1443,6 +1521,7 @@ class DebtSnowballUI {
           ds: Utils.formatDateString(cursor),
           year: y,
           month: m,
+          day: cursor.getDate(),
           monthIndex: this.getMonthIndex(y, m),
         });
         cursor.setDate(cursor.getDate() + 1);
@@ -1633,7 +1712,7 @@ class DebtSnowballUI {
     };
 
     for (let i = 0; i < numDays; i++) {
-      const { ds, year, month, monthIndex } = projDays[i];
+      const { ds, year, month, day, monthIndex } = projDays[i];
       const monthKey = `${year}-${String(month + 1).padStart(2, "0")}`;
 
       if (monthKey !== curMonthKey) {
@@ -1684,7 +1763,7 @@ class DebtSnowballUI {
               balances[infusion.targetDebtId] <= epsilon &&
               !payoffByDebtId[infusion.targetDebtId]
             ) {
-              payoffByDebtId[infusion.targetDebtId] = { year, month };
+              payoffByDebtId[infusion.targetDebtId] = { year, month, day };
             }
           } else {
             let remaining = amount;
@@ -1699,7 +1778,7 @@ class DebtSnowballUI {
               balances[debtId] = roundToCents(b - applied);
               remaining = roundToCents(remaining - applied);
               if (balances[debtId] <= epsilon && !payoffByDebtId[debtId]) {
-                payoffByDebtId[debtId] = { year, month };
+                payoffByDebtId[debtId] = { year, month, day };
               }
             }
           }
@@ -1730,7 +1809,7 @@ class DebtSnowballUI {
             checking = roundToCents(checking - applied);
           }
           if (balances[debtId] <= epsilon && !payoffByDebtId[debtId]) {
-            payoffByDebtId[debtId] = { year, month };
+            payoffByDebtId[debtId] = { year, month, day };
           }
         });
       }
@@ -1756,7 +1835,7 @@ class DebtSnowballUI {
           curMonthInfo.lumpSumPaidByDebtId[debtId] = remaining;
           curMonthInfo.lumpSumDateByDebtId[debtId] = ds;
           if (!payoffByDebtId[debtId]) {
-            payoffByDebtId[debtId] = { year, month };
+            payoffByDebtId[debtId] = { year, month, day };
           }
         }
       }
@@ -2509,7 +2588,7 @@ class DebtSnowballUI {
       }
       const payoff = projection.payoffByDebtId?.[summary.debt.id];
       const payoffLabel = payoff
-        ? this.formatMonthYear(payoff.year, payoff.month)
+        ? this.formatPayoffDate(payoff)
         : "No payoff scheduled";
 
       const head = document.createElement("div");
