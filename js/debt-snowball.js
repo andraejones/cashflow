@@ -1496,12 +1496,20 @@ class DebtSnowballUI {
     });
 
     const payoffByDebtId = {};
+    // Monotonic counter stamped on each payoff as it is recorded, so the UI can
+    // present debts in true clearance order. The daily-floor walk clears the
+    // smallest *running* balance first, and minimum payments reshuffle that order
+    // over time, so the snowball's real sequence is when each debt clears — not
+    // which is smallest today. Pure display metadata; the projection never reads
+    // it back.
+    let payoffSeq = 0;
     Object.keys(balances).forEach((debtId) => {
       if (balances[debtId] <= 0) {
         payoffByDebtId[debtId] = {
           year: baseYear,
           month: baseMonth,
           alreadyPaid: true,
+          seq: payoffSeq++,
         };
       }
     });
@@ -1789,7 +1797,12 @@ class DebtSnowballUI {
               balances[infusion.targetDebtId] <= epsilon &&
               !payoffByDebtId[infusion.targetDebtId]
             ) {
-              payoffByDebtId[infusion.targetDebtId] = { year, month, day };
+              payoffByDebtId[infusion.targetDebtId] = {
+                year,
+                month,
+                day,
+                seq: payoffSeq++,
+              };
             }
           } else {
             let remaining = amount;
@@ -1804,7 +1817,7 @@ class DebtSnowballUI {
               balances[debtId] = roundToCents(b - applied);
               remaining = roundToCents(remaining - applied);
               if (balances[debtId] <= epsilon && !payoffByDebtId[debtId]) {
-                payoffByDebtId[debtId] = { year, month, day };
+                payoffByDebtId[debtId] = { year, month, day, seq: payoffSeq++ };
               }
             }
           }
@@ -1835,7 +1848,7 @@ class DebtSnowballUI {
             checking = roundToCents(checking - applied);
           }
           if (balances[debtId] <= epsilon && !payoffByDebtId[debtId]) {
-            payoffByDebtId[debtId] = { year, month, day };
+            payoffByDebtId[debtId] = { year, month, day, seq: payoffSeq++ };
           }
         });
       }
@@ -1861,7 +1874,7 @@ class DebtSnowballUI {
           curMonthInfo.lumpSumPaidByDebtId[debtId] = remaining;
           curMonthInfo.lumpSumDateByDebtId[debtId] = ds;
           if (!payoffByDebtId[debtId]) {
-            payoffByDebtId[debtId] = { year, month, day };
+            payoffByDebtId[debtId] = { year, month, day, seq: payoffSeq++ };
           }
         }
       }
@@ -2530,7 +2543,24 @@ class DebtSnowballUI {
     const viewBalances = projection.viewBalances || {};
     const monthKey = `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}`;
     const monthInfo = projection.monthTargets?.[monthKey] || {};
-    const targetDebtId = monthInfo.targetDebtId;
+    const viewIndex = this.getMonthIndex(viewYear, viewMonth);
+    // Order debts by the sequence in which the projection actually clears them.
+    // The daily-floor engine pays off the smallest *running* balance first, and
+    // minimum payments reshuffle that order between now and the payoff month, so
+    // the snowball's true next target is the debt that clears soonest — not the
+    // one with the smallest balance today. Debts that never clear within the
+    // horizon (interest outruns payments) have no payoff and sort last.
+    const payoffRank = (debtId) => {
+      const p = projection.payoffByDebtId?.[debtId];
+      return p && typeof p.seq === "number" ? p.seq : Number.POSITIVE_INFINITY;
+    };
+    const byClearanceOrder = (a, b) => {
+      const ra = payoffRank(a.debt.id);
+      const rb = payoffRank(b.debt.id);
+      if (ra !== rb) return ra - rb;
+      if (a.remaining !== b.remaining) return a.remaining - b.remaining;
+      return a.debt.name.localeCompare(b.debt.name);
+    };
     const summaries = this.store
       .getDebts()
       .map((debt) => ({
@@ -2542,23 +2572,26 @@ class DebtSnowballUI {
             : Number(debt.balance) || 0
         ),
       }))
-      // Keep debts that still carry a balance at month end, plus the debt this
-      // month's snowball actually targets even when the snowball clears it this
-      // month (remaining 0). Otherwise the targeted debt drops out and the
-      // "Current target" line falls back to the next surviving debt, wrongly
-      // attributing this month's payment to a debt it isn't paying down yet.
-      .filter(
-        (summary) => summary.remaining > 0 || summary.debt.id === targetDebtId
-      );
+      // Keep debts that still carry a balance at view-month end, plus any debt
+      // the snowball clears within the view month itself (remaining 0 but a
+      // real, dated payoff this month) so the debt being paid doesn't vanish
+      // from the plan the very month it pays off.
+      .filter((summary) => {
+        if (summary.remaining > 0) return true;
+        const p = projection.payoffByDebtId?.[summary.debt.id];
+        return (
+          !!p &&
+          p.alreadyPaid !== true &&
+          this.getMonthIndex(p.year, p.month) === viewIndex
+        );
+      });
 
     if (summaries.length === 0) {
       this.planSummary.textContent = "No active debts to target.";
       return;
     }
-    const target =
-      (targetDebtId &&
-        summaries.find((summary) => summary.debt.id === targetDebtId)) ||
-      [...summaries].sort((a, b) => a.remaining - b.remaining)[0];
+    // Current target = the active debt that actually clears next.
+    const target = [...summaries].sort(byClearanceOrder)[0];
     const summaryText = document.createElement("div");
     summaryText.className = "debt-plan-summary";
     const viewLabel = this.formatMonthYear(viewYear, viewMonth);
@@ -2587,23 +2620,7 @@ class DebtSnowballUI {
         )} — surplus above it funds the next payoff`;
     this.planSummary.appendChild(extraText);
 
-    const summariesByPayoff = [...summaries].sort((a, b) => {
-      const payoffA = projection.payoffByDebtId?.[a.debt.id];
-      const payoffB = projection.payoffByDebtId?.[b.debt.id];
-      const indexA = payoffA
-        ? this.getMonthIndex(payoffA.year, payoffA.month)
-        : Number.POSITIVE_INFINITY;
-      const indexB = payoffB
-        ? this.getMonthIndex(payoffB.year, payoffB.month)
-        : Number.POSITIVE_INFINITY;
-      if (indexA !== indexB) {
-        return indexA - indexB;
-      }
-      if (a.remaining !== b.remaining) {
-        return a.remaining - b.remaining;
-      }
-      return a.debt.name.localeCompare(b.debt.name);
-    });
+    const summariesByPayoff = [...summaries].sort(byClearanceOrder);
 
     summariesByPayoff.forEach((summary, index) => {
       const isTarget = summary.debt.id === target.debt.id;
