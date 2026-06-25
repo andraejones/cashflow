@@ -668,4 +668,124 @@ try {
   global.Date = T12_RealDate;
 }
 
+// TEST 13: Allocation auto-close-out (pinning + expiry sweep) and recurring
+// drawable buckets.
+console.log(
+  "TEST 13: Allocation auto-close-out + recurring buckets"
+);
+const A_RealDate = Date;
+const A_FIXED_TODAY = new A_RealDate(2026, 5, 15, 12, 0, 0); // 2026-06-15
+class A_FrozenDate extends A_RealDate {
+  constructor(...args) {
+    if (args.length === 0) { super(A_FIXED_TODAY.getTime()); } else { super(...args); }
+  }
+  static now() { return A_FIXED_TODAY.getTime(); }
+}
+global.Date = A_FrozenDate;
+try {
+  const s = new TransactionStore();
+  s.resetData();
+  const rm = new RecurringTransactionManager(s);
+
+  // A normal allocation rolls forward; an auto-close-out allocation is pinned.
+  s.addTransaction("2026-06-10", {
+    amount: 100, type: "expense", description: "Rolling", allocated: true, settled: true,
+  });
+  s.addTransaction("2026-06-15", {
+    amount: 300, type: "expense", description: "Pinned",
+    allocated: true, autoCloseout: true, settled: true,
+  });
+  s.rollForwardAllocations();
+  const movedRolling = (s.getTransactions()["2026-06-16"] || []).some(
+    (t) => t.description === "Rolling"
+  );
+  const pinnedStayed = (s.getTransactions()["2026-06-15"] || []).some(
+    (t) => t.description === "Pinned"
+  );
+  if (!movedRolling) throw new Error("Normal allocation should roll forward to tomorrow");
+  if (!pinnedStayed) throw new Error("Auto-close-out allocation must stay pinned to its date");
+  console.log("✅ Auto-close-out allocations are pinned; normal ones roll forward");
+
+  // The expiry sweep removes auto-close-out allocations once their date passes.
+  s.addTransaction("2026-06-14", {
+    amount: 50, type: "expense", description: "Expired",
+    allocated: true, autoCloseout: true, settled: true,
+  });
+  s.closeOutExpiredAllocations();
+  const expiredGone = !(s.getTransactions()["2026-06-14"] || []).some(
+    (t) => t.description === "Expired"
+  );
+  const todayKept = (s.getTransactions()["2026-06-15"] || []).some(
+    (t) => t.description === "Pinned"
+  );
+  if (!expiredGone) throw new Error("Past auto-close-out allocation should be swept");
+  if (!todayKept) throw new Error("Today's auto-close-out allocation must survive the sweep");
+  console.log("✅ Expiry sweep removes only past auto-close-out allocations");
+
+  // A recurring allocation drops a fresh drawable bucket each period; drawing
+  // against it persists across re-expansion.
+  const ralloc = new TransactionStore();
+  ralloc.resetData();
+  const rrm = new RecurringTransactionManager(ralloc);
+  const rid = ralloc.addRecurringTransaction({
+    startDate: "2026-06-20", amount: 400, type: "expense", description: "Groceries",
+    recurrence: "monthly", allocated: true, autoCloseout: true, settled: true,
+  });
+  rrm.applyRecurringTransactions(2026, 5); // June
+  const buckets = ralloc.getAllocations();
+  const bucket = buckets.find((b) => b.description === "Groceries");
+  if (!bucket || bucket.recurring !== true) {
+    throw new Error("Recurring allocation should surface as a drawable bucket");
+  }
+  if (bucket.id !== `ralloc:${rid}:2026-06-20`) {
+    throw new Error(`Unexpected synthetic bucket id: ${bucket.id}`);
+  }
+  // Draw $150 against it; the instance materializes and shrinks to $250.
+  ralloc.addTransaction("2026-06-16", {
+    amount: 150, type: "expense", description: "Store run",
+    drawsFromAllocationId: bucket.id, settled: true,
+  });
+  const drawTxn = (ralloc.getTransactions()["2026-06-16"] || []).find(
+    (t) => t.description === "Store run"
+  );
+  const inst = (ralloc.getTransactions()["2026-06-20"] || []).find(
+    (t) => t.recurringId === rid
+  );
+  if (!inst || inst.modifiedInstance !== true || !inst.id) {
+    throw new Error("Drawing must materialize the recurring instance (id + modifiedInstance)");
+  }
+  if (ralloc._roundCents(inst.amount) !== 250) {
+    throw new Error(`Bucket should debit to 250, got ${inst.amount}`);
+  }
+  if (drawTxn.drawsFromAllocationId !== inst.id) {
+    throw new Error("Draw link should be rewritten from the synthetic key to the real id");
+  }
+  // Re-expansion must not clobber the drawn-down (modified) instance.
+  rrm.applyRecurringTransactions(2026, 5);
+  const instAfter = (ralloc.getTransactions()["2026-06-20"] || []).find(
+    (t) => t.recurringId === rid
+  );
+  if (!instAfter || ralloc._roundCents(instAfter.amount) !== 250) {
+    throw new Error("Re-expansion must preserve the drawn-down recurring bucket");
+  }
+  console.log("✅ Recurring allocation buckets are drawable and persist across re-expansion");
+
+  // Past auto-close-out instances are never materialized by expansion.
+  const past = new TransactionStore();
+  past.resetData();
+  const prm = new RecurringTransactionManager(past);
+  past.addRecurringTransaction({
+    startDate: "2026-05-01", amount: 400, type: "expense", description: "Old budget",
+    recurrence: "monthly", allocated: true, autoCloseout: true, settled: true,
+  });
+  prm.applyRecurringTransactions(2026, 4); // May (all before today)
+  const hasPast = (past.getTransactions()["2026-05-01"] || []).some(
+    (t) => t.description === "Old budget"
+  );
+  if (hasPast) throw new Error("Expansion must skip past auto-close-out instances");
+  console.log("✅ Expansion skips already-expired recurring allocation instances");
+} finally {
+  global.Date = A_RealDate;
+}
+
 console.log("ALL TESTS PASSED");
