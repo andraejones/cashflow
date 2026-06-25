@@ -520,7 +520,7 @@ class PinProtection {
 
     // PIN-based unlock path (also reached when biometric is unavailable on first
     // unlock or when biometric stored PIN was invalid).
-    const result = await this.showUnlockDialog(false);
+    const result = await this.showUnlockDialog();
 
     if (result === "reset") {
       // User chose to reset - confirm with DELETE

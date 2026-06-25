@@ -589,4 +589,83 @@ try {
   global.Date = T11_RealDate;
 }
 
+// TEST 12: Cash-infusion breakdown follows the plan's lump-sum payoffs. A future
+// infusion must not be credited to a debt the snowball plan has already paid off
+// in an earlier month; it should flow to the next surviving debt. Without the
+// plan overlay the monthly allocation sim keeps the paid-off debt alive and
+// mis-attributes the infusion.
+console.log("TEST 12: Infusion Breakdown Honors Plan Lump-Sum Payoffs");
+const T12_RealDate = Date;
+const T12_FIXED_TODAY = new T12_RealDate(2026, 5, 15, 12, 0, 0); // 2026-06-15
+class T12_FrozenDate extends T12_RealDate {
+  constructor(...args) {
+    if (args.length === 0) { super(T12_FIXED_TODAY.getTime()); } else { super(...args); }
+  }
+  static now() { return T12_FIXED_TODAY.getTime(); }
+}
+global.Date = T12_FrozenDate;
+try {
+  const s = new TransactionStore();
+  s.resetData();
+  const rm = new RecurringTransactionManager(s);
+  const calc = new CalculationService(s, rm);
+  const ui = Object.create(DebtSnowballUI.prototype);
+  ui.store = s;
+  ui.recurringManager = rm;
+  ui.calculationService = calc;
+  ui.daySpecificOptions = [];
+
+  s.addRecurringTransaction({
+    startDate: "2026-06-01",
+    amount: 1000,
+    type: "income",
+    description: "Salary",
+    recurrence: "monthly",
+  });
+  const smallId = s.addDebt({ name: "Small", balance: 200, minPayment: 0, dueDay: 28, recurrence: "monthly", interestRate: 0, dueStartDate: "2026-06-28" });
+  const bigId = s.addDebt({ name: "Big", balance: 6000, minPayment: 0, dueDay: 28, recurrence: "monthly", interestRate: 0, dueStartDate: "2026-06-28" });
+  ui.ensureMinimumPaymentRecurring(s.getDebts().find((d) => d.id === smallId));
+  ui.ensureMinimumPaymentRecurring(s.getDebts().find((d) => d.id === bigId));
+  // Future infusion lands AFTER the plan pays Small off (June) but while Big is
+  // still alive (paid much later).
+  s.addCashInfusion({ name: "Windfall", amount: 100, date: "2026-09-01", targetDebtId: null });
+  s.setDebtSnowballSettings({ dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: true });
+  s.flushPendingSave();
+  rm.applyRecurringTransactions(2026, 5);
+
+  const projection = ui.calculateSnowballProjection(2026, 5, true);
+  const infIndex = ui.getMonthIndex(2026, 8); // Sept
+  const smallPaid = projection.payoffByDebtId[smallId];
+  const bigPaid = projection.payoffByDebtId[bigId];
+  if (!smallPaid || ui.getMonthIndex(smallPaid.year, smallPaid.month) >= infIndex) {
+    throw new Error("Test setup: plan must pay Small off before the infusion month");
+  }
+  if (bigPaid && ui.getMonthIndex(bigPaid.year, bigPaid.month) <= infIndex) {
+    throw new Error("Test setup: Big must still be alive at the infusion month");
+  }
+
+  const infId = s.getCashInfusions()[0].id;
+  const withPlan = ui.calculateInfusionAllocations(projection);
+  const toSmall = (withPlan[infId] && withPlan[infId][smallId]) || 0;
+  const toBig = (withPlan[infId] && withPlan[infId][bigId]) || 0;
+  if (toSmall !== 0 || toBig !== 100) {
+    throw new Error(
+      `Infusion must flow to the surviving debt: got Small ${toSmall}, Big ${toBig} (expected Small 0, Big 100)`
+    );
+  }
+
+  // Without the plan overlay the bare monthly sim keeps Small alive and
+  // mis-credits the infusion to it — the inconsistency the overlay fixes.
+  const withoutPlan = ui.calculateInfusionAllocations();
+  const oldToSmall = (withoutPlan[infId] && withoutPlan[infId][smallId]) || 0;
+  if (oldToSmall !== 100) {
+    throw new Error(
+      `Expected the un-overlaid sim to mis-credit Small with 100, got ${oldToSmall}`
+    );
+  }
+  console.log("✅ Infusion breakdown skips plan-paid-off debts, flows to survivors");
+} finally {
+  global.Date = T12_RealDate;
+}
+
 console.log("ALL TESTS PASSED");

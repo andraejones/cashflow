@@ -201,7 +201,9 @@ class CalendarUI {
     let runningUnsettledExpense = 0;
     for (const u of allUnsettled) {
       if (u.date < monthStartStr && (carryAnchor === null || u.date > carryAnchor)) {
-        runningUnsettledExpense += u.transaction.amount;
+        runningUnsettledExpense = this.calculationService.roundToCents(
+          runningUnsettledExpense + u.transaction.amount
+        );
       }
     }
 

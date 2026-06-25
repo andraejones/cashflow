@@ -317,7 +317,7 @@ class DebtSnowballUI {
     const projection = this.calculateSnowballProjection(viewYear, viewMonth, true);
     this.renderHero(projection);
     this.renderDebts();
-    this.renderCashInfusions();
+    this.renderCashInfusions(projection);
     this.renderPlan(projection);
     this.loadSnowballSettings();
   }
@@ -1583,6 +1583,13 @@ class DebtSnowballUI {
       const end = Math.min(numDays, startIdx + 1 + FLOOR_LOOKAHEAD_DAYS);
       for (let i = startIdx + 1; i < end; i++) {
         const day = projDays[i];
+        // Materialize this month's minimums before reading them: the main loop
+        // has only ensured months up to the day it has reached, but the
+        // look-ahead spans up to FLOOR_LOOKAHEAD_DAYS into not-yet-ensured
+        // future months. Without this their minimums would be missing and the
+        // forward checking projection would overstate available surplus.
+        // Idempotent — guarded by minMonthsDone.
+        ensureMinimumsForMonth(day.year, day.month);
         const mk = `${day.year}-${day.month}`;
         if (mk !== prevMonthKey) {
           Object.keys(bal).forEach((debtId) => accrueInterest(bal, debtId));
@@ -2338,11 +2345,6 @@ class DebtSnowballUI {
     const monthsToGo =
       allHavePayoff && debtFree ? Math.max(0, debtFreeIndex - baseIndex) : null;
 
-    const monthKey = `${projection.viewYear}-${String(
-      projection.viewMonth + 1
-    ).padStart(2, "0")}`;
-    const monthInfo =
-      (projection.monthTargets && projection.monthTargets[monthKey]) || {};
     const dailyFloor = Number(projection.dailyFloor) || 0;
 
     const formatWhole = (value) =>
@@ -2713,7 +2715,7 @@ class DebtSnowballUI {
     this.onUpdate();
   }
 
-  renderCashInfusions() {
+  renderCashInfusions(projection = null) {
     if (!this.cashInfusionList) return;
     this.cashInfusionList.innerHTML = "";
     const infusions = this.store.getCashInfusions();
@@ -2727,8 +2729,10 @@ class DebtSnowballUI {
       return;
     }
 
-    // Calculate allocation for each infusion
-    const infusionAllocations = this.calculateInfusionAllocations();
+    // Calculate allocation for each infusion. The plan projection (already run
+    // by the caller) supplies the lump-sum payoff schedule so the breakdown's
+    // surviving-debt set matches the actual plan.
+    const infusionAllocations = this.calculateInfusionAllocations(projection);
 
     // Sort by date
     const sortedInfusions = [...infusions].sort((a, b) =>
@@ -2811,9 +2815,15 @@ class DebtSnowballUI {
     });
   }
 
-  calculateInfusionAllocations() {
-    // This method calculates how each infusion is allocated to debts
-    // by running a projection and tracking infusion-specific allocations
+  calculateInfusionAllocations(projection = null) {
+    // This method calculates how each infusion is allocated to debts by running
+    // a month-by-month projection and tracking infusion-specific allocations.
+    // When the plan projection is supplied (the normal render path), its
+    // lump-sum payoff schedule is overlaid so a debt the plan has already paid
+    // off is not credited with a later infusion — keeping this breakdown's
+    // surviving-debt set in step with the hero card / plan list. Past-dated
+    // infusions, which the forward plan projection does not cover, still
+    // reconstruct from their own month.
     const infusions = this.store.getCashInfusions();
     const debts = this.store.getDebts();
     const settings = this.store.getDebtSnowballSettings();
@@ -2900,6 +2910,19 @@ class DebtSnowballUI {
       infusionAllocations[inf.id] = {};
     });
 
+    // Month index at which the real plan pays each debt off (lump sum, minimum
+    // or infusion). Used to drop debts from the candidate set in months strictly
+    // after the plan clears them, so the surviving-debt set matches the plan.
+    const planPayoffIndexByDebtId = {};
+    if (projection && projection.payoffByDebtId) {
+      Object.keys(projection.payoffByDebtId).forEach((debtId) => {
+        const p = projection.payoffByDebtId[debtId];
+        if (p && typeof p.year === "number" && typeof p.month === "number") {
+          planPayoffIndexByDebtId[debtId] = this.getMonthIndex(p.year, p.month);
+        }
+      });
+    }
+
     // Run projection month by month
     let year = startYear;
     let month = startMonth;
@@ -2943,6 +2966,20 @@ class DebtSnowballUI {
         if (balance <= 0 || scheduledMin <= 0) return;
         const actualMin = roundToCents(Math.min(balance, scheduledMin));
         balances[debtId] = roundToCents(balance - actualMin);
+      });
+
+      // Overlay the real plan's payoffs: a debt the snowball plan cleared in a
+      // strictly earlier month is gone, so an infusion here must skip it and
+      // flow to the next surviving debt. The payoff month itself is left active
+      // so an infusion landing the same month the plan clears the debt is still
+      // attributed to it (the plan applies infusions before its lump-sum sweep).
+      Object.keys(planPayoffIndexByDebtId).forEach((debtId) => {
+        if (
+          planPayoffIndexByDebtId[debtId] < monthIndex &&
+          Number(balances[debtId]) > 0
+        ) {
+          balances[debtId] = 0;
+        }
       });
 
       // Get infusions for this month

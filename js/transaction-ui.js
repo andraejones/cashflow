@@ -1626,23 +1626,11 @@ class TransactionUI {
             }
           }
         }
-        if (type === "balance") {
-          const transactions = this.store.getTransactions();
-          if (transactions[date]) {
-            const indices = [];
-            transactions[date].forEach((t, i) => {
-              if (t.type === "balance") indices.push(i);
-            });
-            // Delete in reverse order to preserve indices
-            for (let i = indices.length - 1; i >= 0; i--) {
-              this.store.deleteTransaction(date, indices[i]);
-            }
-          }
-          // Note: prior unsettled expenses are intentionally NOT auto-settled
-          // here. Settled state is owned by the user; use the carried-forward
-          // "Mark Settled" button to clear individual entries.
-        }
-
+        // Note: the guard above rejects a second balance transaction for this
+        // date, so there is never an existing one to replace here. Prior
+        // unsettled expenses are intentionally NOT auto-settled when a balance
+        // is entered — settled state is owned by the user; use the
+        // carried-forward "Mark Settled" button to clear individual entries.
         this.store.addTransaction(date, newTransaction);
       }
       else if (type !== "balance") {
