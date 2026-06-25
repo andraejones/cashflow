@@ -1300,6 +1300,15 @@ class RecurringTransactionManager {
       return existingKey === occurrenceKey;
     });
     if (!existingInstance) {
+      // Auto-close-out allocations close out once their date passes, so never
+      // materialize an instance for a date that is already in the past.
+      if (rt.allocated === true && rt.autoCloseout === true) {
+        const now = new Date();
+        const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+        if (dateString < todayStr) {
+          return;
+        }
+      }
       const scheduledDate = originalDateString
         ? Utils.parseDateString(originalDateString)
         : currentDate;
@@ -1328,6 +1337,9 @@ class RecurringTransactionManager {
       if (rt.type === "expense") {
         newTransaction.settled = rt.settled !== false;
         newTransaction.allocated = rt.allocated === true;
+        if (rt.allocated === true && rt.autoCloseout === true) {
+          newTransaction.autoCloseout = true;
+        }
       }
 
       transactions[dateString].push(newTransaction);
@@ -1640,6 +1652,9 @@ class RecurringTransactionManager {
       }
       if (recurringTransaction.allocated !== undefined) {
         newRecurringTransaction.allocated = recurringTransaction.allocated;
+      }
+      if (recurringTransaction.autoCloseout !== undefined) {
+        newRecurringTransaction.autoCloseout = recurringTransaction.autoCloseout;
       }
       if (recurringTransaction.debtId) {
         newRecurringTransaction.debtId = recurringTransaction.debtId;

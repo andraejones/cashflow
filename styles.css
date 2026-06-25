@@ -2312,7 +2312,8 @@ body.app-locked #calendarOptions {
   cursor: not-allowed;
 }
 
-.allocate-toggle-label input[type="checkbox"] {
+.allocate-toggle-label input[type="checkbox"],
+.auto-closeout-toggle-label input[type="checkbox"] {
   accent-color: #8b5cf6;
 }
 

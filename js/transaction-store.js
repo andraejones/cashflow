@@ -741,50 +741,97 @@ class TransactionStore {
     return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
   }
 
-  // Allocations are one-time `allocated:true` expenses that act as set-aside
-  // "buckets". Each allocation's `amount` IS its remaining balance, so spending
-  // against it simply shrinks that amount. Returns the buckets a regular
-  // expense can draw from, soonest first.
+  _todayString() {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  }
+
+  // Allocations are `allocated:true` expenses that act as set-aside "buckets".
+  // Each allocation's `amount` IS its remaining balance, so spending against it
+  // simply shrinks that amount. Returns the buckets a regular expense can draw
+  // from, soonest first. Two flavors:
+  //   - One-time allocations: a plain `allocated:true` expense, listed as-is.
+  //   - Recurring allocations: each period's instance is its own bucket. Only
+  //     the soonest upcoming instance per series (date >= today) is offered, so
+  //     the dropdown shows the "current" bucket rather than every future month.
   getAllocations() {
-    const result = [];
+    const oneTime = [];
+    const recurringBySeries = new Map();
+    const todayStr = this._todayString();
     Object.keys(this.transactions).forEach((date) => {
       this.transactions[date].forEach((t) => {
-        if (
-          t.allocated === true &&
-          t.type === "expense" &&
-          !t.recurringId &&
-          t.hidden !== true &&
-          t.id
-        ) {
-          result.push({
+        if (t.allocated !== true || t.type !== "expense" || t.hidden === true) {
+          return;
+        }
+        const description =
+          typeof t.description === "string" && t.description
+            ? t.description
+            : "(no description)";
+        if (!t.recurringId) {
+          if (!t.id) return;
+          oneTime.push({
             id: t.id,
             date,
-            description:
-              typeof t.description === "string" && t.description
-                ? t.description
-                : "(no description)",
+            description,
             remaining: this._roundCents(t.amount),
+            recurring: false,
+          });
+          return;
+        }
+        // Recurring allocation instance — only the upcoming bucket is drawable;
+        // past instances auto-close and future ones aren't the active period.
+        if (date < todayStr) return;
+        const existing = recurringBySeries.get(t.recurringId);
+        if (!existing || date < existing.date) {
+          recurringBySeries.set(t.recurringId, {
+            // Un-materialized instances have no id yet — use a synthetic key the
+            // draw resolver can locate; the first draw assigns it a real id.
+            id: t.id || `ralloc:${t.recurringId}:${date}`,
+            date,
+            description,
+            remaining: this._roundCents(t.amount),
+            recurring: true,
           });
         }
       });
     });
+    const result = oneTime.concat(Array.from(recurringBySeries.values()));
     result.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     return result;
   }
 
   _findAllocationById(id) {
     if (!id) return null;
+    // Synthetic key for an un-materialized recurring allocation instance:
+    // "ralloc:<recurringId>:<date>". The date never contains a colon, so the
+    // last colon separates the recurringId from the date.
+    if (typeof id === "string" && id.startsWith("ralloc:")) {
+      const rest = id.slice("ralloc:".length);
+      const sep = rest.lastIndexOf(":");
+      if (sep === -1) return null;
+      const recurringId = rest.slice(0, sep);
+      const date = rest.slice(sep + 1);
+      const arr = this.transactions[date];
+      if (!arr) return null;
+      for (let i = 0; i < arr.length; i++) {
+        const t = arr[i];
+        if (
+          t.recurringId === recurringId &&
+          t.allocated === true &&
+          t.type === "expense"
+        ) {
+          return t;
+        }
+      }
+      return null;
+    }
     const dates = Object.keys(this.transactions);
     for (let d = 0; d < dates.length; d++) {
       const arr = this.transactions[dates[d]];
       for (let i = 0; i < arr.length; i++) {
         const t = arr[i];
-        if (
-          t.id === id &&
-          t.allocated === true &&
-          t.type === "expense" &&
-          !t.recurringId
-        ) {
+        // Matches one-time allocations and materialized recurring instances.
+        if (t.id === id && t.allocated === true && t.type === "expense") {
           return t;
         }
       }
@@ -811,6 +858,16 @@ class TransactionStore {
       delete transaction.drawsFromAllocationId;
       delete transaction.drawAmount;
       return;
+    }
+    // Drawing from a recurring allocation instance: freeze that one instance as
+    // a persisted modified instance (with a stable id) so the debit survives
+    // re-expansion, and rewrite the link from the synthetic key to the real id.
+    if (allocation.recurringId) {
+      if (!allocation.id) {
+        allocation.id = Utils.generateUniqueId();
+      }
+      allocation.modifiedInstance = true;
+      transaction.drawsFromAllocationId = allocation.id;
     }
     const remaining = Math.max(0, this._roundCents(allocation.amount));
     const draw = this._roundCents(
@@ -1213,8 +1270,11 @@ class TransactionStore {
           t.allocated === true &&
           t.type === "expense" &&
           !t.recurringId &&
+          t.autoCloseout !== true &&
           this._roundCents(t.amount) > 0
         ) {
+          // Auto-close-out allocations are pinned to their date (use-it-or-
+          // lose-it by that deadline), so they never roll forward.
           moves.push({ fromDate: date, id: t.id, transaction: t });
         }
       });
@@ -1244,6 +1304,44 @@ class TransactionStore {
 
     this.debouncedSave();
     return true;
+  }
+
+  // Remove auto-close-out allocations once their date has fully passed
+  // (use-it-or-lose-it by deadline). Covers one-time allocations and
+  // materialized recurring instances; non-materialized recurring instances are
+  // never re-created past today by the expansion engine, so the two together
+  // keep expired buckets from lingering or reappearing.
+  closeOutExpiredAllocations() {
+    const todayStr = this._todayString();
+    let changed = false;
+    Object.keys(this.transactions).forEach((date) => {
+      if (date >= todayStr) return;
+      const arr = this.transactions[date];
+      for (let i = arr.length - 1; i >= 0; i--) {
+        const t = arr[i];
+        if (
+          t.allocated === true &&
+          t.autoCloseout === true &&
+          t.type === "expense"
+        ) {
+          if (t.id) {
+            this._deletedItems.transactions.push({
+              id: t.id,
+              deletedAt: Date.now(),
+            });
+          }
+          arr.splice(i, 1);
+          changed = true;
+        }
+      }
+      if (arr.length === 0) {
+        delete this.transactions[date];
+      }
+    });
+    if (changed) {
+      this.debouncedSave();
+    }
+    return changed;
   }
 
 
