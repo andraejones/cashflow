@@ -752,12 +752,14 @@ class TransactionStore {
   // from, soonest first. Two flavors:
   //   - One-time allocations: a plain `allocated:true` expense, listed as-is.
   //   - Recurring allocations: each period's instance is its own bucket. Only
-  //     the soonest upcoming instance per series (date >= today) is offered, so
-  //     the dropdown shows the "current" bucket rather than every future month.
-  getAllocations() {
+  //     the soonest instance per series on or after `referenceDate` is offered,
+  //     so the dropdown shows the bucket active for the transaction being
+  //     entered rather than every future month. `referenceDate` defaults to
+  //     today; pass the transaction's own date to bill against that period.
+  getAllocations(referenceDate) {
     const oneTime = [];
     const recurringBySeries = new Map();
-    const todayStr = this._todayString();
+    const refStr = referenceDate || this._todayString();
     Object.keys(this.transactions).forEach((date) => {
       this.transactions[date].forEach((t) => {
         if (t.allocated !== true || t.type !== "expense" || t.hidden === true) {
@@ -778,9 +780,10 @@ class TransactionStore {
           });
           return;
         }
-        // Recurring allocation instance — only the upcoming bucket is drawable;
-        // past instances auto-close and future ones aren't the active period.
-        if (date < todayStr) return;
+        // Recurring allocation instance — only the bucket active for the
+        // reference date is drawable; earlier instances aren't the active
+        // period for a transaction dated on/after `refStr`.
+        if (date < refStr) return;
         const existing = recurringBySeries.get(t.recurringId);
         if (!existing || date < existing.date) {
           recurringBySeries.set(t.recurringId, {
@@ -798,6 +801,44 @@ class TransactionStore {
     const result = oneTime.concat(Array.from(recurringBySeries.values()));
     result.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     return result;
+  }
+
+  // Resolves a transaction's `drawsFromAllocationId` to the allocation it draws
+  // from, returning its `{ description, date }` for display. Handles both real
+  // ids (one-time / materialized recurring) and the synthetic
+  // "ralloc:<recurringId>:<date>" key. Returns null if the bucket is gone.
+  getAllocationInfoById(id) {
+    if (!id) return null;
+    let recurringId = null;
+    let targetDate = null;
+    if (typeof id === "string" && id.startsWith("ralloc:")) {
+      const rest = id.slice("ralloc:".length);
+      const sep = rest.lastIndexOf(":");
+      if (sep === -1) return null;
+      recurringId = rest.slice(0, sep);
+      targetDate = rest.slice(sep + 1);
+    }
+    const dates = targetDate ? [targetDate] : Object.keys(this.transactions);
+    for (let d = 0; d < dates.length; d++) {
+      const date = dates[d];
+      const arr = this.transactions[date];
+      if (!arr) continue;
+      for (let i = 0; i < arr.length; i++) {
+        const t = arr[i];
+        if (t.allocated !== true || t.type !== "expense") continue;
+        const match = recurringId ? t.recurringId === recurringId : t.id === id;
+        if (match) {
+          return {
+            description:
+              typeof t.description === "string" && t.description
+                ? t.description
+                : "(no description)",
+            date,
+          };
+        }
+      }
+    }
+    return null;
   }
 
   _findAllocationById(id) {

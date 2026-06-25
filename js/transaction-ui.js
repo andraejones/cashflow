@@ -81,6 +81,11 @@ class TransactionUI {
     document.getElementById("transactionDrawAllocation").addEventListener("change", () => {
       this.syncDrawState();
     });
+    // The drawable recurring bucket depends on the transaction's date (the
+    // soonest instance on/after it), so re-evaluate the dropdown when it changes.
+    document.getElementById("transactionDate").addEventListener("change", () => {
+      this.updateDrawAllocationVisibility();
+    });
     this.setupFocusTrap("transactionModal");
     this.setupFocusTrap("searchModal");
   }
@@ -322,7 +327,11 @@ class TransactionUI {
     }
 
     const previous = select.value;
-    const allocations = this.store.getAllocations();
+    // Offer the bucket active for the transaction's own date, not today's, so an
+    // expense entered in a later period bills against that period's allocation.
+    const dateField = document.getElementById("transactionDate");
+    const refDate = dateField && dateField.value ? dateField.value : undefined;
+    const allocations = this.store.getAllocations(refDate);
     select.innerHTML = '<option value="">No allocation draw</option>';
     allocations.forEach((a) => {
       const option = document.createElement("option");
@@ -709,6 +718,20 @@ class TransactionUI {
             const recurringText = ` (Recurring${recurrenceType ? " " + recurrenceType : ""
               }${additionalInfo})`;
             transactionDiv.appendChild(document.createTextNode(recurringText));
+          }
+
+          // A regular expense that draws from an allocation shows which bucket it
+          // is billed against — the allocation's title and its date.
+          if (normalizedType === "expense" && t.drawsFromAllocationId) {
+            const drawInfo = this.store.getAllocationInfoById(
+              t.drawsFromAllocationId
+            );
+            if (drawInfo) {
+              const drawSpan = document.createElement("span");
+              drawSpan.className = "draw-from-allocation";
+              drawSpan.textContent = ` (Drawn from: ${drawInfo.description}, ${this.formatShortDisplayDate(drawInfo.date)})`;
+              transactionDiv.appendChild(drawSpan);
+            }
           }
 
           if (
