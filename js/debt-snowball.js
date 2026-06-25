@@ -1005,6 +1005,32 @@ class DebtSnowballUI {
     return year * 12 + month;
   }
 
+  // Build a Set of "YYYY-MM-DD" strings for the exact days a debt is paid off.
+  // Only entries the daily-floor walk pinned to a specific day are included
+  // (already-paid debts and month-only history snapshots have no `day` and are
+  // skipped), so the calendar only flags real, dated payoff events.
+  buildPayoffDateSet(payoffByDebtId) {
+    const set = new Set();
+    if (!payoffByDebtId) return set;
+    Object.values(payoffByDebtId).forEach((p) => {
+      if (
+        p &&
+        typeof p.year === "number" &&
+        typeof p.month === "number" &&
+        typeof p.day === "number"
+      ) {
+        set.add(Utils.formatDateString(new Date(p.year, p.month, p.day)));
+      }
+    });
+    return set;
+  }
+
+  // Latest set of snowball payoff days, refreshed each render by
+  // ensureSnowballPaymentsForHorizon. Consumed by CalendarUI to flag the days.
+  getPayoffDates() {
+    return this._payoffDates || new Set();
+  }
+
   // Convert a "YYYY-MM" extra-payment start month into a comparable month index.
   // Empty/invalid values return -Infinity so the extra payment applies from the
   // start of the projection (no restriction).
@@ -3309,6 +3335,9 @@ class DebtSnowballUI {
       includeExtra,
       { captureThroughIndex: endIndex }
     );
+    // Capture the exact payoff days from this projection so the calendar can
+    // flag them at a glance.
+    this._payoffDates = this.buildPayoffDateSet(projection.payoffByDebtId);
     // Sync minimum-payment end dates once for the whole window before
     // materializing individual months (each month then skips the redundant sync).
     if (this.syncMinimumPaymentEndDates(projection.payoffByDebtId)) {

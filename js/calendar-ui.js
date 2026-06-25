@@ -283,6 +283,10 @@ class CalendarUI {
       }
     }
 
+    // Days on which a debt is fully paid off by the snowball plan, so they can
+    // be flagged at a glance.
+    const payoffDates = this.debtSnowball ? this.debtSnowball.getPayoffDates() : null;
+
     for (let i = 1; i <= daysInMonth; i++) {
       const day = document.createElement("div");
       day.classList.add("day");
@@ -315,6 +319,8 @@ class CalendarUI {
       if (negativeBalanceDates.includes(currentDateString)) {
         day.classList.add("negative-balance");
       }
+      // Flag days where a debt gets fully paid off by the snowball plan.
+      const isPayoffDay = payoffDates ? payoffDates.has(currentDateString) : false;
       const dateString = currentDateString;
       const dailyTotals =
         this.calculationService.calculateDailyTotals(dateString);
@@ -367,6 +373,7 @@ class CalendarUI {
           : ""
         }
         ${this._getDayIndicatorHtml(dailyTotals, hasMoveAnomaly)}
+        ${isPayoffDay ? '<div class="payoff-indicator" title="Debt paid off">🎯</div>' : ""}
       `;
       day.setAttribute('data-date', dateString);
       // Event listener is handled via delegation in initEventListeners()
