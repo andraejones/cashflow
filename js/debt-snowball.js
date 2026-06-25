@@ -18,10 +18,11 @@ const WEEKDAY_LABELS = [
 const SNOWBALL_FORWARD_HORIZON = 6;
 
 class DebtSnowballUI {
-  constructor(store, recurringManager, onUpdate) {
+  constructor(store, recurringManager, onUpdate, calculationService = null) {
     this.store = store;
     this.recurringManager = recurringManager;
     this.onUpdate = onUpdate;
+    this.calculationService = calculationService;
     this.editingDebtId = null;
     this.view = document.getElementById("debtSnowballView");
     this.debtList = document.getElementById("debtList");
@@ -41,7 +42,7 @@ class DebtSnowballUI {
     this.debtEndConditionOptions = document.getElementById(
       "debtEndConditionOptions"
     );
-    this.snowballExtraInput = document.getElementById("snowballExtraAmount");
+    this.snowballFloorInput = document.getElementById("snowballDailyFloor");
     this.snowballExtraStartInput = document.getElementById(
       "snowballExtraStartMonth"
     );
@@ -323,8 +324,8 @@ class DebtSnowballUI {
 
   loadSnowballSettings() {
     const settings = this.store.getDebtSnowballSettings();
-    if (this.snowballExtraInput) {
-      this.snowballExtraInput.value = settings.extraPayment || 0;
+    if (this.snowballFloorInput) {
+      this.snowballFloorInput.value = settings.dailyFloor || 0;
     }
     if (this.snowballExtraStartInput) {
       this.snowballExtraStartInput.value = settings.extraPaymentStartMonth || "";
@@ -1105,21 +1106,6 @@ class DebtSnowballUI {
     }
   }
 
-  getDebtDueDateForMonth(debt, year, month) {
-    const recurringTemplate = this.buildDebtRecurringTransaction(debt);
-    recurringTemplate.id =
-      recurringTemplate.id || debt.minRecurringId || "debt-preview";
-    const occurrences = this.getRecurringOccurrencesForMonth(
-      recurringTemplate,
-      year,
-      month
-    );
-    if (!occurrences.length) {
-      return null;
-    }
-    return this.getDateFromString(occurrences[0].dateString);
-  }
-
   // Ensure every past debt-payment occurrence is materialized before the
   // snapshot reads "paid so far" from the transaction store. Debt minimum
   // payments are recurring and expanded lazily as months are viewed; without
@@ -1326,92 +1312,10 @@ class DebtSnowballUI {
     });
   }
 
-  // Lump-sum accumulation model: the snowball extra is NEVER applied to any
-  // debt's principal monthly (some lenders treat overpayments as pre-payments,
-  // crediting future installments instead of reducing principal). Instead each
-  // debt pays only its minimum, the extra accumulates into a carried "fund", and
-  // a debt is paid off in full the first month the fund can cover its remaining
-  // balance. `incomingFund` is the fund carried in from prior months;
-  // `fundBalanceEnd` is what carries forward.
-  calculateMonthlySnowballAllocation(
-    balances,
-    monthlyTotalsByDebtId,
-    applySnowball,
-    baseExtraPayment,
-    rolloverAmount,
-    incomingFund
-  ) {
-    const roundToCents = (value) =>
-      Math.round((Number(value) || 0) * 100) / 100;
-    const minPaidByDebtId = {};
-    const balancesAfterMin = {};
-    let inMonthRollover = 0;
-
-    Object.keys(balances).forEach((debtId) => {
-      const balance = Number(balances[debtId]) || 0;
-      const scheduledMin = Number(monthlyTotalsByDebtId?.[debtId]) || 0;
-      if (balance <= 0 || scheduledMin <= 0) {
-        minPaidByDebtId[debtId] = 0;
-        balancesAfterMin[debtId] = Math.max(0, balance);
-        return;
-      }
-      const actualMin = Math.min(balance, scheduledMin);
-      minPaidByDebtId[debtId] = roundToCents(actualMin);
-      balancesAfterMin[debtId] = roundToCents(Math.max(0, balance - actualMin));
-      if (scheduledMin > actualMin) {
-        inMonthRollover = roundToCents(inMonthRollover + (scheduledMin - actualMin));
-      }
-    });
-
-    const debtOrder = Object.keys(balancesAfterMin)
-      .filter((debtId) => balancesAfterMin[debtId] > 0)
-      .sort((leftId, rightId) => balancesAfterMin[leftId] - balancesAfterMin[rightId]);
-    const targetDebtId = debtOrder.length ? debtOrder[0] : null;
-
-    // This month's contribution to the set-aside fund: base extra + freed-up
-    // minimums of already-paid-off debts (rolloverAmount) + any same-month
-    // leftover when a minimum overshot its remaining balance (inMonthRollover).
-    const fundContribution = applySnowball
-      ? roundToCents(
-        (Number(baseExtraPayment) || 0) +
-        (Number(rolloverAmount) || 0) +
-        inMonthRollover
-      )
-      : 0;
-    let fund = roundToCents((Number(incomingFund) || 0) + fundContribution);
-
-    // Cascade payoff: clear debts smallest-first whenever the accumulated fund
-    // can cover the next target's remaining balance. debtOrder is ascending, so
-    // once the fund can't cover the current target it can't cover any later one.
-    const epsilon = 0.005;
-    const lumpSumPaidByDebtId = {};
-    const balancesAfterPayments = { ...balancesAfterMin };
-    if (applySnowball && fund > 0) {
-      for (const debtId of debtOrder) {
-        const remainingBalance = Number(balancesAfterPayments[debtId]) || 0;
-        if (remainingBalance <= 0) continue;
-        if (fund + epsilon < remainingBalance) break;
-        lumpSumPaidByDebtId[debtId] = roundToCents(remainingBalance);
-        balancesAfterPayments[debtId] = 0;
-        fund = roundToCents(fund - remainingBalance);
-      }
-    }
-
-    return {
-      minPaidByDebtId,
-      lumpSumPaidByDebtId,
-      balancesAfterPayments,
-      targetDebtId,
-      fundContribution,
-      fundBalanceEnd: fund,
-      inMonthRollover,
-    };
-  }
-
   calculateSnowballProjection(viewYear, viewMonth, includeExtra = true, options = {}) {
     const debts = this.store.getDebts();
     const settings = this.store.getDebtSnowballSettings();
-    const baseExtraPayment = Number(settings.extraPayment) || 0;
+    const dailyFloor = Number(settings.dailyFloor) || 0;
     const extraStartIndex = this.parseExtraStartMonthIndex(
       settings.extraPaymentStartMonth
     );
@@ -1506,207 +1410,374 @@ class DebtSnowballUI {
       viewIndex - baseIndex + 1,
       captureThroughIndex !== null ? captureThroughIndex - baseIndex + 1 : 0
     );
-    let year = baseYear;
-    let month = baseMonth;
-    // Snowball extra accumulates into this fund across months and is spent only
-    // when it can pay a debt off in full (see calculateMonthlySnowballAllocation).
-    let snowballFund = 0;
 
-    for (let i = 0; i < maxMonths; i++) {
-      const monthKey = `${year}-${String(month + 1).padStart(2, "0")}`;
-      const monthIndex = this.getMonthIndex(year, month);
-      const monthlyTotalsByDebtId = {};
-      Object.keys(recurringTemplates).forEach((debtId) => {
-        const template = recurringTemplates[debtId];
-        if (!template) {
-          monthlyTotalsByDebtId[debtId] = 0;
+    // --- Daily floor model ---------------------------------------------------
+    // The snowball no longer sets aside a fixed monthly amount. The user declares
+    // a minimum daily cashflow floor; whatever the projected checking balance
+    // carries above that floor — durably, across the look-ahead window — is swept
+    // into a full debt payoff on the exact day the cash is there (not the debt's
+    // due date). Freed-up minimums of paid-off debts raise that surplus naturally,
+    // so there is no separate "fund". Walk the timeline day by day.
+    // How far forward a payoff must keep checking above the floor. Bounded (~1yr)
+    // so a single payoff decision doesn't force expanding/scanning the entire
+    // multi-decade horizon, while still covering a full seasonal cycle of bills.
+    const FLOOR_LOOKAHEAD_DAYS = 366;
+    const epsilon = 0.005;
+
+    // Day timeline from the projection start across the horizon.
+    const projDays = [];
+    {
+      const horizonEnd = new Date(baseYear, baseMonth + maxMonths, 1, 12, 0, 0);
+      const cursor = new Date(
+        projectionStartDate.getFullYear(),
+        projectionStartDate.getMonth(),
+        projectionStartDate.getDate(),
+        12,
+        0,
+        0
+      );
+      while (cursor < horizonEnd) {
+        const y = cursor.getFullYear();
+        const m = cursor.getMonth();
+        projDays.push({
+          ds: Utils.formatDateString(cursor),
+          year: y,
+          month: m,
+          monthIndex: this.getMonthIndex(y, m),
+        });
+        cursor.setDate(cursor.getDate() + 1);
+      }
+    }
+    const numDays = projDays.length;
+
+    // Starting checking = the real running balance through today. Everything
+    // before the projection start has already happened (including any real
+    // minimum/snowball payments); future days layer on top.
+    let startingChecking = 0;
+    if (this.calculationService) {
+      const todayDateString = Utils.formatDateString(
+        new Date(currentYear, currentMonth, today.getDate(), 12, 0, 0)
+      );
+      startingChecking =
+        Number(
+          this.calculationService.getRunningBalanceForDate(todayDateString)
+        ) || 0;
+    }
+
+    // Lazily computed base (non-debt) cashflow per day: income − expense for the
+    // day EXCLUDING debt minimum payments and snowball payoffs (the sim injects
+    // those itself so it controls when they stop). `anchor` is an Ending Balance
+    // that overrides the running balance for the day (reconciliation anchor).
+    const dayFlowCache = new Map();
+    const expandedMonths = new Set();
+    const getDayFlow = (ds, year, month) => {
+      let cached = dayFlowCache.get(ds);
+      if (cached) return cached;
+      const monthKey = `${year}-${month}`;
+      if (!expandedMonths.has(monthKey)) {
+        this.recurringManager.applyRecurringTransactions(year, month);
+        expandedMonths.add(monthKey);
+      }
+      const transactions = this.store.getTransactions();
+      const list = transactions[ds] || [];
+      let baseNet = 0;
+      let anchor = null;
+      list.forEach((t) => {
+        const isSkipped =
+          t.recurringId &&
+          this.recurringManager.isTransactionSkipped(ds, t.recurringId);
+        if (isSkipped) return;
+        if (t.type === "balance") {
+          anchor = Number(t.amount) || 0;
           return;
         }
+        // Debt minimums and snowball payoffs are injected by the sim — exclude
+        // the materialized rows here so they are not double-counted.
+        if (t.debtRole === "minimum" || t.snowballGenerated === true) return;
+        if (t.type === "income") {
+          baseNet = roundToCents(baseNet + (Number(t.amount) || 0));
+        } else if (t.type === "expense") {
+          baseNet = roundToCents(baseNet - (Number(t.amount) || 0));
+        }
+      });
+      cached = { baseNet, anchor };
+      dayFlowCache.set(ds, cached);
+      return cached;
+    };
+
+    // Lazily computed scheduled minimum occurrences per day, keyed by date.
+    // Built per month from each debt's recurrence template (clean scheduled
+    // amounts, independent of any materialized/adjusted instances). Current-month
+    // occurrences before the projection start are skipped (already reflected in
+    // the starting balances/checking).
+    const minsByDate = new Map();
+    const minMonthsDone = new Set();
+    const monthlyScheduledByKey = {};
+    const ensureMinimumsForMonth = (year, month) => {
+      const monthKey = `${year}-${String(month + 1).padStart(2, "0")}`;
+      if (minMonthsDone.has(monthKey)) return;
+      minMonthsDone.add(monthKey);
+      const totals = {};
+      Object.keys(recurringTemplates).forEach((debtId) => {
+        const template = recurringTemplates[debtId];
+        if (!template) return;
         const occurrences = this.getRecurringOccurrencesForMonth(
           template,
           year,
           month
         );
-        const filteredOccurrences =
-          year === currentYear && month === currentMonth
-            ? occurrences.filter(
-              (occurrence) =>
-                occurrence.dateString >= projectionStartDateString
-            )
-            : occurrences;
-        const totalPayment = roundToCents(
-          filteredOccurrences.reduce(
-            (sum, occurrence) => sum + occurrence.amount,
-            0
-          )
-        );
-        monthlyTotalsByDebtId[debtId] = totalPayment;
+        occurrences.forEach((occ) => {
+          if (occ.dateString < projectionStartDateString) return;
+          const amount = roundToCents(occ.amount);
+          if (amount <= 0) return;
+          if (!minsByDate.has(occ.dateString)) {
+            minsByDate.set(occ.dateString, []);
+          }
+          minsByDate.get(occ.dateString).push({ debtId, amount });
+          totals[debtId] = roundToCents((totals[debtId] || 0) + amount);
+        });
       });
+      monthlyScheduledByKey[monthKey] = totals;
+    };
 
-      Object.keys(balances).forEach((debtId) => {
-        const debt = debtById[debtId];
-        const balance = Number(balances[debtId]) || 0;
-        const interestRate =
-          debt && typeof debt.interestRate === "number"
-            ? debt.interestRate
-            : Number(debt?.interestRate) || 0;
-        if (balance <= 0 || interestRate <= 0) {
-          return;
-        }
-        const interest = roundToCents((balance * interestRate) / 1200);
-        if (interest <= 0) {
-          return;
-        }
-        balances[debtId] = roundToCents(balance + interest);
-      });
-
-      const activeDebtIds = Object.keys(balances).filter(
-        (debtId) => balances[debtId] > 0
-      );
-      if (!activeDebtIds.length) {
-        break;
+    // Cash infusions land on their actual date (only those on/after the
+    // projection start matter; earlier ones already happened). External windfalls
+    // applied straight to debt — they accelerate payoff but are NOT checking
+    // outflows, so they never touch the checking balance / floor.
+    const infusionsByDate = new Map();
+    this.store.getCashInfusions().forEach((infusion) => {
+      if (!infusion || !infusion.date) return;
+      if (infusion.date < projectionStartDateString) return;
+      if (!infusionsByDate.has(infusion.date)) {
+        infusionsByDate.set(infusion.date, []);
       }
-      const rolloverAmount = applySnowball
-        ? Object.keys(monthlyTotalsByDebtId).reduce((sum, debtId) => {
-          const payoff = payoffByDebtId[debtId];
-          if (!payoff) {
-            return sum;
-          }
-          const payoffIndex = this.getMonthIndex(payoff.year, payoff.month);
-          const eligible =
-            payoff.alreadyPaid === true
-              ? payoffIndex <= monthIndex
-              : payoffIndex < monthIndex;
-          if (!eligible) {
-            return sum;
-          }
-          const monthlyTotal = Number(monthlyTotalsByDebtId[debtId]) || 0;
-          if (monthlyTotal <= 0) {
-            return sum;
-          }
-          return sum + monthlyTotal;
-        }, 0)
-        : 0;
+      infusionsByDate.get(infusion.date).push(infusion);
+    });
 
-      // Calculate cash infusion amount for this month
-      const monthInfusions = (infusionsByMonthKey[monthKey] || []).filter(
-        (infusion) =>
-          !(
-            year === currentYear &&
-            month === currentMonth &&
-            infusion.date < projectionStartDateString
-          )
-      );
-      let generalInfusionAmount = 0;
-      const targetedInfusionsByDebtId = {};
-      monthInfusions.forEach((infusion) => {
-        const amount = Number(infusion.amount) || 0;
-        if (amount <= 0) return;
-        if (infusion.targetDebtId && balances[infusion.targetDebtId] > 0) {
-          // Targeted infusion
-          if (!targetedInfusionsByDebtId[infusion.targetDebtId]) {
-            targetedInfusionsByDebtId[infusion.targetDebtId] = 0;
-          }
-          targetedInfusionsByDebtId[infusion.targetDebtId] += amount;
+    const accrueInterest = (balanceMap, debtId) => {
+      const debt = debtById[debtId];
+      const balance = Number(balanceMap[debtId]) || 0;
+      const interestRate =
+        debt && typeof debt.interestRate === "number"
+          ? debt.interestRate
+          : Number(debt?.interestRate) || 0;
+      if (balance <= 0 || interestRate <= 0) return;
+      const interest = roundToCents((balance * interestRate) / 1200);
+      if (interest <= 0) return;
+      balanceMap[debtId] = roundToCents(balance + interest);
+    };
+
+    // Forward-looking floor check: the lowest the checking balance reaches from
+    // `startIdx` to the end of the look-ahead window, assuming NO further lump-sum
+    // payoffs (debts keep paying only their minimums until cleared). Subtracting a
+    // payoff lowers the whole tail uniformly and stopping that debt's minimums
+    // only raises it, so a payoff is safe whenever its balance ≤ (this min −
+    // floor). Conservative w.r.t. infusions (ignored here) — never violates the
+    // floor. Only invoked when today's checking already clears the candidate, so
+    // it runs at most once per committed payoff.
+    const forwardMinChecking = (startIdx, startChecking, debtBalances) => {
+      let c = startChecking;
+      let minC = startChecking;
+      const bal = { ...debtBalances };
+      let prevMonthKey = `${projDays[startIdx].year}-${projDays[startIdx].month}`;
+      const end = Math.min(numDays, startIdx + 1 + FLOOR_LOOKAHEAD_DAYS);
+      for (let i = startIdx + 1; i < end; i++) {
+        const day = projDays[i];
+        const mk = `${day.year}-${day.month}`;
+        if (mk !== prevMonthKey) {
+          Object.keys(bal).forEach((debtId) => accrueInterest(bal, debtId));
+          prevMonthKey = mk;
+        }
+        const flow = getDayFlow(day.ds, day.year, day.month);
+        if (flow.anchor !== null) {
+          c = flow.anchor;
         } else {
-          // Auto infusion (snowball priority)
-          generalInfusionAmount += amount;
+          c = roundToCents(c + flow.baseNet);
+          const mins = minsByDate.get(day.ds);
+          if (mins) {
+            mins.forEach(({ debtId, amount }) => {
+              const b = Number(bal[debtId]) || 0;
+              if (b <= 0) return;
+              const applied = Math.min(b, amount);
+              c = roundToCents(c - applied);
+              bal[debtId] = roundToCents(b - applied);
+            });
+          }
+        }
+        if (c < minC) minC = c;
+      }
+      return minC;
+    };
+
+    // --- Forward daily walk --------------------------------------------------
+    let checking = startingChecking;
+    const monthAccrued = new Set();
+    let curMonthKey = null;
+    let curMonthInfo = null;
+    const flushMonthInfo = () => {
+      if (!curMonthKey || !curMonthInfo) return;
+      const unpaid = Object.keys(balances)
+        .filter((id) => balances[id] > epsilon)
+        .sort((a, b) => balances[a] - balances[b]);
+      curMonthInfo.targetDebtId = unpaid.length ? unpaid[0] : null;
+      monthTargets[curMonthKey] = curMonthInfo;
+      curMonthKey = null;
+      curMonthInfo = null;
+    };
+
+    for (let i = 0; i < numDays; i++) {
+      const { ds, year, month, monthIndex } = projDays[i];
+      const monthKey = `${year}-${String(month + 1).padStart(2, "0")}`;
+
+      if (monthKey !== curMonthKey) {
+        flushMonthInfo();
+        curMonthKey = monthKey;
+        curMonthInfo = {
+          targetDebtId: null,
+          minPaidByDebtId: {},
+          lumpSumPaidByDebtId: {},
+          lumpSumDateByDebtId: {},
+          monthlyTotalsByDebtId: {},
+        };
+      }
+
+      // Interest accrues once per calendar month (including the first, partial
+      // month — matching the prior monthly model).
+      if (!monthAccrued.has(monthKey)) {
+        Object.keys(balances).forEach((debtId) =>
+          accrueInterest(balances, debtId)
+        );
+        monthAccrued.add(monthKey);
+      }
+
+      ensureMinimumsForMonth(year, month);
+      const scheduledThisMonth = monthlyScheduledByKey[monthKey] || {};
+      curMonthInfo.monthlyTotalsByDebtId = { ...scheduledThisMonth };
+      // Seed a minPaid entry (0) for every debt scheduled to pay a minimum this
+      // month, so adjustMinimumPaymentTransactions reconciles even a debt whose
+      // minimum is entirely suppressed by an earlier lump-sum payoff (otherwise
+      // a stale minimum would linger on the calendar in the payoff month).
+      Object.keys(scheduledThisMonth).forEach((debtId) => {
+        if (curMonthInfo.minPaidByDebtId[debtId] === undefined) {
+          curMonthInfo.minPaidByDebtId[debtId] = 0;
         }
       });
 
-      // Cash infusions are external windfalls (e.g., a tax refund) applied
-      // straight to debt. They reduce the debt balance / accelerate payoff here
-      // but are intentionally NOT materialized as calendar expenses — they are
-      // not drawn from the tracked checking balance. (Contrast snowball extra
-      // payments, which are real outflows and DO appear on the calendar.)
-      // Apply targeted infusions directly to specific debts
-      Object.keys(targetedInfusionsByDebtId).forEach((debtId) => {
-        const infusionAmount = targetedInfusionsByDebtId[debtId];
-        const currentBalance = Number(balances[debtId]) || 0;
-        if (currentBalance <= 0) return;
-        const applied = Math.min(currentBalance, infusionAmount);
-        balances[debtId] = roundToCents(currentBalance - applied);
-        if (balances[debtId] === 0 && !payoffByDebtId[debtId]) {
-          payoffByDebtId[debtId] = { year, month };
-        }
-      });
+      // Cash infusions applied straight to debt balances (not checking).
+      const dayInfusions = infusionsByDate.get(ds);
+      if (dayInfusions) {
+        dayInfusions.forEach((infusion) => {
+          const amount = roundToCents(Number(infusion.amount) || 0);
+          if (amount <= 0) return;
+          if (infusion.targetDebtId && balances[infusion.targetDebtId] > 0) {
+            const b = Number(balances[infusion.targetDebtId]) || 0;
+            const applied = Math.min(b, amount);
+            balances[infusion.targetDebtId] = roundToCents(b - applied);
+            if (
+              balances[infusion.targetDebtId] <= epsilon &&
+              !payoffByDebtId[infusion.targetDebtId]
+            ) {
+              payoffByDebtId[infusion.targetDebtId] = { year, month };
+            }
+          } else {
+            let remaining = amount;
+            const order = Object.keys(balances)
+              .filter((id) => balances[id] > 0)
+              .sort((a, b) => balances[a] - balances[b]);
+            for (const debtId of order) {
+              if (remaining <= epsilon) break;
+              const b = Number(balances[debtId]) || 0;
+              if (b <= 0) continue;
+              const applied = roundToCents(Math.min(b, remaining));
+              balances[debtId] = roundToCents(b - applied);
+              remaining = roundToCents(remaining - applied);
+              if (balances[debtId] <= epsilon && !payoffByDebtId[debtId]) {
+                payoffByDebtId[debtId] = { year, month };
+              }
+            }
+          }
+        });
+      }
 
-      // Apply auto-priority (general) infusions to smallest-balance debts.
-      // This runs regardless of applySnowball — infusions are real money the
-      // user is putting toward debt and shouldn't be discarded just because
-      // the user has the snowball strategy disabled.
-      if (generalInfusionAmount > 0) {
-        const order = Object.keys(balances)
-          .filter((id) => balances[id] > 0)
-          .sort((a, b) => balances[a] - balances[b]);
-        let remaining = roundToCents(generalInfusionAmount);
-        for (const debtId of order) {
-          if (remaining <= 0) break;
-          const currentBalance = Number(balances[debtId]) || 0;
-          if (currentBalance <= 0) continue;
-          const applied = roundToCents(Math.min(currentBalance, remaining));
-          if (applied <= 0) continue;
-          balances[debtId] = roundToCents(currentBalance - applied);
-          remaining = roundToCents(remaining - applied);
-          if (balances[debtId] === 0 && !payoffByDebtId[debtId]) {
+      // Apply the day's base cashflow (or reconcile to an Ending Balance) and the
+      // day's scheduled minimum payments. Minimums always reduce the debt balance;
+      // on an anchor day the entered figure supersedes their effect on checking.
+      const flow = getDayFlow(ds, year, month);
+      const onAnchor = flow.anchor !== null;
+      if (onAnchor) {
+        checking = roundToCents(flow.anchor);
+      } else {
+        checking = roundToCents(checking + flow.baseNet);
+      }
+      const mins = minsByDate.get(ds);
+      if (mins) {
+        mins.forEach(({ debtId, amount }) => {
+          const b = Number(balances[debtId]) || 0;
+          if (b <= 0) return;
+          const applied = Math.min(b, amount);
+          balances[debtId] = roundToCents(b - applied);
+          curMonthInfo.minPaidByDebtId[debtId] = roundToCents(
+            (curMonthInfo.minPaidByDebtId[debtId] || 0) + applied
+          );
+          if (!onAnchor) {
+            checking = roundToCents(checking - applied);
+          }
+          if (balances[debtId] <= epsilon && !payoffByDebtId[debtId]) {
+            payoffByDebtId[debtId] = { year, month };
+          }
+        });
+      }
+
+      // Floor-driven payoff: sweep durable surplus above the floor into full
+      // payoffs, smallest balance first, on this exact day.
+      if (applySnowball && monthIndex >= extraStartIndex) {
+        while (true) {
+          const order = Object.keys(balances)
+            .filter((id) => balances[id] > epsilon)
+            .sort((a, b) => balances[a] - balances[b]);
+          if (!order.length) break;
+          const debtId = order[0];
+          const remaining = roundToCents(balances[debtId]);
+          // Cheap prune: today's checking caps the forward minimum, so skip the
+          // forward scan unless today alone could already cover the payoff.
+          if (roundToCents(checking - dailyFloor) + epsilon < remaining) break;
+          const fwdMin = forwardMinChecking(i, checking, balances);
+          const surplus = roundToCents(fwdMin - dailyFloor);
+          if (remaining > surplus + epsilon) break;
+          checking = roundToCents(checking - remaining);
+          balances[debtId] = 0;
+          curMonthInfo.lumpSumPaidByDebtId[debtId] = remaining;
+          curMonthInfo.lumpSumDateByDebtId[debtId] = ds;
+          if (!payoffByDebtId[debtId]) {
             payoffByDebtId[debtId] = { year, month };
           }
         }
       }
 
-      // Only apply the base extra payment once the user-selected start month
-      // is reached. Rollovers from paid-off debts still snowball regardless.
-      const effectiveExtraPayment =
-        monthIndex >= extraStartIndex ? baseExtraPayment : 0;
-
-      const allocation = this.calculateMonthlySnowballAllocation(
-        balances,
-        monthlyTotalsByDebtId,
-        applySnowball,
-        effectiveExtraPayment,
-        rolloverAmount,
-        snowballFund
-      );
-      balances = { ...allocation.balancesAfterPayments };
-      snowballFund = allocation.fundBalanceEnd;
-
-      Object.keys(balances).forEach((debtId) => {
-        if (balances[debtId] === 0 && !payoffByDebtId[debtId]) {
-          payoffByDebtId[debtId] = { year, month };
-        }
-      });
-
-      const monthInfo = {
-        targetDebtId: allocation.targetDebtId,
-        fundContribution: allocation.fundContribution,
-        fundBalanceEnd: allocation.fundBalanceEnd,
-        rolloverAmount,
-        baseExtraPayment: effectiveExtraPayment,
-        infusionAmount: generalInfusionAmount,
-        targetedInfusions: targetedInfusionsByDebtId,
-        inMonthRollover: allocation.inMonthRollover,
-      };
-      const isViewMonth = year === viewYear && month === viewMonth;
-      const inCaptureWindow =
-        captureThroughIndex !== null &&
-        monthIndex >= currentIndex &&
-        monthIndex <= captureThroughIndex;
-      if (isViewMonth || inCaptureWindow) {
-        monthInfo.minPaidByDebtId = allocation.minPaidByDebtId;
-        monthInfo.lumpSumPaidByDebtId = allocation.lumpSumPaidByDebtId;
-        monthInfo.monthlyTotalsByDebtId = monthlyTotalsByDebtId;
-      }
-      monthTargets[monthKey] = monthInfo;
-      if (viewBalances === null && year === viewYear && month === viewMonth) {
+      // Capture the view-month balances at the end of the view month.
+      const isLastDayOfViewMonth =
+        year === viewYear &&
+        month === viewMonth &&
+        (i + 1 >= numDays ||
+          projDays[i + 1].month !== viewMonth ||
+          projDays[i + 1].year !== viewYear);
+      if (viewBalances === null && isLastDayOfViewMonth) {
         viewBalances = { ...balances };
       }
 
-      month += 1;
-      if (month > 11) {
-        month = 0;
-        year += 1;
+      // Stop once every debt is cleared and we are past the view/capture window.
+      const anyActive = Object.keys(balances).some(
+        (id) => balances[id] > epsilon
+      );
+      const pastNeeded =
+        monthIndex >= viewIndex &&
+        (captureThroughIndex === null || monthIndex >= captureThroughIndex);
+      if (!anyActive && pastNeeded) {
+        flushMonthInfo();
+        break;
       }
     }
+    flushMonthInfo();
 
     if (viewBalances === null) {
       // For past months, use historical balances; otherwise use projected balances
@@ -1721,7 +1792,7 @@ class DebtSnowballUI {
       viewBalances,
       payoffByDebtId,
       monthTargets,
-      extraPayment: baseExtraPayment,
+      dailyFloor,
       applySnowball,
     };
   }
@@ -2038,52 +2109,6 @@ class DebtSnowballUI {
     return changed;
   }
 
-  getRolloverAvailableDate(
-    year,
-    month,
-    minPaidByDebtId,
-    monthlyTotalsByDebtId,
-    debtsById
-  ) {
-    if (!minPaidByDebtId || !monthlyTotalsByDebtId || !debtsById) {
-      return null;
-    }
-    const epsilon = 0.01;
-    let latestDate = null;
-    Object.keys(monthlyTotalsByDebtId).forEach((debtId) => {
-      const scheduled = Number(monthlyTotalsByDebtId[debtId]) || 0;
-      const actual = Number(minPaidByDebtId[debtId]) || 0;
-      if (scheduled <= actual + epsilon) {
-        return;
-      }
-      const debt = debtsById.get(debtId);
-      if (!debt) {
-        return;
-      }
-      const recurringTemplate = this.buildDebtRecurringTransaction(debt);
-      recurringTemplate.id =
-        recurringTemplate.id || debt.minRecurringId || "debt-preview";
-      const occurrences = this.getRecurringOccurrencesForMonth(
-        recurringTemplate,
-        year,
-        month
-      );
-      if (!occurrences.length) {
-        return;
-      }
-      const dueDate = this.getDateFromString(
-        occurrences[occurrences.length - 1].dateString
-      );
-      if (!dueDate) {
-        return;
-      }
-      if (!latestDate || dueDate > latestDate) {
-        latestDate = dueDate;
-      }
-    });
-    return latestDate;
-  }
-
   syncSnowballTransactionsForMonth(
     year,
     month,
@@ -2318,7 +2343,7 @@ class DebtSnowballUI {
     ).padStart(2, "0")}`;
     const monthInfo =
       (projection.monthTargets && projection.monthTargets[monthKey]) || {};
-    const fundContribution = Number(monthInfo.fundContribution) || 0;
+    const dailyFloor = Number(projection.dailyFloor) || 0;
 
     const formatWhole = (value) =>
       `$${Math.round(Number(value) || 0).toLocaleString("en-US")}`;
@@ -2378,12 +2403,9 @@ class DebtSnowballUI {
 
     this.heroEl.appendChild(
       makeCard({
-        label: "Set aside / month",
-        value: formatWhole(fundContribution),
-        sub:
-          fundContribution > 0
-            ? "Saved toward your next payoff"
-            : "Add an extra payment to speed this up",
+        label: "Daily floor",
+        value: formatWhole(dailyFloor),
+        sub: "Surplus above this funds the next payoff",
       })
     );
   }
@@ -2439,26 +2461,23 @@ class DebtSnowballUI {
 
     const extraText = document.createElement("div");
     extraText.className = "debt-plan-extra";
-    const baseExtraPayment = Number(monthInfo.baseExtraPayment) || 0;
-    const fundContribution = Number(monthInfo.fundContribution) || 0;
-    const fundBalanceEnd = Number(monthInfo.fundBalanceEnd) || 0;
-    const rolloverAmount = Number(monthInfo.rolloverAmount) || 0;
-    const inMonthRollover = Number(monthInfo.inMonthRollover) || 0;
-    // The extra is NEVER paid to a debt monthly; it accumulates into a fund and
-    // pays a debt off in full when it can. The breakdown is what's set aside this
-    // month; the fund balance is the running total carried toward the next payoff.
-    // Cash infusions are applied straight to debt and are shown separately in the
-    // cash-infusion list, not folded in here.
-    const breakdownParts = [`Base $${baseExtraPayment.toFixed(2)}`];
-    if (rolloverAmount > 0) {
-      breakdownParts.push(`Rollovers $${rolloverAmount.toFixed(2)}`);
-    }
-    if (inMonthRollover > 0) {
-      breakdownParts.push(`Same-month $${inMonthRollover.toFixed(2)}`);
-    }
-    extraText.textContent = `Set aside this month: $${fundContribution.toFixed(
-      2
-    )} (${breakdownParts.join(" + ")}) — fund balance $${fundBalanceEnd.toFixed(2)}`;
+    const dailyFloor = Number(projection.dailyFloor) || 0;
+    const lumpSums = monthInfo.lumpSumPaidByDebtId || {};
+    const sweptThisMonth = Object.keys(lumpSums).reduce(
+      (sum, id) => sum + (Number(lumpSums[id]) || 0),
+      0
+    );
+    // No monthly set-aside fund: a debt is paid off in full on the day the
+    // projected checking surplus above the floor can cover it. Cash infusions are
+    // applied straight to debt and shown separately in the cash-infusion list.
+    extraText.textContent =
+      sweptThisMonth > 0
+        ? `Daily floor $${dailyFloor.toFixed(
+          2
+        )} — $${sweptThisMonth.toFixed(2)} paid off this month from surplus above it`
+        : `Daily floor $${dailyFloor.toFixed(
+          2
+        )} — surplus above it funds the next payoff`;
     this.planSummary.appendChild(extraText);
 
     const summariesByPayoff = [...summaries].sort((a, b) => {
@@ -2983,24 +3002,24 @@ class DebtSnowballUI {
   }
 
   saveSnowballSettings() {
-    const extraPayment = parseFloat(this.snowballExtraInput?.value || "0");
+    const dailyFloor = parseFloat(this.snowballFloorInput?.value || "0");
     const autoGenerate = this.snowballAutoCheckbox?.checked === true;
     const extraPaymentStartMonth = (
       this.snowballExtraStartInput?.value || ""
     ).trim();
-    if (isNaN(extraPayment) || extraPayment < 0) {
-      Utils.showNotification("Extra payment must be 0 or greater", "error");
+    if (isNaN(dailyFloor) || dailyFloor < 0) {
+      Utils.showNotification("Minimum daily cashflow must be 0 or greater", "error");
       return;
     }
     if (
       extraPaymentStartMonth &&
       !/^\d{4}-\d{2}$/.test(extraPaymentStartMonth)
     ) {
-      Utils.showNotification("Invalid extra payment start month", "error");
+      Utils.showNotification("Invalid floor start month", "error");
       return;
     }
     this.store.setDebtSnowballSettings({
-      extraPayment,
+      dailyFloor,
       extraPaymentStartMonth,
       autoGenerate,
     });
@@ -3072,12 +3091,12 @@ class DebtSnowballUI {
 
     const monthInfo = projection.monthTargets?.[monthKey] || {};
     const minPaidByDebtId = monthInfo.minPaidByDebtId || {};
-    // Lump-sum accumulation model: a debt is paid off in full in a single month
-    // (when the accumulated fund can cover it), so most months have no entry and
-    // a payoff month has exactly one entry per cleared debt.
+    // Floor model: a debt is paid off in full on the exact day the projected
+    // checking surplus above the floor can cover it (lumpSumDateByDebtId), which
+    // is independent of the debt's due date. Most months have no payoff; a payoff
+    // month has one entry per cleared debt.
     const lumpSumPaidByDebtId = monthInfo.lumpSumPaidByDebtId || {};
-    const monthlyTotalsByDebtId = monthInfo.monthlyTotalsByDebtId || {};
-    const inMonthRollover = Number(monthInfo.inMonthRollover) || 0;
+    const lumpSumDateByDebtId = monthInfo.lumpSumDateByDebtId || {};
 
     if (allowMutation) {
       if (this.adjustMinimumPaymentTransactions(year, month, minPaidByDebtId)) {
@@ -3089,16 +3108,6 @@ class DebtSnowballUI {
         const debtsById = new Map(
           this.store.getDebts().map((debt) => [debt.id, debt])
         );
-        const rolloverAvailableDate =
-          inMonthRollover > 0
-            ? this.getRolloverAvailableDate(
-              year,
-              month,
-              minPaidByDebtId,
-              monthlyTotalsByDebtId,
-              debtsById
-            )
-            : null;
         Object.keys(lumpSumPaidByDebtId).forEach((debtId) => {
           const amount = Number(lumpSumPaidByDebtId[debtId]) || 0;
           if (amount <= 0) {
@@ -3108,18 +3117,9 @@ class DebtSnowballUI {
           if (!debt) {
             return;
           }
-          const dueDate = this.getDebtDueDateForMonth(debt, year, month);
-          let paymentDate = dueDate;
-          if (
-            paymentDate &&
-            rolloverAvailableDate &&
-            paymentDate < rolloverAvailableDate
-          ) {
-            paymentDate = rolloverAvailableDate;
-          }
-          const dueDateString = paymentDate
-            ? Utils.formatDateString(paymentDate)
-            : null;
+          // Place the payoff on the availability date the projection computed,
+          // not the debt's due date.
+          const dueDateString = lumpSumDateByDebtId[debtId] || null;
           if (!dueDateString) {
             return;
           }

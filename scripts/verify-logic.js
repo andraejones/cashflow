@@ -313,63 +313,86 @@ console.log("✅ Past debt payments are counted without pre-rendering months");
 // TEST 9: The snowball is materialized across a forward window, not just the
 // viewed month, so forward balances and the 30-day Minimum (which read
 // materialized transactions) reflect planned snowball spend for months the user
-// has not opened. Under the lump-sum model a debt's payoff lands in a single
-// month, so the balances below are tuned so the fund (extra $200/mo) clears a
-// debt exactly two months ahead.
+// has not opened. Under the floor model a debt is paid off in full on the day
+// the projected checking surplus above the floor (here $0) can cover it. With a
+// healthy recurring income the surplus accrues over a couple of months and the
+// payoff lands in a forward month the user never opened. Date is frozen for
+// determinism.
 console.log("TEST 9: Snowball Materializes Across The Forward Horizon");
-const horizonStore = new TransactionStore();
-horizonStore.resetData();
-const horizonRecurringManager = new RecurringTransactionManager(horizonStore);
-const horizonUI = Object.create(DebtSnowballUI.prototype);
-horizonUI.store = horizonStore;
-horizonUI.recurringManager = horizonRecurringManager;
-horizonUI.daySpecificOptions = [];
+const H_RealDate = Date;
+const H_FIXED_TODAY = new H_RealDate(2026, 5, 15, 12, 0, 0); // 2026-06-15
+class H_FrozenDate extends H_RealDate {
+  constructor(...args) {
+    if (args.length === 0) { super(H_FIXED_TODAY.getTime()); } else { super(...args); }
+  }
+  static now() { return H_FIXED_TODAY.getTime(); }
+}
+global.Date = H_FrozenDate;
+try {
+  const horizonStore = new TransactionStore();
+  horizonStore.resetData();
+  const horizonRecurringManager = new RecurringTransactionManager(horizonStore);
+  const horizonCalc = new CalculationService(
+    horizonStore,
+    horizonRecurringManager
+  );
+  const horizonUI = Object.create(DebtSnowballUI.prototype);
+  horizonUI.store = horizonStore;
+  horizonUI.recurringManager = horizonRecurringManager;
+  horizonUI.calculationService = horizonCalc;
+  horizonUI.daySpecificOptions = [];
 
-const horizonNow = new Date();
-const horizonY = horizonNow.getFullYear();
-const horizonM = horizonNow.getMonth();
-const horizonStart = `${horizonY}-${String(horizonM + 1).padStart(2, "0")}-15`;
-["Card X", "Card Y"].forEach((name) => {
-  const id = horizonStore.addDebt({
-    name,
-    balance: 700,
+  const horizonY = 2026;
+  const horizonM = 5; // June (0-indexed)
+  // Recurring monthly income drives a steady surplus above the $0 floor.
+  horizonStore.addRecurringTransaction({
+    startDate: "2026-06-01",
+    amount: 2000,
+    type: "income",
+    description: "Salary",
+    recurrence: "monthly",
+  });
+  // A debt large enough that the surplus only covers it a couple of months out.
+  const horizonDebtId = horizonStore.addDebt({
+    name: "Card X",
+    balance: 5000,
     minPayment: 50,
     dueDay: 15,
     recurrence: "monthly",
-    dueStartDate: horizonStart,
+    interestRate: 0,
+    dueStartDate: "2026-06-15",
   });
   horizonUI.ensureMinimumPaymentRecurring(
-    horizonStore.getDebts().find((d) => d.id === id)
+    horizonStore.getDebts().find((d) => d.id === horizonDebtId)
   );
-});
-horizonStore.setDebtSnowballSettings({
-  extraPayment: 200,
-  extraPaymentStartMonth: "",
-  autoGenerate: true,
-});
-
-horizonRecurringManager.applyRecurringTransactions(horizonY, horizonM);
-horizonUI.ensureSnowballPaymentsForHorizon(horizonY, horizonM);
-
-// Two months ahead has not been "visited", yet its snowball must exist.
-const twoAhead = new Date(horizonY, horizonM + 2, 1);
-const twoAheadPrefix = `${twoAhead.getFullYear()}-${String(
-  twoAhead.getMonth() + 1
-).padStart(2, "0")}-`;
-const horizonTxns = horizonStore.getTransactions();
-let forwardSnowballCount = 0;
-Object.keys(horizonTxns).forEach((dk) => {
-  if (!dk.startsWith(twoAheadPrefix)) return;
-  horizonTxns[dk].forEach((t) => {
-    if (t.snowballGenerated === true) forwardSnowballCount += 1;
+  horizonStore.setDebtSnowballSettings({
+    dailyFloor: 0,
+    extraPaymentStartMonth: "",
+    autoGenerate: true,
   });
-});
-if (forwardSnowballCount === 0) {
-  throw new Error(
-    "Expected snowball payments materialized two months ahead without opening that month"
-  );
+
+  horizonRecurringManager.applyRecurringTransactions(horizonY, horizonM);
+  horizonUI.ensureSnowballPaymentsForHorizon(horizonY, horizonM);
+
+  // A forward month the user never opened must carry the materialized payoff.
+  const currentPrefix = `${horizonY}-${String(horizonM + 1).padStart(2, "0")}`;
+  const horizonTxns = horizonStore.getTransactions();
+  let forwardSnowballCount = 0;
+  Object.keys(horizonTxns).forEach((dk) => {
+    if (dk.slice(0, 7) <= currentPrefix) return; // only months after June
+    horizonTxns[dk].forEach((t) => {
+      if (t.snowballGenerated === true) forwardSnowballCount += 1;
+    });
+  });
+  if (forwardSnowballCount === 0) {
+    throw new Error(
+      "Expected snowball payoff materialized in a forward month without opening it"
+    );
+  }
+  console.log("✅ Snowball is materialized for unopened forward months");
+} finally {
+  global.Date = H_RealDate;
 }
-console.log("✅ Snowball is materialized for unopened forward months");
 
 // TEST 10: Cash-infusion allocation starts its projection at the infusion's
 // own month, not earlier. The previous component-wise min(year)/min(month)
@@ -414,6 +437,156 @@ try {
   console.log("✅ Infusion projection starts at the infusion's month, not earlier");
 } finally {
   global.Date = RealDate;
+}
+
+// TEST 11: Floor model specifics — (a) a debt is paid off on the day the surplus
+// above the floor can cover it, NOT on the debt's due date; (b) a floor set above
+// the reachable surplus blocks the lump-sum payoff entirely (minimums only).
+console.log("TEST 11: Floor-Driven Payoff Timing And Floor Blocking");
+const T11_RealDate = Date;
+const T11_FIXED_TODAY = new T11_RealDate(2026, 5, 15, 12, 0, 0); // 2026-06-15
+class T11_FrozenDate extends T11_RealDate {
+  constructor(...args) {
+    if (args.length === 0) { super(T11_FIXED_TODAY.getTime()); } else { super(...args); }
+  }
+  static now() { return T11_FIXED_TODAY.getTime(); }
+}
+global.Date = T11_FrozenDate;
+try {
+  const makeUI = () => {
+    const s = new TransactionStore();
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    const calc = new CalculationService(s, rm);
+    const ui = Object.create(DebtSnowballUI.prototype);
+    ui.store = s;
+    ui.recurringManager = rm;
+    ui.calculationService = calc;
+    ui.daySpecificOptions = [];
+    return { s, rm, ui };
+  };
+
+  // (a) Surplus already covers the debt; payoff must land on the availability
+  // day (2026-06-16, the first projected day) and never on the 28th due date.
+  {
+    const { s, rm, ui } = makeUI();
+    s.addRecurringTransaction({
+      startDate: "2026-06-01",
+      amount: 2000,
+      type: "income",
+      description: "Salary",
+      recurrence: "monthly",
+    });
+    const debtId = s.addDebt({
+      name: "Card A",
+      balance: 1500,
+      minPayment: 0,
+      dueDay: 28,
+      recurrence: "monthly",
+      interestRate: 0,
+      dueStartDate: "2026-06-28",
+    });
+    ui.ensureMinimumPaymentRecurring(s.getDebts().find((d) => d.id === debtId));
+    s.setDebtSnowballSettings({ dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: true });
+    rm.applyRecurringTransactions(2026, 5);
+    ui.ensureSnowballPaymentsForHorizon(2026, 5);
+
+    const txns = s.getTransactions();
+    const hasSnowballOn = (date) =>
+      (txns[date] || []).some((t) => t.snowballGenerated === true);
+    if (!hasSnowballOn("2026-06-16")) {
+      throw new Error("Expected payoff on availability day 2026-06-16");
+    }
+    if (hasSnowballOn("2026-06-28")) {
+      throw new Error("Payoff must not land on the due date 2026-06-28");
+    }
+  }
+  console.log("✅ Payoff lands on the availability day, not the due date");
+
+  // (b) Tiny net surplus and a floor above the reachable balance — no lump-sum
+  // payoff should ever materialize within the horizon.
+  {
+    const { s, rm, ui } = makeUI();
+    s.addRecurringTransaction({
+      startDate: "2026-06-01",
+      amount: 100,
+      type: "income",
+      description: "Side income",
+      recurrence: "monthly",
+    });
+    const debtId = s.addDebt({
+      name: "Card B",
+      balance: 1500,
+      minPayment: 50,
+      dueDay: 15,
+      recurrence: "monthly",
+      interestRate: 0,
+      dueStartDate: "2026-06-15",
+    });
+    ui.ensureMinimumPaymentRecurring(s.getDebts().find((d) => d.id === debtId));
+    s.setDebtSnowballSettings({ dailyFloor: 1000, extraPaymentStartMonth: "", autoGenerate: true });
+    rm.applyRecurringTransactions(2026, 5);
+    ui.ensureSnowballPaymentsForHorizon(2026, 5);
+
+    const txns = s.getTransactions();
+    let snowballCount = 0;
+    Object.keys(txns).forEach((dk) => {
+      txns[dk].forEach((t) => {
+        if (t.snowballGenerated === true) snowballCount += 1;
+      });
+    });
+    if (snowballCount !== 0) {
+      throw new Error(
+        `Floor above reachable surplus must block payoff, found ${snowballCount} snowball payments`
+      );
+    }
+  }
+  console.log("✅ A floor above the reachable surplus blocks lump-sum payoff");
+
+  // (c) A payoff that lands BEFORE the same-month minimum due date must suppress
+  // that minimum (no stale minimum lingering on the calendar in the payoff month).
+  {
+    const { s, rm, ui } = makeUI();
+    s.addRecurringTransaction({
+      startDate: "2026-06-01",
+      amount: 2000,
+      type: "income",
+      description: "Salary",
+      recurrence: "monthly",
+    });
+    const debtId = s.addDebt({
+      name: "Card C",
+      balance: 1500,
+      minPayment: 50,
+      dueDay: 20,
+      recurrence: "monthly",
+      interestRate: 0,
+      dueStartDate: "2026-06-20",
+    });
+    ui.ensureMinimumPaymentRecurring(s.getDebts().find((d) => d.id === debtId));
+    s.setDebtSnowballSettings({ dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: true });
+    rm.applyRecurringTransactions(2026, 5);
+    ui.ensureSnowballPaymentsForHorizon(2026, 5);
+
+    const txns = s.getTransactions();
+    const paidEarly = (txns["2026-06-16"] || []).some(
+      (t) => t.snowballGenerated === true
+    );
+    if (!paidEarly) {
+      throw new Error("Expected early payoff on 2026-06-16");
+    }
+    const lingeringMin = (txns["2026-06-20"] || []).some(
+      (t) => t.debtRole === "minimum" && t.debtId === debtId && Number(t.amount) > 0
+    );
+    if (lingeringMin) {
+      throw new Error(
+        "Minimum due after the same-month payoff must be suppressed, not left active"
+      );
+    }
+  }
+  console.log("✅ Minimum after a same-month payoff is suppressed");
+} finally {
+  global.Date = T11_RealDate;
 }
 
 console.log("ALL TESTS PASSED");

@@ -785,8 +785,8 @@ class CloudSync {
         remoteData.monthlyNotes
       ),
       debtSnowballSettings: this._mergeDebtSnowballSettings(
-        localData.debtSnowballSettings || { extraPayment: 0, autoGenerate: false },
-        remoteData.debtSnowballSettings || { extraPayment: 0, autoGenerate: false },
+        localData.debtSnowballSettings || { dailyFloor: 0, autoGenerate: false },
+        remoteData.debtSnowballSettings || { dailyFloor: 0, autoGenerate: false },
         localData.lastUpdated,
         remoteData.lastUpdated
       ),
