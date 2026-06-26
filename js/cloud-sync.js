@@ -1354,7 +1354,12 @@ class CloudSync {
   // Check if local data has changes since last sync
   _hasLocalChangesSinceSync(localData) {
     if (!this._lastSyncTime) {
-      // Never synced before, assume no local changes need merging
+      // Never synced before → no merge: returning false makes loadFromCloud do a
+      // straight one-way pull (remote replaces local). This is INTENTIONAL.
+      // "Load from Cloud" means "take the cloud version"; merge-and-protect is the
+      // job of Save / auto-sync, not Load. Do not "fix" this to merge here — that
+      // would change Load's documented one-way semantics. (A first-ever Load on a
+      // device that has local-only data will therefore discard it, by design.)
       return false;
     }
 

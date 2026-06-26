@@ -256,6 +256,15 @@ class CalculationService {
           this.recurringManager.isTransactionSkipped(dateString, t.recurringId);
 
         if (!isSkipped) {
+          // INTENTIONAL: income/expense are summed independently of `balance`.
+          // On a day that also carries an Ending Balance (reconciliation anchor),
+          // the balance-walk paths (updateMonthlyBalances / getRunningBalanceForDate
+          // / calculateMinimum) deliberately do NOT re-apply that day's income/
+          // expense — the entered figure already reconciles same-day activity. The
+          // gross income/expense are still reported here so the calendar day cell
+          // and Monthly Summary can show the activity for the record. The day cell
+          // showing +income/-expense while the balance equals the anchor is the
+          // expected, by-design result — not a bug to reconcile.
           if (t.type === "balance") {
             balance = t.amount;
           } else if (t.type === "income") {
