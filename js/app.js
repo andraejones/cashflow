@@ -14,6 +14,9 @@ class CashflowApp {
     this._operationLock = false;
     this._pendingUpdateUI = false;
     this._initialized = false;
+    // Guards against overlapping resume syncs when several foreground events
+    // (visibilitychange, pageshow, online) fire for a single wake.
+    this._resumeSyncing = false;
     this.cloudSync = new CloudSync(this.store, () => this.updateUI());
     this.transactionUI = new TransactionUI(
       this.store,
@@ -64,7 +67,11 @@ class CashflowApp {
   async init() {
     try {
       Utils.cleanUpHtmlArtifacts();
-      await this.safeCloudLoad();
+      // On startup, push first if this device has local changes that never
+      // reached the cloud (e.g. it was backgrounded/discarded before the
+      // debounced save fired); otherwise pull. A fresh reload fires no resume
+      // event, so the push has to happen here.
+      await this._syncPendingOrLoad();
     } catch (error) {
       console.error("Error loading from cloud:", error);
     }
@@ -75,11 +82,11 @@ class CashflowApp {
     // Start heartbeat polling for remote changes (1 minute interval)
     this.cloudSync.startHeartbeat(60000);
 
-    // Set up callback to refresh from cloud after PIN unlock (session resume)
+    // Set up callback to refresh from cloud after PIN unlock (session resume).
+    // Unlock is an explicit user action, so it keeps the normal (non-quiet) UI.
     this.pinProtection.onUnlockCallback = async () => {
       try {
-        // safeCloudLoad() already handles cache invalidation internally
-        await this.safeCloudLoad();
+        await this._syncPendingOrLoad();
         this.updateUI();
         // Restart heartbeat after unlock
         this.cloudSync.startHeartbeat(60000);
@@ -95,9 +102,47 @@ class CashflowApp {
   }
 
 
+  // Push local changes that never reached the cloud, otherwise pull. Shared by
+  // startup, PIN-unlock, and foreground-resume so they can't drift apart.
+  // `quiet` suppresses the routine sync UI for background-triggered syncs.
+  async _syncPendingOrLoad(quiet = false) {
+    this.cloudSync.store.flushPendingSave();
+    const { token, gistId } = await this.cloudSync.getCloudCredentialsAsync();
+    if (token && gistId && this.cloudSync.hasPendingCloudSave()) {
+      // saveToCloud() merges remote changes in before pushing, so this is safe
+      // even if the other device also edited while we were away.
+      await this.cloudSync.saveToCloud(quiet);
+      this.recurringManager.invalidateCache();
+      this.calculationService.invalidateCache();
+      return true;
+    }
+    return this.safeCloudLoad(quiet);
+  }
+
+  // Re-sync when the app returns to the foreground (tab visible again, bfcache
+  // restore, or connectivity returns). Runs quietly so routine resumes don't
+  // flash a spinner — only merges/errors surface UI.
+  async syncOnResume() {
+    if (this._resumeSyncing) return;
+    // While locked the store may be empty/encrypted; the unlock flow owns sync.
+    if (this.pinProtection && this.pinProtection.isLocked) return;
+    if (!this.cloudSync.autoSyncEnabled) return;
+    // Definitely offline — the "online" event will re-run this once we reconnect.
+    if (navigator.onLine === false) return;
+    this._resumeSyncing = true;
+    try {
+      await this._syncPendingOrLoad(true);
+      this.updateUI();
+    } catch (error) {
+      console.error("Resume sync failed:", error);
+    } finally {
+      this._resumeSyncing = false;
+    }
+  }
+
   // Safe cloud load with operation locking to prevent race conditions
   // Uses heartbeat check to avoid unnecessary full loads when data hasn't changed
-  async safeCloudLoad() {
+  async safeCloudLoad(quiet = false) {
     if (this._operationLock) {
       console.log("Operation in progress, skipping cloud load");
       return false;
@@ -115,12 +160,12 @@ class CashflowApp {
       if (hasChanges === false) {
         // No changes detected (304 response) - skip full load
         console.log("No remote changes detected, skipping full load");
-        Utils.showNotification("Cloud data up to date");
+        if (!quiet) Utils.showNotification("Cloud data up to date");
         return true;
       }
 
       // hasChanges is true or null (can't determine) - do full load
-      await this.cloudSync.loadFromCloud();
+      await this.cloudSync.loadFromCloud(quiet);
       this.recurringManager.invalidateCache();
       this.calculationService.invalidateCache();
       return true;
@@ -559,6 +604,51 @@ document.addEventListener("DOMContentLoaded", async () => {
     window.app = await CashflowApp.create(pinProtection);
   }
 });
+
+// --- Background / foreground sync lifecycle -------------------------------
+// Mobile browsers freeze or discard backgrounded tabs, so the 10s debounced
+// cloud save can be lost if the device sleeps before it fires. These handlers
+// push the moment the page is backgrounded (the last reliable callback on
+// mobile) and re-sync on resume as a safety net for anything that didn't land.
+
+function flushAppOnHide() {
+  if (!window.app || !window.app._initialized || !window.app.store) return;
+  // Always persist to localStorage first so nothing is lost locally.
+  window.app.store.flushPendingSave();
+  if (navigator.onLine === false) return; // Can't push offline; resume/online will retry.
+  const cloudSync = window.app.cloudSync;
+  if (cloudSync && cloudSync.autoSyncEnabled && cloudSync.hasPendingCloudSave()) {
+    // Best-effort immediate push. It may be cut short on a hard unload, but the
+    // resume handler (and next startup) guarantees the change lands eventually.
+    cloudSync.saveToCloud(true).catch((err) =>
+      console.error("Hide-time cloud save failed:", err)
+    );
+  }
+}
+
+function resumeAppSync() {
+  if (window.app && window.app._initialized && typeof window.app.syncOnResume === "function") {
+    window.app.syncOnResume();
+  }
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    flushAppOnHide();
+  } else {
+    resumeAppSync();
+  }
+});
+
+// pagehide fires on real unload/discard; pageshow with persisted is a bfcache
+// restore (a resume), not a fresh load.
+window.addEventListener("pagehide", flushAppOnHide);
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted) resumeAppSync();
+});
+
+// Woke with no connectivity, then it returned — flush anything still pending.
+window.addEventListener("online", resumeAppSync);
 
 // Ensure any pending data is saved before closing/refreshing
 window.addEventListener("beforeunload", () => {

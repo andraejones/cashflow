@@ -20,6 +20,11 @@ class CloudSync {
     this._lastSaveTime = null;
     this._isSyncing = false;
     this._suppressAutoSyncSchedule = false;
+    // True while a debounced cloud save is queued but has not yet run. Lets the
+    // lifecycle handlers (background/resume/startup) tell whether there is local
+    // work still waiting to reach the cloud.
+    this._pendingCloudSave = false;
+    this._pendingSaveAfterSync = false;
 
     if (typeof this.store.registerSaveCallback === 'function') {
       this.store.registerSaveCallback((isDataModified) => {
@@ -425,6 +430,7 @@ class CloudSync {
     }
 
     clearTimeout(this.saveTimeout);
+    this._pendingCloudSave = true;
     this.showPendingMessage();
     // Mark save time early so heartbeat checks during the delay won't false-positive
     this._lastSaveTime = Date.now();
@@ -446,7 +452,23 @@ class CloudSync {
 
   cancelPendingCloudSave() {
     clearTimeout(this.saveTimeout);
+    this._pendingCloudSave = false;
     this.clearPendingMessage();
+  }
+
+  // Whether there is local work that has not yet been pushed to the cloud:
+  // either a debounced save is still queued, a save was requested mid-sync, or
+  // the store has changes newer than the last successful sync. Used by the
+  // background/resume/startup handlers to decide between pushing and pulling.
+  hasPendingCloudSave() {
+    if (this._pendingCloudSave || this._pendingSaveAfterSync) {
+      return true;
+    }
+    try {
+      return this._hasLocalChangesSinceSync(this.store.exportData());
+    } catch (e) {
+      return false;
+    }
   }
 
 
@@ -954,17 +976,24 @@ class CloudSync {
     }
   }
 
-  async saveToCloud() {
+  async saveToCloud(quiet = false) {
     if (this._isSyncing) {
       console.log("Sync already in progress, skipping saveToCloud");
-      Utils.showNotification("Sync already in progress...", "info");
+      if (!quiet) Utils.showNotification("Sync already in progress...", "info");
       return;
     }
     this._isSyncing = true;
+    // We are committing to a save now, so any queued debounce is subsumed.
+    this._pendingCloudSave = false;
+
+    // In quiet mode (background/resume syncs) suppress the loading overlay so
+    // routine syncs don't flash a spinner; merge/conflict and error
+    // notifications still fire.
+    const showLoading = (msg) => { if (!quiet) Utils.showLoading(msg); };
 
     const syncIndicator = document.querySelector(".cloud-sync-indicator");
     if (syncIndicator) syncIndicator.className = "cloud-sync-indicator syncing";
-    Utils.showLoading("Saving to cloud...");
+    showLoading("Saving to cloud...");
 
     try {
       let { token, gistId } = await this.getCloudCredentialsAsync();
@@ -974,7 +1003,7 @@ class CloudSync {
           // Hide loading while prompting for credentials
           Utils.hideLoading();
           const credentials = await this.promptForCredentials();
-          Utils.showLoading("Saving to cloud...");
+          showLoading("Saving to cloud...");
           token = credentials.token;
           gistId = credentials.gistId;
           if (!gistId) {
@@ -1027,7 +1056,7 @@ class CloudSync {
 
         if (!notModified && checkResponse.ok) {
           // Remote has changed - need to merge
-          Utils.showLoading("Merging changes...");
+          showLoading("Merging changes...");
           const gist = await checkResponse.json();
 
           if (gist.files && gist.files["cashflow_data.json"]) {
@@ -1087,7 +1116,7 @@ class CloudSync {
       }
 
       // Step 2: Save the data (original or merged)
-      Utils.showLoading("Saving to cloud...");
+      showLoading("Saving to cloud...");
       const response = await fetch(`https://api.github.com/gists/${gistId}`, {
         method: "PATCH",
         headers: {
@@ -1157,7 +1186,7 @@ class CloudSync {
 
       if (syncIndicator)
         syncIndicator.className = "cloud-sync-indicator synced";
-      Utils.showNotification("Data saved to cloud successfully!");
+      if (!quiet) Utils.showNotification("Data saved to cloud successfully!");
     } catch (error) {
       console.error("Error saving to cloud:", error);
       if (syncIndicator) syncIndicator.className = "cloud-sync-indicator error";
@@ -1177,17 +1206,19 @@ class CloudSync {
   }
 
 
-  async loadFromCloud() {
+  async loadFromCloud(quiet = false) {
     if (this._isSyncing) {
       console.log("Sync already in progress, skipping loadFromCloud");
-      Utils.showNotification("Sync already in progress...", "info");
+      if (!quiet) Utils.showNotification("Sync already in progress...", "info");
       return;
     }
     this._isSyncing = true;
 
+    const showLoading = (msg) => { if (!quiet) Utils.showLoading(msg); };
+
     const syncIndicator = document.querySelector(".cloud-sync-indicator");
     if (syncIndicator) syncIndicator.className = "cloud-sync-indicator syncing";
-    Utils.showLoading("Loading from cloud...");
+    showLoading("Loading from cloud...");
 
     try {
       let { token, gistId } = await this.getCloudCredentialsAsync();
@@ -1197,7 +1228,7 @@ class CloudSync {
           // Hide loading while prompting for credentials
           Utils.hideLoading();
           const credentials = await this.promptForCredentials();
-          Utils.showLoading("Loading from cloud...");
+          showLoading("Loading from cloud...");
           token = credentials.token;
           gistId = credentials.gistId;
 
@@ -1276,7 +1307,7 @@ class CloudSync {
           }
 
           // Merge local and remote data
-          Utils.showLoading("Merging changes...");
+          showLoading("Merging changes...");
           const mergedData = this._mergeData(localData, remoteData);
 
           // Only resync if merge actually produced different data than remote
@@ -1316,9 +1347,9 @@ class CloudSync {
 
         // If we merged local changes, save back to cloud
         if (needsResync && this.autoSyncEnabled) {
-          // Schedule a save to push merged data back
+          // Schedule a save to push merged data back (preserve quiet mode)
           setTimeout(() => {
-            this.saveToCloud();
+            this.saveToCloud(quiet);
           }, 500);
         }
 
@@ -1326,11 +1357,17 @@ class CloudSync {
           syncIndicator.className = "cloud-sync-indicator synced";
         // Clear any update-available indicator since we just loaded
         this._clearUpdateAvailable();
-        Utils.showNotification(
-          hasLocalChanges
-            ? "Data merged with cloud successfully!"
-            : "Data loaded from cloud successfully!"
-        );
+        // In quiet mode only surface a toast when a merge actually happened;
+        // a plain pull stays silent.
+        if (!quiet) {
+          Utils.showNotification(
+            hasLocalChanges
+              ? "Data merged with cloud successfully!"
+              : "Data loaded from cloud successfully!"
+          );
+        } else if (hasLocalChanges) {
+          Utils.showNotification("Data merged with cloud successfully!");
+        }
 
         this.onUpdate();
       } catch (parseError) {
