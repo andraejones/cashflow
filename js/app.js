@@ -34,6 +34,12 @@ class CashflowApp {
       this.transactionUI
     );
 
+    this.bankReconcile = new BankReconcileUI(
+      this.store,
+      this.recurringManager,
+      () => this.updateUI()
+    );
+
     this.debtSnowball = new DebtSnowballUI(
       this.store,
       this.recurringManager,

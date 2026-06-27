@@ -467,6 +467,16 @@ class CalendarUI {
       >
         Debt Snowball
       </button>
+      <button
+        type="button"
+        role="menuitem"
+        class="calendar-option"
+        onclick="app.bankReconcile.show(); app.calendarUI.closeAppMenu();"
+        aria-haspopup="dialog"
+        aria-controls="bankReconcileModal"
+      >
+        Reconcile Bank Statement
+      </button>
       <button type="button" role="menuitem" class="calendar-option" onclick="app.exportData(); app.calendarUI.closeAppMenu();">
         Save to Device
       </button>

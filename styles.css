@@ -2407,3 +2407,144 @@ body.app-locked #calendarOptions {
     transition: none;
   }
 }
+
+/* ---- Bank reconciliation ------------------------------------------------ */
+
+.bank-reconcile-content {
+  max-width: 640px;
+}
+
+.bank-reconcile-hint {
+  color: var(--muted-color);
+  font-size: 0.92rem;
+  margin: 0 0 0.75rem;
+}
+
+.bank-reconcile-upload {
+  margin-bottom: 1rem;
+}
+
+.bank-reconcile-upload input[type="file"] {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+}
+
+.bank-reconcile-summary {
+  background: var(--surface-muted);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.75rem;
+  margin-bottom: 1rem;
+  font-size: 0.92rem;
+  color: var(--ink-color);
+}
+
+.bank-reconcile-allclear {
+  background: rgba(15, 122, 108, 0.08);
+  border: 1px solid var(--primary-color);
+  border-radius: var(--radius-sm);
+  padding: 0.75rem;
+  color: var(--primary-strong);
+  text-align: center;
+}
+
+.bank-reconcile-section {
+  margin-bottom: 1.1rem;
+}
+
+.bank-reconcile-section h4 {
+  margin: 0 0 0.15rem;
+  font-size: 1rem;
+}
+
+.bank-reconcile-section-hint {
+  margin: 0 0 0.5rem;
+  font-size: 0.82rem;
+  color: var(--muted-color);
+}
+
+.bank-reconcile-section.br-missing h4 {
+  color: var(--error-color-contrast);
+}
+
+.bank-reconcile-section.br-review h4 {
+  color: var(--accent-strong);
+}
+
+.bank-reconcile-row {
+  display: grid;
+  grid-template-columns: 3rem minmax(6rem, auto) 1fr auto;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 0.9rem;
+}
+
+.bank-reconcile-row.muted {
+  opacity: 0.72;
+}
+
+.bank-reconcile-row.pending {
+  background: rgba(246, 176, 66, 0.06);
+}
+
+.bank-reconcile-row.review {
+  background: rgba(246, 176, 66, 0.05);
+}
+
+.bank-reconcile-row .br-date {
+  color: var(--muted-color);
+  font-variant-numeric: tabular-nums;
+}
+
+.bank-reconcile-row .br-amount {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.bank-reconcile-row .br-amount.expense {
+  color: var(--error-color-contrast);
+}
+
+.bank-reconcile-row .br-amount.income {
+  color: var(--primary-strong);
+}
+
+.bank-reconcile-row .br-amount em {
+  font-weight: 400;
+  font-style: normal;
+  color: var(--muted-color);
+}
+
+.bank-reconcile-row .br-desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bank-reconcile-row .br-action {
+  border: 1px solid var(--primary-color);
+  background: var(--surface-color);
+  color: var(--primary-strong);
+  border-radius: var(--radius-sm);
+  padding: 0.2rem 0.6rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.bank-reconcile-row .br-action:hover,
+.bank-reconcile-row .br-action:focus {
+  background: var(--primary-color);
+  color: #fff;
+}
+
+.bank-reconcile-row .br-note {
+  font-size: 0.78rem;
+  color: var(--muted-color);
+  font-style: italic;
+  white-space: nowrap;
+}
