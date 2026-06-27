@@ -354,13 +354,37 @@ class CalendarUI {
       const isCurrentDay = year === today.getFullYear() && month === today.getMonth() && i === today.getDate();
       const isPastOrToday = dateString <= todayStr;
 
+      // The cell's expense figure. The current day is "live": it shows its own
+      // activity (settled + pending) PLUS every unsettled item carried forward
+      // from earlier days, which sit on today until settled. Every other day
+      // counts settled spend only — settling an item moves it to the day it
+      // settled, so it then counts on that day's cell, never stranded on its
+      // original date. Running balances above/below are intentionally left
+      // counting all expenses.
+      // (runningUnsettledExpense already includes today's own unsettled, so
+      // subtract it to isolate the carried-forward portion; clamp guards the
+      // reconciliation-anchor reset case.)
+      const carriedForwardUnsettled = Math.max(
+        0,
+        this.calculationService.roundToCents(
+          runningUnsettledExpense - dailyTotals.unsettledExpense
+        )
+      );
+      const cellExpense = isCurrentDay
+        ? this.calculationService.roundToCents(
+            dailyTotals.expense + carriedForwardUnsettled
+          )
+        : this.calculationService.roundToCents(
+            dailyTotals.expense - dailyTotals.unsettledExpense
+          );
+
       day.querySelector(".day-content").innerHTML = `
         ${dailyTotals.income > 0
           ? `<div class="income">+${dailyTotals.income.toFixed(2)}</div>`
           : ""
         }
-        ${dailyTotals.expense > 0
-          ? `<div class="expense">-${dailyTotals.expense.toFixed(2)}</div>`
+        ${cellExpense > 0
+          ? `<div class="expense">-${cellExpense.toFixed(2)}</div>`
           : ""
         }
         ${balanceWithoutUnsettled !== null && isPastOrToday
