@@ -2548,3 +2548,9 @@ body.app-locked #calendarOptions {
   font-style: italic;
   white-space: nowrap;
 }
+
+.bank-reconcile-row .br-move {
+  color: var(--accent-strong);
+  font-style: normal;
+  font-size: 0.82rem;
+}
