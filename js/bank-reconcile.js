@@ -25,6 +25,9 @@ class BankReconcileUI {
     // dates are within this many days (Transaction Date vs the day it was
     // logged routinely differ by 1, sometimes 2).
     this.toleranceDays = 2;
+    // Unsettled expenses are explicitly waiting to clear and can sit for days
+    // before posting, so give them a wider match window than settled entries.
+    this.unsettledToleranceDays = 7;
     // A second pass pairs near-but-not-equal amounts (tip/auth drift, e.g. a
     // $41.61 pending hold that settles at $46.61) as "needs review".
     this.amountReviewThreshold = 6; // dollars
@@ -162,6 +165,11 @@ class BankReconcileUI {
       const date = this._toIsoDate(txnRaw);
       if (!date) continue; // skip non-data rows (totals, blanks)
 
+      // Posted Date is when the bank settled the line; used as the settle date
+      // when clearing an unsettled app entry. Fall back to Transaction Date.
+      const postedDate =
+        idx.posted !== -1 ? this._toIsoDate((cells[idx.posted] || "").trim()) : null;
+
       const deposit = this._parseMoney(cells[idx.deposit]);
       const withdrawal = this._parseMoney(cells[idx.withdrawal]);
       const balance = idx.balance !== -1 ? this._parseMoney(cells[idx.balance]) : null;
@@ -180,6 +188,7 @@ class BankReconcileUI {
 
       rows.push({
         date,
+        postedDate: postedDate || date,
         signed: Math.round(signed * 100) / 100,
         description,
         pending,
@@ -332,10 +341,13 @@ class BankReconcileUI {
     const bankStart = dates[0];
     const bankEnd = dates[dates.length - 1];
 
-    // Widen the app window by the tolerance so edge-of-statement lines can
-    // still match an entry logged a day earlier/later.
-    const appStart = this._shiftIso(bankStart, -this.toleranceDays);
-    const appEnd = this._shiftIso(bankEnd, this.toleranceDays);
+    // Widen the candidate window by the largest tolerance (unsettled entries
+    // match up to a week out) so edge-of-statement lines can still match an
+    // entry logged earlier/later. Reporting is still clamped to the statement
+    // window; margin entries are candidates only.
+    const maxTol = Math.max(this.toleranceDays, this.unsettledToleranceDays);
+    const appStart = this._shiftIso(bankStart, -maxTol);
+    const appEnd = this._shiftIso(bankEnd, maxTol);
     const appItems = this._buildAppItems(appStart, appEnd);
 
     // Reset match flags (a re-run after Add/Settle reuses fresh arrays anyway).
@@ -425,7 +437,7 @@ class BankReconcileUI {
     for (const cand of appItems) {
       if (cand.matched) continue;
       const gap = this._dayGap(bankRow.date, cand.date);
-      if (gap > this.toleranceDays) continue;
+      if (gap > this._toleranceFor(cand)) continue;
       if (!predicate(cand)) continue;
       if (gap < bestGap) {
         best = cand;
@@ -433,6 +445,13 @@ class BankReconcileUI {
       }
     }
     return best;
+  }
+
+  // Unsettled expenses get the wider window; everything else the default.
+  _toleranceFor(cand) {
+    return cand.type === "expense" && cand.settled === false
+      ? this.unsettledToleranceDays
+      : this.toleranceDays;
   }
 
   // Conservative near-amount pairing for the review pass. Among unmatched
@@ -567,11 +586,18 @@ class BankReconcileUI {
     if (pairs.length === 0) return "";
     const items = pairs
       .map((p, i) => {
+        const settleDate = p.bank.postedDate || p.bank.date;
+        // Recurring instances settle in place; one-time entries move to the
+        // bank's settle date.
+        const moves = !p.app.recurringId && settleDate !== p.app.date;
+        const moveNote = moves
+          ? ` <em class="br-move">→ settles ${this._shortDate(settleDate)}</em>`
+          : "";
         return `
         <div class="bank-reconcile-row">
           <span class="br-date">${this._shortDate(p.app.date)}</span>
           <span class="br-amount expense">${this._money(p.app.signed)}</span>
-          <span class="br-desc">${this._esc(p.app.description || "(no description)")}</span>
+          <span class="br-desc">${this._esc(p.app.description || "(no description)")}${moveNote}</span>
           <button type="button" class="br-action" data-act="settle" data-i="${i}">Mark settled</button>
         </div>`;
       })
@@ -579,7 +605,7 @@ class BankReconcileUI {
     return this._section(
       "cleared",
       `Cleared at bank — still unsettled (${pairs.length})`,
-      "These matched a posted bank line but are flagged unsettled in the app.",
+      "Matched a posted bank line but flagged unsettled. Settling moves the entry to the bank's settle date.",
       items
     );
   }
@@ -662,7 +688,7 @@ class BankReconcileUI {
         const i = parseInt(btn.getAttribute("data-i"), 10);
         if (act === "add-missing") this._addBankRow(this.result.missingFromApp[i], true);
         else if (act === "add-pending") this._addBankRow(this.result.missingPending[i], false);
-        else if (act === "settle") this._settle(this.result.clearedUnsettled[i].app);
+        else if (act === "settle") this._settle(this.result.clearedUnsettled[i]);
         else if (act === "fix-amount") this._fixAmount(this.result.reviewPairs[i]);
       });
     });
@@ -686,15 +712,46 @@ class BankReconcileUI {
     this._afterMutation();
   }
 
-  _settle(appItem) {
-    if (!appItem) return;
+  // Settle a cleared-but-unsettled entry. One-time entries are moved to the
+  // bank's settle date (Posted Date) and marked settled; recurring instances
+  // are settled in place (moving an expansion is unsafe).
+  _settle(pair) {
+    if (!pair || !pair.app) return;
+    const appItem = pair.app;
     const index = this._currentIndex(appItem);
     if (index === -1) {
       Utils.showNotification("Could not locate that entry to settle.", "error");
       return;
     }
-    this.store.setTransactionSettled(appItem.date, index, true);
-    Utils.showNotification("Marked settled.");
+    const settleDate = (pair.bank && pair.bank.postedDate) || appItem.date;
+
+    if (appItem.recurringId || settleDate === appItem.date) {
+      this.store.setTransactionSettled(appItem.date, index, true);
+      Utils.showNotification("Marked settled.");
+      this._afterMutation();
+      return;
+    }
+
+    // Move the one-time entry to the bank's settle date, marked settled. Mirror
+    // the app's move pattern: delete the old (tombstoned for merge) and add a
+    // fresh object so it gets a new id, preserving allocation fields.
+    const tx = this.store.getTransactions()[appItem.date][index];
+    const moved = {
+      amount: tx.amount,
+      type: tx.type,
+      description: tx.description,
+      settled: true,
+    };
+    if (tx.allocated === true) {
+      moved.allocated = true;
+      if (tx.autoCloseout === true) moved.autoCloseout = true;
+    }
+    if (tx.drawsFromAllocationId) {
+      moved.drawsFromAllocationId = tx.drawsFromAllocationId;
+    }
+    this.store.deleteTransaction(appItem.date, index);
+    this.store.addTransaction(settleDate, moved);
+    Utils.showNotification(`Settled and moved to ${this._shortDate(settleDate)}.`);
     this._afterMutation();
   }
 
