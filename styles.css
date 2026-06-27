@@ -2473,6 +2473,10 @@ body.app-locked #calendarOptions {
   color: var(--accent-strong);
 }
 
+.bank-reconcile-section.br-nobank h4 {
+  color: var(--accent-strong);
+}
+
 .bank-reconcile-row {
   display: grid;
   grid-template-columns: 3rem minmax(6rem, auto) 1fr auto;

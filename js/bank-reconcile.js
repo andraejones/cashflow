@@ -32,6 +32,27 @@ class BankReconcileUI {
     // $41.61 pending hold that settles at $46.61) as "needs review".
     this.amountReviewThreshold = 6; // dollars
 
+    // Pass 3 (name-assisted) lets a shared distinctive word bridge a wider
+    // amount gap than pass 2 allows. Guards keep it reliable:
+    //  - nameMatchMinRatio: the smaller amount must be at least this fraction of
+    //    the larger, so a name hit can't pair $20 with $200.
+    //  - distinctiveMaxDocFreq: a shared word only counts if it appears on at
+    //    most this many descriptions per side — common merchants that recur all
+    //    over the statement (Amazon, Walmart) are excluded; rare names qualify.
+    //  - nameMinTokenLen: shared word must be at least this long (prefix-tolerant
+    //    for bank truncation like YAIMARAS -> "YAIMARAS BEA").
+    this.nameMatchMinRatio = 0.5;
+    this.distinctiveMaxDocFreq = 2;
+    this.nameMinTokenLen = 4;
+    // Dropped from name tokens: transaction-type noise and generic business
+    // words that aren't distinguishing on their own.
+    this._nameStopwords = new Set([
+      "THE", "AND", "FOR", "INC", "LLC", "CORP", "COM", "BILL", "ONLINE",
+      "STORE", "SUPERCENTER", "MKTPL", "RETA", "PURCHASE", "PAYMENT",
+      "WITHDRAWAL", "DEPOSIT", "RECURRING", "DEBIT", "CARD", "POS", "ACH",
+      "ATM", "WWW", "SUB", "USA",
+    ]);
+
     this.result = null;
     this._escHandler = null;
     this._closeBound = false;
@@ -364,6 +385,7 @@ class BankReconcileUI {
         b.matched = true;
         a.matched = true;
         b._match = a;
+        a._matchedBank = b;
       }
     });
 
@@ -383,6 +405,15 @@ class BankReconcileUI {
       }
     });
 
+    // Pass 3: name-assisted review match. Amount passes can't bridge a large but
+    // legitimate gap (a 25% nail-salon tip, a hold that posts far off). This pass
+    // pairs a bank line to an app entry when their descriptions share a
+    // *distinctive* word — one rare across this statement, so "AMAZON"/"WALMART"
+    // (which recur on many lines) can't carry a match, but "YAIMARAS" can. Still
+    // gated by same sign, date tolerance, and a sane amount ratio, and surfaced
+    // as a review pair the user confirms — never auto-applied.
+    this._nameMatchPass(sortedBank, appItems, reviewPairs);
+
     const missingFromApp = [];
     const missingPending = [];
     bankRows.forEach((b) => {
@@ -395,13 +426,27 @@ class BankReconcileUI {
     // the ±tolerance margin were pulled in as match candidates (so an edge bank
     // line can match an entry logged a day earlier/later) but are not
     // discrepancies — they belong to a different statement period.
+    // Unsettled app expenses split by how far the bank has acknowledged them:
+    //   - appPendingAtBank: matched to a pending hold — bank sees it, clearing
+    //     soon (a pending hold isn't a clearance, so it stays here rather than
+    //     in clearedUnsettled, which requires a posted line).
+    //   - appOnlyExpected: no bank line at all — logged here, bank shows nothing
+    //     yet, not even pending. Worth a look.
+    const appPendingAtBank = [];
     const appOnlyExpected = [];
     const appOnlyUnmatched = [];
     appItems.forEach((a) => {
-      if (a.matched) return;
       if (a.date < bankStart || a.date > bankEnd) return;
-      if (a.type === "expense" && a.settled === false) appOnlyExpected.push(a);
-      else appOnlyUnmatched.push(a);
+      const isUnsettledExpense = a.type === "expense" && a.settled === false;
+      const matchedToPending =
+        a.matched && a._matchedBank && a._matchedBank.pending;
+      if (a.matched && !(isUnsettledExpense && matchedToPending)) return;
+      if (isUnsettledExpense) {
+        if (matchedToPending) appPendingAtBank.push(a);
+        else appOnlyExpected.push(a);
+      } else {
+        appOnlyUnmatched.push(a);
+      }
     });
 
     // Matched pairs where the app entry is still unsettled but the bank has
@@ -422,6 +467,7 @@ class BankReconcileUI {
       missingFromApp,
       missingPending,
       reviewPairs,
+      appPendingAtBank,
       appOnlyExpected,
       appOnlyUnmatched,
       clearedUnsettled,
@@ -480,6 +526,106 @@ class BankReconcileUI {
     return best;
   }
 
+  // Name-assisted pass: pair still-unmatched bank lines to app entries that
+  // share a distinctive word. Distinctiveness is measured against this run's
+  // own corpus (statement + app), so the threshold adapts — a word is only a
+  // basis for matching if it's rare here, regardless of any hardcoded list.
+  _nameMatchPass(sortedBank, appItems, reviewPairs) {
+    sortedBank.forEach((b) => (b._tokens = this._nameTokens(b.description)));
+    appItems.forEach((a) => (a._tokens = this._nameTokens(a.description)));
+    const bankFreq = this._docFreq(sortedBank.map((b) => b._tokens));
+    const appFreq = this._docFreq(appItems.map((a) => a._tokens));
+    const rare = (tok) =>
+      (bankFreq.get(tok) || 0) <= this.distinctiveMaxDocFreq &&
+      (appFreq.get(tok) || 0) <= this.distinctiveMaxDocFreq;
+
+    sortedBank.forEach((b) => {
+      if (b.matched) return;
+      const bankAbs = Math.abs(b.signed);
+      if (bankAbs < 0.005) return;
+      let best = null;
+      let bestScore = 0;
+      let bestRatio = 0;
+      for (const a of appItems) {
+        if (a.matched) continue;
+        if ((a.signed < 0) !== (b.signed < 0)) continue;
+        if (this._dayGap(b.date, a.date) > this._toleranceFor(a)) continue;
+        const appAbs = Math.abs(a.signed);
+        if (appAbs < 0.005) continue;
+        if (Math.abs(appAbs - bankAbs) < 0.005) continue; // exact: earlier pass
+        const ratio = Math.min(appAbs, bankAbs) / Math.max(appAbs, bankAbs);
+        if (ratio < this.nameMatchMinRatio) continue;
+        const score = this._distinctiveSharedScore(a._tokens, b._tokens, rare);
+        if (score < this.nameMinTokenLen) continue;
+        // Strongest shared word wins, then the closest amount.
+        if (score > bestScore || (score === bestScore && ratio > bestRatio)) {
+          best = a;
+          bestScore = score;
+          bestRatio = ratio;
+        }
+      }
+      if (best) {
+        b.matched = true;
+        best.matched = true;
+        reviewPairs.push({
+          bank: b,
+          app: best,
+          diff: Math.abs(Math.abs(best.signed) - Math.abs(b.signed)),
+          viaName: true,
+        });
+      }
+    });
+  }
+
+  // Distinctive alphabetic words from a description, for name matching. Strips
+  // processor stars (SQ *, TST*, DD *), ref/card/store numbers, and generic
+  // stopwords; uppercases so comparison is case-insensitive.
+  _nameTokens(desc) {
+    if (!desc) return new Set();
+    let s = String(desc).toUpperCase();
+    s = s.replace(/\b[A-Z]{2,4}\s*\*/g, " "); // SQ *, TST*, DD *
+    s = s.replace(/[*#]/g, " ");
+    s = s.replace(/\b\d[\d.\-]*\b/g, " ");     // amounts, ref/card numbers
+    s = s.replace(/[^A-Z ]+/g, " ");
+    const out = new Set();
+    s.split(/\s+/).forEach((tok) => {
+      if (tok.length < 3) return; // also drops 2-letter state codes
+      if (this._nameStopwords.has(tok)) return;
+      out.add(tok);
+    });
+    return out;
+  }
+
+  // How many descriptions each token appears on (document frequency).
+  _docFreq(tokenSets) {
+    const freq = new Map();
+    tokenSets.forEach((set) => {
+      set.forEach((tok) => freq.set(tok, (freq.get(tok) || 0) + 1));
+    });
+    return freq;
+  }
+
+  // Longest distinctive shared word between two token sets, prefix-tolerant so
+  // a truncated bank token (YAIMARAS -> "YAIMARA") still matches. Only tokens
+  // passing `rare` on both sides count, and only matches of nameMinTokenLen+.
+  // Returns the matched length (0 = no distinctive shared word).
+  _distinctiveSharedScore(aTokens, bTokens, rare) {
+    let best = 0;
+    for (const a of aTokens) {
+      if (!rare(a)) continue;
+      for (const b of bTokens) {
+        if (!rare(b)) continue;
+        const shorter = a.length <= b.length ? a : b;
+        const longer = a.length <= b.length ? b : a;
+        if (!longer.startsWith(shorter)) continue;
+        if (shorter.length >= this.nameMinTokenLen && shorter.length > best) {
+          best = shorter.length;
+        }
+      }
+    }
+    return best;
+  }
+
   _dayGap(isoA, isoB) {
     const a = Utils.parseDateString(isoA);
     const b = Utils.parseDateString(isoB);
@@ -515,7 +661,8 @@ class BankReconcileUI {
     html += this._sectionClearedUnsettled(r.clearedUnsettled);
     html += this._sectionPending(r.missingPending);
     html += this._sectionAppOnlyUnmatched(r.appOnlyUnmatched);
-    html += this._sectionAppOnlyExpected(r.appOnlyExpected);
+    html += this._sectionAppNoBankRecord(r.appOnlyExpected);
+    html += this._sectionAppPendingAtBank(r.appPendingAtBank);
 
     if (needsAttention === 0 && r.missingPending.length === 0) {
       html += `<div class="bank-reconcile-allclear">Everything reconciles for this statement. 🎉</div>`;
@@ -557,11 +704,14 @@ class BankReconcileUI {
     const items = pairs
       .map((p, i) => {
         const name = this._normalizeMerchant(p.bank.description);
+        // Flag pairs the name pass proposed (often a wider gap, e.g. a tip), so
+        // the larger Δ reads as intentional rather than a mismatch.
+        const nameTag = p.viaName ? `<span class="br-note">name match</span> ` : "";
         // A pending hold's amount isn't final (the app entry may be the correct
         // settled figure), so don't offer to overwrite it with the hold amount.
         const action = p.bank.pending
-          ? `<span class="br-note">bank pending</span>`
-          : `<button type="button" class="br-action" data-act="fix-amount" data-i="${i}">Use bank amount</button>`;
+          ? `<span class="br-note">${p.viaName ? "name match · " : ""}bank pending</span>`
+          : `${nameTag}<button type="button" class="br-action" data-act="fix-amount" data-i="${i}">Use bank amount</button>`;
         return `
         <div class="bank-reconcile-row review">
           <span class="br-date">${this._shortDate(p.bank.date)}</span>
@@ -587,9 +737,9 @@ class BankReconcileUI {
     const items = pairs
       .map((p, i) => {
         const settleDate = p.bank.postedDate || p.bank.date;
-        // Recurring instances settle in place; one-time entries move to the
-        // bank's settle date.
-        const moves = !p.app.recurringId && settleDate !== p.app.date;
+        // Entries (one-time and recurring) settle on the bank's posted date.
+        // Only when that already equals the entry's own date is there no move.
+        const moves = settleDate !== p.app.date;
         const moveNote = moves
           ? ` <em class="br-move">→ settles ${this._shortDate(settleDate)}</em>`
           : "";
@@ -652,7 +802,32 @@ class BankReconcileUI {
     );
   }
 
-  _sectionAppOnlyExpected(items) {
+  // Unsettled, with no bank line at all — logged here but the bank shows
+  // nothing yet, not even a pending hold. Usually just timing (an ACH that
+  // hasn't initiated), but worth a glance for a wrong date or duplicate.
+  _sectionAppNoBankRecord(items) {
+    if (items.length === 0) return "";
+    const rows = items
+      .map((a) => {
+        return `
+        <div class="bank-reconcile-row">
+          <span class="br-date">${this._shortDate(a.date)}</span>
+          <span class="br-amount expense">${this._money(a.signed)}</span>
+          <span class="br-desc">${this._esc(a.description || "(no description)")}</span>
+        </div>`;
+      })
+      .join("");
+    return this._section(
+      "nobank",
+      `Unsettled in app, no bank record yet (${items.length})`,
+      "Logged here, but the bank shows nothing — not even pending. Worth a look.",
+      rows
+    );
+  }
+
+  // Unsettled, but the bank has placed a pending hold for it — in-flight and
+  // clearing soon. Reassuring, no action needed.
+  _sectionAppPendingAtBank(items) {
     if (items.length === 0) return "";
     const rows = items
       .map((a) => {
@@ -665,9 +840,9 @@ class BankReconcileUI {
       })
       .join("");
     return this._section(
-      "expected",
-      `In app, not yet cleared (${items.length})`,
-      "Unsettled entries the bank hasn't posted yet — expected, no action needed.",
+      "pendingbank",
+      `In app — pending at bank (${items.length})`,
+      "Bank placed a hold; clearing soon — expected, no action needed.",
       rows
     );
   }
@@ -712,9 +887,13 @@ class BankReconcileUI {
     this._afterMutation();
   }
 
-  // Settle a cleared-but-unsettled entry. One-time entries are moved to the
-  // bank's settle date (Posted Date) and marked settled; recurring instances
-  // are settled in place (moving an expansion is unsafe).
+  // Settle a cleared-but-unsettled entry, dated to the day it actually settled
+  // (the bank's Posted Date) so it counts on that day. When the settle date is
+  // the entry's own date, just mark it settled in place. Otherwise move it:
+  // one-time entries move directly; recurring instances can't be moved as
+  // expansions, so we skip the original occurrence and re-add it as a settled
+  // one-time entry on the settle date (same pattern as the carried-forward
+  // Settle button).
   _settle(pair) {
     if (!pair || !pair.app) return;
     const appItem = pair.app;
@@ -725,16 +904,16 @@ class BankReconcileUI {
     }
     const settleDate = (pair.bank && pair.bank.postedDate) || appItem.date;
 
-    if (appItem.recurringId || settleDate === appItem.date) {
+    if (settleDate === appItem.date) {
       this.store.setTransactionSettled(appItem.date, index, true);
       Utils.showNotification("Marked settled.");
       this._afterMutation();
       return;
     }
 
-    // Move the one-time entry to the bank's settle date, marked settled. Mirror
-    // the app's move pattern: delete the old (tombstoned for merge) and add a
-    // fresh object so it gets a new id, preserving allocation fields.
+    // Snapshot the entry before removing it, preserving allocation fields, and
+    // re-add it on the settle date as a fresh object (new id; the delete is
+    // tombstoned for merge).
     const tx = this.store.getTransactions()[appItem.date][index];
     const moved = {
       amount: tx.amount,
@@ -749,8 +928,24 @@ class BankReconcileUI {
     if (tx.drawsFromAllocationId) {
       moved.drawsFromAllocationId = tx.drawsFromAllocationId;
     }
-    this.store.deleteTransaction(appItem.date, index);
-    this.store.addTransaction(settleDate, moved);
+
+    if (appItem.recurringId) {
+      const recId = appItem.recurringId;
+      this.store.deleteTransaction(appItem.date, index);
+      // Skip the original occurrence so re-expansion won't recreate it, and
+      // record the move so the calendar/recurrence track the relocation.
+      if (!this.recurringManager.isTransactionSkipped(appItem.date, recId)) {
+        this.recurringManager.toggleSkipTransaction(appItem.date, recId);
+      }
+      this.store.moveTransaction(recId, appItem.date, settleDate);
+      moved.movedFrom = appItem.date;
+      moved.originalRecurringId = recId;
+      this.store.addTransaction(settleDate, moved);
+    } else {
+      this.store.deleteTransaction(appItem.date, index);
+      this.store.addTransaction(settleDate, moved);
+    }
+
     Utils.showNotification(`Settled and moved to ${this._shortDate(settleDate)}.`);
     this._afterMutation();
   }
