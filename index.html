@@ -209,6 +209,14 @@
     </div>
   </div>
 
+  <div id="bankReconcileModal" class="modal" role="dialog" aria-labelledby="bankReconcileTitle" aria-hidden="true">
+    <div class="modal-content bank-reconcile-content">
+      <span id="bankReconcileClose" class="close" role="button" tabindex="0" aria-label="Close">&times;</span>
+      <h3 id="bankReconcileTitle">Reconcile Bank Statement</h3>
+      <div id="bankReconcileBody"></div>
+    </div>
+  </div>
+
   <div id="notesModal" class="modal" role="dialog" aria-labelledby="notesModalTitle" aria-hidden="true">
     <div class="modal-content notes-modal-content">
       <span class="close" onclick="app.calendarUI.hideNotesModal()" aria-label="Close">&times;</span>
@@ -409,6 +417,7 @@
   <script src="js/transaction-ui.js"></script>
   <script src="js/calendar-ui.js"></script>
   <script src="js/search-ui.js"></script>
+  <script src="js/bank-reconcile.js"></script>
   <script src="js/debt-snowball.js"></script>
   <script src="js/cloud-sync.js"></script>
 
