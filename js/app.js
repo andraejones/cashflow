@@ -37,7 +37,8 @@ class CashflowApp {
     this.bankReconcile = new BankReconcileUI(
       this.store,
       this.recurringManager,
-      () => this.updateUI()
+      () => this.updateUI(),
+      (date) => this.openDayFromReconcile(date)
     );
 
     this.debtSnowball = new DebtSnowballUI(
@@ -472,6 +473,24 @@ class CashflowApp {
 
   openDayFromRecent(dateString) {
     this.hideRecentTransactions();
+    const [year, month] = dateString.split("-").map(Number);
+    const targetMonth = new Date(year, month - 1, 1);
+    const current = this.calendarUI.currentDate;
+    if (
+      targetMonth.getFullYear() !== current.getFullYear() ||
+      targetMonth.getMonth() !== current.getMonth()
+    ) {
+      this.calendarUI.currentDate = targetMonth;
+      this.calendarUI.generateCalendar();
+    }
+    this.transactionUI.showTransactionDetails(dateString);
+  }
+
+  // Open a day's transaction modal from the Bank Reconcile report. Unlike
+  // openDayFromRecent, the reconcile modal stays open underneath (the day modal
+  // stacks on top) so the user can edit a day and return to the report.
+  openDayFromReconcile(dateString) {
+    if (!dateString) return;
     const [year, month] = dateString.split("-").map(Number);
     const targetMonth = new Date(year, month - 1, 1);
     const current = this.calendarUI.currentDate;
