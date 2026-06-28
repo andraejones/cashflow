@@ -2493,6 +2493,14 @@ body.app-locked #calendarOptions {
   font-size: 0.9rem;
 }
 
+.bank-reconcile-row[data-open-date] {
+  cursor: pointer;
+}
+
+.bank-reconcile-row[data-open-date]:hover {
+  background: var(--hover-color, rgba(127, 127, 127, 0.08));
+}
+
 .bank-reconcile-row.muted {
   opacity: 0.72;
 }

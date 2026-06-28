@@ -32,6 +32,12 @@ const ModalManager = {
     // Reset z-index to default
     modalElement.style.zIndex = '';
   },
+
+  // The currently topmost (most recently opened) modal, or null. Lets a modal's
+  // own Escape handler defer to whatever is stacked above it.
+  topModal: function () {
+    return this._openModals[this._openModals.length - 1] || null;
+  },
 };
 
 // Expose ModalManager globally for tests

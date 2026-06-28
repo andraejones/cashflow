@@ -16,10 +16,14 @@
 
 class BankReconcileUI {
 
-  constructor(store, recurringManager, onChange) {
+  constructor(store, recurringManager, onChange, onOpenDay) {
     this.store = store;
     this.recurringManager = recurringManager;
     this.onChange = typeof onChange === "function" ? onChange : () => {};
+    // Opens the calendar's day modal for a given ISO date. Lets the user click a
+    // reconcile row to jump straight to that day's transactions for context or
+    // a manual edit; the reconcile modal stays open underneath (stacked).
+    this.onOpenDay = typeof onOpenDay === "function" ? onOpenDay : () => {};
 
     // Match a bank line to an app entry when the signed amount is equal and the
     // dates are within this many days (Transaction Date vs the day it was
@@ -86,9 +90,16 @@ class BankReconcileUI {
 
     if (!this._escHandler) {
       this._escHandler = (e) => {
-        if (e.key === "Escape") this.hide();
+        if (e.key !== "Escape") return;
+        // A day modal opened from a reconcile row stacks on top of this one.
+        // Run in the capture phase (before TransactionUI's bubble-phase Escape
+        // handler closes that day modal) and only act when we're actually the
+        // topmost modal, so Escape dismisses the stacked day modal first and
+        // leaves the reconcile report in place.
+        if (ModalManager.topModal() !== modal) return;
+        this.hide();
       };
-      document.addEventListener("keydown", this._escHandler);
+      document.addEventListener("keydown", this._escHandler, true);
     }
   }
 
@@ -99,7 +110,7 @@ class BankReconcileUI {
     modal.setAttribute("aria-hidden", "true");
     ModalManager.closeModal(modal);
     if (this._escHandler) {
-      document.removeEventListener("keydown", this._escHandler);
+      document.removeEventListener("keydown", this._escHandler, true);
       this._escHandler = null;
     }
   }
@@ -376,6 +387,17 @@ class BankReconcileUI {
 
     const sortedBank = [...bankRows].sort((a, b) => a.date.localeCompare(b.date));
 
+    // Normalized-merchant name tokens for Pass 2's overlap guard (below). Built
+    // from the normalized merchant so a split bank token ("WAL-MART" -> WAL +
+    // MART) still lines up with the app's clean name ("Walmart"); raw tokens
+    // wouldn't. Pass 3 keeps its own raw-description tokens.
+    sortedBank.forEach(
+      (b) => (b._normTokens = this._nameTokens(this._normalizeMerchant(b.description)))
+    );
+    appItems.forEach(
+      (a) => (a._normTokens = this._nameTokens(this._normalizeMerchant(a.description)))
+    );
+
     // Pass 1: exact amount, same sign, nearest date within tolerance.
     sortedBank.forEach((b) => {
       const a = this._bestMatch(b, appItems, (cand) =>
@@ -391,9 +413,11 @@ class BankReconcileUI {
 
     // Pass 2: near amount (same sign) — "probably the same purchase with a tip
     // or auth-hold difference." Kept deliberately conservative to avoid pairing
-    // unrelated lines: same sign, within 1 day, and the gap must be both a small
+    // unrelated lines: same sign, within 1 day, the gap must be both a small
     // absolute amount AND a small fraction of the total (a tip is a few percent;
-    // a $5.72 gap on a $9.44 item is a different purchase).
+    // a $5.72 gap on a $9.44 item is a different purchase), AND the two must
+    // share a name token — a coincidental near amount alone shouldn't pair
+    // unrelated merchants (a $21.42 Walmart debit vs a $25 Mastercard payment).
     const reviewPairs = [];
     sortedBank.forEach((b) => {
       if (b.matched) return;
@@ -502,7 +526,9 @@ class BankReconcileUI {
 
   // Conservative near-amount pairing for the review pass. Among unmatched
   // candidates within 1 day and the same sign, accept only those whose amount
-  // gap is both small in dollars and a small fraction of the total, and return
+  // gap is both small in dollars and a small fraction of the total AND that
+  // share a name token (prefix-tolerant, on the normalized merchant; no rarity
+  // guard since the tight amount gap already constrains the pairing), and return
   // the closest-amount one.
   _bestNearMatch(bankRow, appItems) {
     const bankAbs = Math.abs(bankRow.signed);
@@ -518,6 +544,11 @@ class BankReconcileUI {
       const bigger = Math.max(candAbs, bankAbs);
       if (diff > this.amountReviewThreshold) continue;
       if (diff > 0.25 * bigger) continue;
+      if (
+        this._distinctiveSharedScore(cand._normTokens, bankRow._normTokens, () => true) <
+        this.nameMinTokenLen
+      )
+        continue;
       if (diff < bestDiff) {
         best = cand;
         bestDiff = diff;
@@ -683,7 +714,7 @@ class BankReconcileUI {
       .map((b, i) => {
         const name = this._normalizeMerchant(b.description);
         return `
-        <div class="bank-reconcile-row">
+        <div class="bank-reconcile-row" data-open-date="${b.date}">
           <span class="br-date">${this._shortDate(b.date)}</span>
           <span class="br-amount ${b.signed < 0 ? "expense" : "income"}">${this._money(b.signed)}</span>
           <span class="br-desc" title="${this._attr(b.description)}">${this._esc(name)}</span>
@@ -713,7 +744,7 @@ class BankReconcileUI {
           ? `<span class="br-note">${p.viaName ? "name match · " : ""}bank pending</span>`
           : `${nameTag}<button type="button" class="br-action" data-act="fix-amount" data-i="${i}">Use bank amount</button>`;
         return `
-        <div class="bank-reconcile-row review">
+        <div class="bank-reconcile-row review" data-open-date="${p.app.date}">
           <span class="br-date">${this._shortDate(p.bank.date)}</span>
           <span class="br-amount">
             bank ${this._money(p.bank.signed)} · app ${this._money(p.app.signed)}
@@ -744,7 +775,7 @@ class BankReconcileUI {
           ? ` <em class="br-move">→ settles ${this._shortDate(settleDate)}</em>`
           : "";
         return `
-        <div class="bank-reconcile-row">
+        <div class="bank-reconcile-row" data-open-date="${p.app.date}">
           <span class="br-date">${this._shortDate(p.app.date)}</span>
           <span class="br-amount expense">${this._money(p.app.signed)}</span>
           <span class="br-desc">${this._esc(p.app.description || "(no description)")}${moveNote}</span>
@@ -766,7 +797,7 @@ class BankReconcileUI {
       .map((b, i) => {
         const name = this._normalizeMerchant(b.description);
         return `
-        <div class="bank-reconcile-row pending">
+        <div class="bank-reconcile-row pending" data-open-date="${b.date}">
           <span class="br-date">${this._shortDate(b.date)}</span>
           <span class="br-amount ${b.signed < 0 ? "expense" : "income"}">${this._money(b.signed)}</span>
           <span class="br-desc" title="${this._attr(b.description)}">${this._esc(name)}</span>
@@ -787,7 +818,7 @@ class BankReconcileUI {
     const rows = items
       .map((a) => {
         return `
-        <div class="bank-reconcile-row">
+        <div class="bank-reconcile-row" data-open-date="${a.date}">
           <span class="br-date">${this._shortDate(a.date)}</span>
           <span class="br-amount ${a.signed < 0 ? "expense" : "income"}">${this._money(a.signed)}</span>
           <span class="br-desc">${this._esc(a.description || "(no description)")}${a.recurringId ? " (Recurring)" : ""}</span>
@@ -810,7 +841,7 @@ class BankReconcileUI {
     const rows = items
       .map((a) => {
         return `
-        <div class="bank-reconcile-row">
+        <div class="bank-reconcile-row" data-open-date="${a.date}">
           <span class="br-date">${this._shortDate(a.date)}</span>
           <span class="br-amount expense">${this._money(a.signed)}</span>
           <span class="br-desc">${this._esc(a.description || "(no description)")}</span>
@@ -832,7 +863,7 @@ class BankReconcileUI {
     const rows = items
       .map((a) => {
         return `
-        <div class="bank-reconcile-row muted">
+        <div class="bank-reconcile-row muted" data-open-date="${a.date}">
           <span class="br-date">${this._shortDate(a.date)}</span>
           <span class="br-amount expense">${this._money(a.signed)}</span>
           <span class="br-desc">${this._esc(a.description || "(no description)")}</span>
@@ -865,6 +896,16 @@ class BankReconcileUI {
         else if (act === "add-pending") this._addBankRow(this.result.missingPending[i], false);
         else if (act === "settle") this._settle(this.result.clearedUnsettled[i]);
         else if (act === "fix-amount") this._fixAmount(this.result.reviewPairs[i]);
+      });
+    });
+
+    // Clicking a row (anywhere but its action button) opens that day's modal —
+    // the bank line's date for bank-only rows, the app entry's date otherwise.
+    container.querySelectorAll(".bank-reconcile-row[data-open-date]").forEach((row) => {
+      row.addEventListener("click", (e) => {
+        if (e.target.closest("button")) return; // let action buttons do their thing
+        const date = row.getAttribute("data-open-date");
+        if (date) this.onOpenDay(date);
       });
     });
   }
@@ -960,9 +1001,26 @@ class BankReconcileUI {
     }
     const list = this.store.getTransactions()[appItem.date];
     const target = list[index];
-    const updated = { ...target, amount: Math.abs(pair.bank.signed) };
-    this.store.updateTransaction(appItem.date, index, updated);
-    Utils.showNotification(`Updated amount to $${Math.abs(pair.bank.signed).toFixed(2)}.`);
+    const newAmount = Math.abs(pair.bank.signed);
+    if (target.recurringId) {
+      // A recurring expansion must be edited through editTransaction so it's
+      // flagged a modifiedInstance (and given a stable id). A bare
+      // store.updateTransaction leaves it recurringId-only, which
+      // _filterPersistedTransactions drops on save — the amount fix would
+      // silently revert on the next reload/sync.
+      this.recurringManager.editTransaction(
+        appItem.date,
+        index,
+        { amount: newAmount },
+        "this"
+      );
+    } else {
+      this.store.updateTransaction(appItem.date, index, {
+        ...target,
+        amount: newAmount,
+      });
+    }
+    Utils.showNotification(`Updated amount to $${newAmount.toFixed(2)}.`);
     this._afterMutation();
   }
 
