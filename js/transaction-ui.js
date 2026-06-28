@@ -371,10 +371,12 @@ class TransactionUI {
   // "Auto close-out" toggle is revealed, and the description autocomplete is
   // suppressed.
   //
-  // Recurrence is only meaningful for an allocation when it auto-closes:
-  //   - Allocate only            → forced one-time, recurrence hidden.
-  //   - Allocate + auto close-out → recurrence available (a fresh pinned,
-  //                                 use-it-or-lose-it bucket each period).
+  // Recurrence is available for any allocation, with two distinct flavors:
+  //   - Allocate + auto close-out → a fresh pinned, use-it-or-lose-it bucket
+  //     each period that closes once its own date passes.
+  //   - Allocate only (no auto close-out) → a rolling bucket that stays live
+  //     across its period; each new instance closes the prior one (forfeiting
+  //     any unspent remainder back to the balance).
   syncAllocateState() {
     const allocateCb = document.getElementById("transactionAllocate");
     const settledCb = document.getElementById("transactionSettled");
@@ -393,22 +395,14 @@ class TransactionUI {
     if (autoCloseoutCb && !allocated) {
       autoCloseoutCb.checked = false;
     }
-    const autoCloseout = allocated && autoCloseoutCb && autoCloseoutCb.checked;
 
     const recurrenceSelect = document.getElementById("transactionRecurrence");
     if (recurrenceSelect) {
-      if (allocated && !autoCloseout) {
-        if (recurrenceSelect.value !== "once") {
-          recurrenceSelect.value = "once";
-          this.updateRecurrenceOptions();
-        }
-        recurrenceSelect.style.display = "none";
-      } else {
-        // Restore the recurrence select unless the type still hides it (balance).
-        const type = document.getElementById("transactionType");
-        if (!type || type.value !== "balance") {
-          recurrenceSelect.style.display = "";
-        }
+      // Recurrence is allowed for any allocation flavor; only the balance type
+      // hides it. (autoCloseout no longer gates recurrence visibility.)
+      const type = document.getElementById("transactionType");
+      if (!type || type.value !== "balance") {
+        recurrenceSelect.style.display = "";
       }
     }
 
@@ -1708,8 +1702,10 @@ class TransactionUI {
           newRecurringTransaction.settled = allocated
             ? true
             : document.getElementById("transactionSettled").checked;
-          // A recurring allocation is only allowed when auto close-out is on;
-          // each period drops a fresh pinned bucket that closes after its date.
+          // Two recurring-allocation flavors: with auto close-out, each period
+          // drops a fresh pinned bucket that closes after its own date; without
+          // it, each period's bucket rolls across its period and is forfeited
+          // when the next instance arrives (see closeOutExpiredAllocations).
           if (allocated && document.getElementById("transactionAutoCloseout").checked) {
             newRecurringTransaction.autoCloseout = true;
           }

@@ -1300,13 +1300,32 @@ class RecurringTransactionManager {
       return existingKey === occurrenceKey;
     });
     if (!existingInstance) {
-      // Auto-close-out allocations close out once their date passes, so never
-      // materialize an instance for a date that is already in the past.
-      if (rt.allocated === true && rt.autoCloseout === true) {
+      if (rt.allocated === true) {
         const now = new Date();
         const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
         if (dateString < todayStr) {
-          return;
+          if (rt.autoCloseout === true) {
+            // Auto-close-out allocations close out once their own date passes,
+            // so never materialize an instance for a date already in the past.
+            return;
+          }
+          // Rolling allocation (no auto close-out): the live bucket is the
+          // latest occurrence on/before today and must persist even though its
+          // date is in the past. Earlier, superseded periods are forfeited by
+          // closeOutExpiredAllocations and must not be re-materialized (else
+          // re-expansion would resurrect them). A period is superseded when a
+          // sibling instance already exists in (dateString, today].
+          const superseded = Object.keys(transactions).some(
+            (d) =>
+              d > dateString &&
+              d <= todayStr &&
+              transactions[d].some(
+                (t) => t.recurringId === rt.id && t.allocated === true
+              )
+          );
+          if (superseded) {
+            return;
+          }
         }
       }
       const scheduledDate = originalDateString
