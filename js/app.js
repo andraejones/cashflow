@@ -327,6 +327,10 @@ class CashflowApp {
       this.recurringManager.applyRecurringTransactions(d.getFullYear(), d.getMonth());
     }
     const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    // Last day of the 30-day window that drives the calendar's "Minimum" figure
+    // (today + 30 days, matching CalculationService.calculateMinimum).
+    const cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 30);
+    const cutoffStr = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, "0")}-${String(cutoff.getDate()).padStart(2, "0")}`;
 
     const transactions = this.store.getTransactions();
     const items = [];
@@ -374,7 +378,20 @@ class CashflowApp {
       empty.textContent = "No allocated transactions.";
       list.appendChild(empty);
     } else {
+      let dividerPlaced = false;
+      let inWindowCount = 0;
       items.forEach(({ date, transaction }) => {
+        // Drop a separator between items inside the 30-day window and those
+        // beyond it. Only once, and only when both sides are non-empty.
+        if (!dividerPlaced && date > cutoffStr && inWindowCount > 0) {
+          const divider = document.createElement("div");
+          divider.className = "allocated-window-divider";
+          divider.setAttribute("role", "separator");
+          list.appendChild(divider);
+          dividerPlaced = true;
+        }
+        if (date <= cutoffStr) inWindowCount++;
+
         const row = document.createElement("button");
         row.type = "button";
         row.className = "recent-transaction-row";

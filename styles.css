@@ -545,6 +545,12 @@ h4 {
   font-style: italic;
 }
 
+.allocated-window-divider {
+  height: 0;
+  border-top: 2px solid var(--muted-color);
+  margin: 6px 0;
+}
+
 .recent-transaction-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
