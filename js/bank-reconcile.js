@@ -482,6 +482,25 @@ class BankReconcileUI {
       }
     });
 
+    // Pending holds that exact-matched an entry already in the calendar. These
+    // reconcile, so they'd otherwise vanish from the report — but surfacing them
+    // (with the matched entry and its date) lets the user spot a scheduled item
+    // whose date drifted from the bank's (e.g. a recurring bill due on a day the
+    // hold lands earlier), so they can adjust the schedule. Only Pass 1 sets
+    // `_match`; review-pair pending lines are already shown in their own section.
+    // Skip matches whose entry is an in-window unsettled expense: those already
+    // appear under "In app — pending at bank" (appPendingAtBank), so listing them
+    // here too would just double up.
+    const pendingMatched = [];
+    bankRows.forEach((b) => {
+      if (!(b.matched && b.pending && b._match)) return;
+      const a = b._match;
+      const inWindow = a.date >= bankStart && a.date <= bankEnd;
+      const isUnsettledExpense = a.type === "expense" && a.settled === false;
+      if (inWindow && isUnsettledExpense) return; // shown in appPendingAtBank
+      pendingMatched.push({ bank: b, app: a });
+    });
+
     const matchedCount = bankRows.filter((b) => b.matched).length;
 
     this.result = {
@@ -495,6 +514,7 @@ class BankReconcileUI {
       appOnlyExpected,
       appOnlyUnmatched,
       clearedUnsettled,
+      pendingMatched,
     };
     this._renderReport();
   }
@@ -687,17 +707,18 @@ class BankReconcileUI {
       </div>
     `;
 
+    if (needsAttention === 0 && r.missingPending.length === 0) {
+      html += `<div class="bank-reconcile-allclear">Everything reconciles for this statement. 🎉</div>`;
+    }
+
     html += this._sectionMissing(r.missingFromApp);
     html += this._sectionReview(r.reviewPairs);
     html += this._sectionClearedUnsettled(r.clearedUnsettled);
     html += this._sectionPending(r.missingPending);
+    html += this._sectionPendingMatched(r.pendingMatched);
     html += this._sectionAppOnlyUnmatched(r.appOnlyUnmatched);
     html += this._sectionAppNoBankRecord(r.appOnlyExpected);
     html += this._sectionAppPendingAtBank(r.appPendingAtBank);
-
-    if (needsAttention === 0 && r.missingPending.length === 0) {
-      html += `<div class="bank-reconcile-allclear">Everything reconciles for this statement. 🎉</div>`;
-    }
 
     container.innerHTML = html;
     this._bindReportActions(container);
@@ -809,6 +830,35 @@ class BankReconcileUI {
       "pending",
       `Pending at bank (${rows.length})`,
       "Holds that haven't fully posted. They may still change — adding is optional.",
+      items
+    );
+  }
+
+  // Pending holds that already line up with a logged entry. They reconcile, but
+  // we keep them visible alongside the matched entry and its date so a drifted
+  // schedule (a recurring bill dated apart from the hold) is easy to spot.
+  _sectionPendingMatched(pairs) {
+    if (pairs.length === 0) return "";
+    const items = pairs
+      .map((p) => {
+        const name = this._normalizeMerchant(p.bank.description);
+        const moves = p.app.date !== p.bank.date;
+        const dateNote = moves
+          ? ` <em class="br-move">→ scheduled ${this._shortDate(p.app.date)}</em>`
+          : "";
+        const recurTag = p.app.recurringId ? " (Recurring)" : "";
+        return `
+        <div class="bank-reconcile-row pending muted" data-open-date="${p.app.date}">
+          <span class="br-date">${this._shortDate(p.bank.date)}</span>
+          <span class="br-amount ${p.bank.signed < 0 ? "expense" : "income"}">${this._money(p.bank.signed)}</span>
+          <span class="br-desc" title="${this._attr(p.bank.description)}">${this._esc(name)} ↔ ${this._esc(p.app.description || "(no description)")}${recurTag}${dateNote}</span>
+        </div>`;
+      })
+      .join("");
+    return this._section(
+      "pendingmatched",
+      `Pending — already in your calendar (${pairs.length})`,
+      "A hold that matches an entry you've already logged. If the dates differ, the schedule may need adjusting.",
       items
     );
   }
