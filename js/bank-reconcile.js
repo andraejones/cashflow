@@ -228,7 +228,9 @@ class BankReconcileUI {
       });
     }
 
-    const dates = rows.map((r) => r.date).sort();
+    // Statement period is the posted-date range (what the bank export filters
+    // on); see _statementWindow for why transaction date isn't used here.
+    const dates = rows.map((r) => r.postedDate || r.date).sort();
     return {
       rows,
       window: dates.length ? { start: dates[0], end: dates[dates.length - 1] } : null,
@@ -369,17 +371,19 @@ class BankReconcileUI {
     // Stash the full statement so a re-run after Add/Settle/Fix compares
     // against the same set of bank lines.
     this._allBankRows = bankRows;
-    const dates = bankRows.map((r) => r.date).sort();
-    const bankStart = dates[0];
-    const bankEnd = dates[dates.length - 1];
+    // The reporting window is the posted-date range; the candidate (matching)
+    // window also spans the transaction-date range. See _statementWindow.
+    const { reportStart, reportEnd, candLo, candHi } = this._statementWindow(bankRows);
+    const bankStart = reportStart;
+    const bankEnd = reportEnd;
 
     // Widen the candidate window by the largest tolerance (unsettled entries
     // match up to a week out) so edge-of-statement lines can still match an
     // entry logged earlier/later. Reporting is still clamped to the statement
     // window; margin entries are candidates only.
     const maxTol = Math.max(this.toleranceDays, this.unsettledToleranceDays);
-    const appStart = this._shiftIso(bankStart, -maxTol);
-    const appEnd = this._shiftIso(bankEnd, maxTol);
+    const appStart = this._shiftIso(candLo, -maxTol);
+    const appEnd = this._shiftIso(candHi, maxTol);
     const appItems = this._buildAppItems(appStart, appEnd);
 
     // Reset match flags (a re-run after Add/Settle reuses fresh arrays anyway).
@@ -397,6 +401,14 @@ class BankReconcileUI {
     appItems.forEach(
       (a) => (a._normTokens = this._nameTokens(this._normalizeMerchant(a.description)))
     );
+
+    // Hard rule (see _blockMatch): a bank "Transfer To ... Share" line is a
+    // person-to-person share transfer with no merchant. Its round amount
+    // collides with unrelated bills (a $40 transfer silently matched a $40
+    // recurring bill a day away), so it may pair ONLY with an app entry the user
+    // explicitly labeled a transfer.
+    sortedBank.forEach((b) => (b._shareTransfer = this._isShareTransfer(b.description)));
+    appItems.forEach((a) => (a._isTransferEntry = /transfer/i.test(a.description || "")));
 
     // Pass 1: exact amount, same sign, nearest date within tolerance.
     sortedBank.forEach((b) => {
@@ -519,6 +531,54 @@ class BankReconcileUI {
     this._renderReport();
   }
 
+  // The statement's date window, computed from two different date columns:
+  //
+  //  - reportStart/reportEnd come from POSTED Date. A bank export is filtered by
+  //    posted date, so the posted-date range is the true statement period. This
+  //    is what we display and what clamps the "in app, not on statement" report.
+  //  - candLo/candHi span the TRANSACTION-date range as well, because each line
+  //    is matched by its transaction date (when the purchase happened — which is
+  //    how app entries are dated). The candidate window must cover that so an
+  //    edge line still finds its app entry.
+  //
+  // The split matters at the boundary: a line transacted on day N but posted on
+  // N+1 lands in an "N+1 to present" download even though most of day N posted
+  // earlier and was excluded. Keying the report off transaction date would
+  // stretch the window back onto day N and flag that day's (legitimately logged)
+  // entries as missing. Posted date keeps the window where the download drew it.
+  _statementWindow(bankRows) {
+    const posted = bankRows.map((r) => r.postedDate || r.date).sort();
+    const txn = bankRows.map((r) => r.date).sort();
+    const reportStart = posted[0];
+    const reportEnd = posted[posted.length - 1];
+    const txnLo = txn[0];
+    const txnHi = txn[txn.length - 1];
+    return {
+      reportStart,
+      reportEnd,
+      candLo: txnLo < reportStart ? txnLo : reportStart,
+      candHi: txnHi > reportEnd ? txnHi : reportEnd,
+    };
+  }
+
+  // A bank "Transfer To ... Share" line: a person-to-person credit-union share
+  // transfer. Both tokens must be present so a regular merchant line that merely
+  // contains the word "transfer" isn't swept in.
+  _isShareTransfer(desc) {
+    if (!desc) return false;
+    const s = String(desc).toLowerCase();
+    return s.includes("transfer to") && s.includes("share");
+  }
+
+  // Hard match guard, applied in every pass. A share transfer (flagged on the
+  // bank row) may match ONLY an app entry whose description contains "transfer";
+  // its round amount must never absorb into an unrelated bill. Returns true to
+  // block the pairing.
+  _blockMatch(bankRow, appItem) {
+    if (bankRow._shareTransfer && !appItem._isTransferEntry) return true;
+    return false;
+  }
+
   // Among unmatched candidates passing `predicate`, pick the one closest in date
   // (within tolerance), tie-broken by smallest date gap then earliest.
   _bestMatch(bankRow, appItems, predicate) {
@@ -526,6 +586,7 @@ class BankReconcileUI {
     let bestGap = Infinity;
     for (const cand of appItems) {
       if (cand.matched) continue;
+      if (this._blockMatch(bankRow, cand)) continue;
       const gap = this._dayGap(bankRow.date, cand.date);
       if (gap > this._toleranceFor(cand)) continue;
       if (!predicate(cand)) continue;
@@ -556,6 +617,7 @@ class BankReconcileUI {
     let bestDiff = Infinity;
     for (const cand of appItems) {
       if (cand.matched) continue;
+      if (this._blockMatch(bankRow, cand)) continue;
       if ((cand.signed < 0) !== (bankRow.signed < 0)) continue;
       if (this._dayGap(bankRow.date, cand.date) > 1) continue;
       const candAbs = Math.abs(cand.signed);
@@ -599,6 +661,7 @@ class BankReconcileUI {
       let bestRatio = 0;
       for (const a of appItems) {
         if (a.matched) continue;
+        if (this._blockMatch(b, a)) continue;
         if ((a.signed < 0) !== (b.signed < 0)) continue;
         if (this._dayGap(b.date, a.date) > this._toleranceFor(a)) continue;
         const appAbs = Math.abs(a.signed);
