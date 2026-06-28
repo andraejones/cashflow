@@ -274,7 +274,10 @@ class CalculationService {
             if (t.settled === false) {
               unsettledExpense = this.roundToCents(unsettledExpense + t.amount);
             }
-            if (t.allocated === true) {
+            // Only one-time allocated expenses tint the day purple. Recurring
+            // allocated instances (carry a recurringId) repeat often enough that
+            // shading every occurrence is noise, not signal.
+            if (t.allocated === true && !t.recurringId) {
               hasAllocated = true;
             }
           }

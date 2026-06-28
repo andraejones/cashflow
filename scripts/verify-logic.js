@@ -788,4 +788,83 @@ try {
   global.Date = A_RealDate;
 }
 
+// TEST 14: Rolling (non-auto-close) recurring allocations. Each period's bucket
+// stays live across its period and is forfeited when the next instance lands;
+// the unspent remainder releases back to the balance, draws stay as expenses.
+console.log("TEST 14: Rolling recurring allocations");
+const B_RealDate = Date;
+let B_FIXED = new B_RealDate(2026, 5, 15, 12, 0, 0); // 2026-06-15
+class B_FrozenDate extends B_RealDate {
+  constructor(...args) {
+    if (args.length === 0) { super(B_FIXED.getTime()); } else { super(...args); }
+  }
+  static now() { return B_FIXED.getTime(); }
+}
+global.Date = B_FrozenDate;
+try {
+  const s = new TransactionStore();
+  s.resetData();
+  const rm = new RecurringTransactionManager(s);
+
+  // Monthly rolling allocation ($200) starting 2026-06-01, NO auto close-out.
+  const rid = s.addRecurringTransaction({
+    startDate: "2026-06-01", amount: 200, type: "expense", description: "Spending",
+    recurrence: "monthly", allocated: true, settled: true,
+  });
+  rm.applyRecurringTransactions(2026, 5); // June
+
+  const junInst0 = (s.getTransactions()["2026-06-01"] || []).find((t) => t.recurringId === rid);
+  if (!junInst0 || junInst0.allocated !== true || junInst0.autoCloseout !== undefined) {
+    throw new Error("Live June bucket must materialize at its past period date without autoCloseout");
+  }
+  const active = s.getAllocations("2026-06-15").find((b) => b.description === "Spending");
+  if (!active || active.date !== "2026-06-01") {
+    throw new Error("Active bucket for 06-15 should be the June 1 period (latest <= ref)");
+  }
+  console.log("✅ Rolling bucket stays live across its period and is the active draw target");
+
+  // Draw $150 -> bucket shrinks to $50; draw is its own expense.
+  s.addTransaction("2026-06-15", {
+    amount: 150, type: "expense", description: "Shopping",
+    drawsFromAllocationId: active.id, settled: true,
+  });
+  const junDrawn = (s.getTransactions()["2026-06-01"] || []).find((t) => t.recurringId === rid);
+  if (s._roundCents(junDrawn.amount) !== 50) {
+    throw new Error(`June bucket should debit to 50, got ${junDrawn.amount}`);
+  }
+  console.log("✅ Drawing against a rolling bucket shrinks it like any allocation");
+
+  // July still in the future on 06-15: June stays live, not yet superseded.
+  rm.applyRecurringTransactions(2026, 6); // July
+  if (s.closeOutExpiredAllocations()) rm.invalidateCache();
+  if (!(s.getTransactions()["2026-06-01"] || []).some((t) => t.recurringId === rid)) {
+    throw new Error("June bucket must stay live while July is still in the future");
+  }
+
+  // Advance to 2026-07-10: July 1 becomes live and forfeits June 1.
+  B_FIXED = new B_RealDate(2026, 6, 10, 12, 0, 0);
+  if (s.closeOutExpiredAllocations()) rm.invalidateCache();
+  if ((s.getTransactions()["2026-06-01"] || []).some((t) => t.recurringId === rid)) {
+    throw new Error("June bucket should be forfeited once July 1 is live");
+  }
+  const julInst = (s.getTransactions()["2026-07-01"] || []).find((t) => t.recurringId === rid);
+  if (!julInst || s._roundCents(julInst.amount) !== 200) {
+    throw new Error("July bucket should be the fresh $200 live envelope");
+  }
+  const drawKept = (s.getTransactions()["2026-06-15"] || []).find((t) => t.description === "Shopping");
+  if (!drawKept || drawKept.amount !== 150) {
+    throw new Error("The $150 draw must remain as a real expense after forfeit");
+  }
+  console.log("✅ Next instance forfeits the prior bucket (remainder released, draw kept)");
+
+  // Re-expanding the old month must NOT resurrect the forfeited bucket.
+  rm.applyRecurringTransactions(2026, 5);
+  if ((s.getTransactions()["2026-06-01"] || []).some((t) => t.recurringId === rid)) {
+    throw new Error("Forfeited June bucket must not reappear on re-expansion");
+  }
+  console.log("✅ Superseded period is not re-materialized on re-expansion");
+} finally {
+  global.Date = B_RealDate;
+}
+
 console.log("ALL TESTS PASSED");

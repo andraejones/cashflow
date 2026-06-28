@@ -781,20 +781,32 @@ class TransactionStore {
           return;
         }
         // Recurring allocation instance — only the bucket active for the
-        // reference date is drawable; earlier instances aren't the active
-        // period for a transaction dated on/after `refStr`.
-        if (date < refStr) return;
+        // reference date is drawable. The "active" instance depends on flavor:
+        //   - Auto close-out (pinned): the soonest instance on/after refStr;
+        //     earlier instances have already closed by their own date.
+        //   - Rolling (no auto close-out): the latest instance on/before refStr
+        //     (the period containing the reference date); it stays live until
+        //     the next instance supersedes it.
         const existing = recurringBySeries.get(t.recurringId);
-        if (!existing || date < existing.date) {
-          recurringBySeries.set(t.recurringId, {
-            // Un-materialized instances have no id yet — use a synthetic key the
-            // draw resolver can locate; the first draw assigns it a real id.
-            id: t.id || `ralloc:${t.recurringId}:${date}`,
-            date,
-            description,
-            remaining: this._roundCents(t.amount),
-            recurring: true,
-          });
+        const candidate = {
+          // Un-materialized instances have no id yet — use a synthetic key the
+          // draw resolver can locate; the first draw assigns it a real id.
+          id: t.id || `ralloc:${t.recurringId}:${date}`,
+          date,
+          description,
+          remaining: this._roundCents(t.amount),
+          recurring: true,
+        };
+        if (t.autoCloseout === true) {
+          if (date < refStr) return;
+          if (!existing || date < existing.date) {
+            recurringBySeries.set(t.recurringId, candidate);
+          }
+        } else {
+          if (date > refStr) return;
+          if (!existing || date > existing.date) {
+            recurringBySeries.set(t.recurringId, candidate);
+          }
         }
       });
     });
@@ -1347,33 +1359,64 @@ class TransactionStore {
     return true;
   }
 
-  // Remove auto-close-out allocations once their date has fully passed
-  // (use-it-or-lose-it by deadline). Covers one-time allocations and
-  // materialized recurring instances; non-materialized recurring instances are
-  // never re-created past today by the expansion engine, so the two together
-  // keep expired buckets from lingering or reappearing.
+  // Forfeit allocations that have closed out. Two flavors:
+  //   - Auto close-out: a pinned use-it-or-lose-it bucket closes once its own
+  //     date has fully passed.
+  //   - Rolling recurring (allocated, no auto close-out): each period's bucket
+  //     stays live until the next same-series instance lands; once a newer
+  //     instance is live (dated on/before today), the older one is forfeited.
+  // Forfeiting deletes the bucket, releasing any unspent remainder back to the
+  // running balance (draws already recorded against it stay as real expenses).
+  // Covers one-time allocations and materialized recurring instances; the
+  // expansion engine won't re-create a superseded period, so the two together
+  // keep closed buckets from lingering or reappearing.
   closeOutExpiredAllocations() {
     const todayStr = this._todayString();
     let changed = false;
+
+    // Per rolling series, the live bucket is the latest instance dated on/before
+    // today. Earlier instances of that series are superseded.
+    const liveRollingDate = new Map();
     Object.keys(this.transactions).forEach((date) => {
-      if (date >= todayStr) return;
+      if (date > todayStr) return;
+      this.transactions[date].forEach((t) => {
+        if (
+          t.allocated === true &&
+          t.autoCloseout !== true &&
+          t.recurringId &&
+          t.type === "expense"
+        ) {
+          const cur = liveRollingDate.get(t.recurringId);
+          if (!cur || date > cur) {
+            liveRollingDate.set(t.recurringId, date);
+          }
+        }
+      });
+    });
+
+    Object.keys(this.transactions).forEach((date) => {
       const arr = this.transactions[date];
       for (let i = arr.length - 1; i >= 0; i--) {
         const t = arr[i];
-        if (
-          t.allocated === true &&
-          t.autoCloseout === true &&
-          t.type === "expense"
-        ) {
-          if (t.id) {
-            this._deletedItems.transactions.push({
-              id: t.id,
-              deletedAt: Date.now(),
-            });
-          }
-          arr.splice(i, 1);
-          changed = true;
+        if (t.type !== "expense" || t.allocated !== true) continue;
+
+        let forfeit = false;
+        if (t.autoCloseout === true) {
+          forfeit = date < todayStr;
+        } else if (t.recurringId) {
+          const live = liveRollingDate.get(t.recurringId);
+          forfeit = !!live && date < live;
         }
+        if (!forfeit) continue;
+
+        if (t.id) {
+          this._deletedItems.transactions.push({
+            id: t.id,
+            deletedAt: Date.now(),
+          });
+        }
+        arr.splice(i, 1);
+        changed = true;
       }
       if (arr.length === 0) {
         delete this.transactions[date];

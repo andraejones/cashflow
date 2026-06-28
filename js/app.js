@@ -194,8 +194,14 @@ class CashflowApp {
       return;
     }
     this.store.autoSettleExpiredRecurring();
-    this.store.closeOutExpiredAllocations();
+    // Forfeiting a closed-out allocation removes a materialized recurring
+    // instance; the expansion cache (keyed only on recurring definitions) would
+    // otherwise replay the now-stale month and resurrect the bucket, so drop it.
+    const closedOut = this.store.closeOutExpiredAllocations();
     this.store.rollForwardAllocations();
+    if (closedOut) {
+      this.recurringManager.invalidateCache();
+    }
     this.calendarUI.generateCalendar();
   }
 
@@ -340,10 +346,42 @@ class CashflowApp {
     const upcomingRecurringIds = new Set();
     // Soonest upcoming derived (un-modified) instance per recurring series.
     const nextRecurring = new Map();
+
+    // Rolling (non-auto-close recurring) allocations stay live across their
+    // whole period, so their active bucket is the latest instance dated
+    // on/before today — usually a past date the "next upcoming" logic below
+    // would miss. Surface exactly that live bucket per series.
+    const liveRollingDate = new Map();
+    Object.keys(transactions).forEach((date) => {
+      if (date > todayStr) return;
+      transactions[date].forEach((t) => {
+        if (t.hidden === true || t.allocated !== true) return;
+        if (t.autoCloseout === true || !t.recurringId) return;
+        const cur = liveRollingDate.get(t.recurringId);
+        if (!cur || date > cur) liveRollingDate.set(t.recurringId, date);
+      });
+    });
+    const shownRolling = new Set();
+
     Object.keys(transactions).forEach((date) => {
       transactions[date].forEach((t) => {
         if (t.hidden === true) return;
         if (t.allocated !== true) return;
+
+        // Rolling allocation with a live bucket: show only that bucket (the
+        // latest instance on/before today), whether or not it's been drawn.
+        const liveDate =
+          t.recurringId && t.autoCloseout !== true
+            ? liveRollingDate.get(t.recurringId)
+            : undefined;
+        if (liveDate) {
+          if (date === liveDate && !shownRolling.has(t.recurringId)) {
+            items.push({ date, transaction: t });
+            shownRolling.add(t.recurringId);
+          }
+          return;
+        }
+
         if (t._lastModified) {
           // Entries the user actually entered or modified.
           items.push({ date, transaction: t });

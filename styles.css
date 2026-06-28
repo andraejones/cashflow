@@ -2288,6 +2288,10 @@ body.app-locked #calendarOptions {
   gap: 8px;
   flex-grow: 1;
   min-width: 140px;
+  /* Align the checkboxes with the text inside the inputs/selects, which are
+     inset by their 1px border + 10px padding. Without this the bare checkboxes
+     sit flush at the form edge and the column reads as ragged when wrapped. */
+  padding-left: 11px;
 }
 
 .settled-toggle-label {
