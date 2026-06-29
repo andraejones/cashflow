@@ -152,7 +152,10 @@ class SearchUI {
     let csvContent = "Date,Type,Amount,Description,Recurring\n";
 
     this.searchResults.forEach(({ date, transaction, isRecurringDef }) => {
-      const formattedDate = date.split("-").join("/");
+      // Match the on-screen MM/DD/YYYY format so the export isn't ambiguous for
+      // US-locale spreadsheet import.
+      const [year, month, day] = date.split("-");
+      const formattedDate = `${month}/${day}/${year}`;
       const amount = transaction.amount.toFixed(2);
       const descriptionText =
         typeof transaction.description === "string" ? transaction.description : "";
@@ -352,8 +355,13 @@ class SearchUI {
       if (typeFilter && rt.type !== typeFilter) continue;
       if (hasMinAmount && rt.amount < minAmount) continue;
       if (hasMaxAmount && rt.amount > maxAmount) continue;
-      if (dateFrom && rt.startDate < dateFrom) continue;
+      // A recurrence is open-ended, so filter by whether its [startDate,
+      // endDate] window overlaps the search range — not by startDate
+      // membership. Otherwise a monthly item that began before the window but
+      // still occurs inside it (e.g. rent with startDate 2025-01-01, searching
+      // June 2026) is wrongly dropped.
       if (dateTo && rt.startDate > dateTo) continue;
+      if (dateFrom && rt.endDate && rt.endDate < dateFrom) continue;
       if (searchTerm === "") {
         foundTransactions.push({ date: rt.startDate, transaction: rt, isRecurringDef: true });
         continue;

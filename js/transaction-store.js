@@ -148,44 +148,56 @@ class TransactionStore {
 
 
   loadData() {
+    let loadFailed = false;
     try {
-      const decrypt = (val) => {
+      const decrypt = (val, structured = false) => {
         if (
           this.pinProtection &&
           this.pinProtection.getCurrentPin() &&
           val
         ) {
-          return this.pinProtection.decrypt(val);
+          const out = this.pinProtection.decrypt(val);
+          // decrypt() returns "" only from its own catch — a genuine failure
+          // (wrong PIN that passed the hash, or corrupt ciphertext). For
+          // structured keys, legit-empty data still encodes to "{}"/"[]", so a
+          // non-empty ciphertext decrypting to empty means the value is
+          // unrecoverable. Flag it so saveData refuses to overwrite the intact
+          // on-disk copy with the empty in-memory fallback.
+          if (structured && !out) {
+            loadFailed = true;
+          }
+          return out;
         }
         return val;
       };
 
-      const storedTransactions = decrypt(this.storage.getItem("transactions"));
-      const storedMonthlyBalances = decrypt(this.storage.getItem("monthlyBalances"));
+      const storedTransactions = decrypt(this.storage.getItem("transactions"), true);
+      const storedMonthlyBalances = decrypt(this.storage.getItem("monthlyBalances"), true);
       const storedRecurringTransactions = decrypt(
-        this.storage.getItem("recurringTransactions")
+        this.storage.getItem("recurringTransactions"), true
       );
       const storedSkippedTransactions = decrypt(
-        this.storage.getItem("skippedTransactions")
+        this.storage.getItem("skippedTransactions"), true
       );
-      const storedDebts = decrypt(this.storage.getItem("debts"));
+      const storedDebts = decrypt(this.storage.getItem("debts"), true);
       const storedCashInfusions = decrypt(
-        this.storage.getItem("cashInfusions")
+        this.storage.getItem("cashInfusions"), true
       );
       const storedSnowballSettings = decrypt(
-        this.storage.getItem("debtSnowballSettings")
+        this.storage.getItem("debtSnowballSettings"), true
       );
       const storedMonthlyNotes = decrypt(
-        this.storage.getItem("monthlyNotes")
+        this.storage.getItem("monthlyNotes"), true
       );
       const storedMovedTransactions = decrypt(
-        this.storage.getItem("movedTransactions")
+        this.storage.getItem("movedTransactions"), true
       );
+      // lastUpdated can legitimately be an empty string, so it isn't "structured".
       const storedLastUpdated = decrypt(
         this.storage.getItem("lastUpdated")
       );
       const storedDeletedItems = decrypt(
-        this.storage.getItem("deletedItems")
+        this.storage.getItem("deletedItems"), true
       );
 
       if (storedTransactions) {
@@ -311,13 +323,28 @@ class TransactionStore {
         });
       }
 
+      if (loadFailed) {
+        // A structured key failed to decrypt. Block persistence so a later save
+        // can't overwrite the still-intact ciphertext with the empty in-memory
+        // fallback. Recovers on reload with the correct PIN / fixed storage.
+        this._loadFailed = true;
+        console.error(
+          "Data load integrity check failed — saves disabled to protect on-disk data"
+        );
+      }
+
       // Handle deferred migration save (encrypt() is only defined in saveData())
-      if (this._needsMigrationSave) {
+      if (this._needsMigrationSave && !this._loadFailed) {
         delete this._needsMigrationSave;
         this.saveData(false); // Don't trigger cloud sync for migration
       }
     } catch (error) {
       console.error("Error loading data from storage:", error);
+      // Decrypt/parse threw mid-load. Reset in-memory to a consistent empty
+      // state so the app stays usable, but flag the failure so saveData refuses
+      // to persist — otherwise the next debounced save overwrites the intact
+      // on-disk ciphertext with this empty state, making the loss permanent.
+      this._loadFailed = true;
       this.transactions = {};
       this.monthlyBalances = {};
       this.recurringTransactions = [];
@@ -372,6 +399,17 @@ class TransactionStore {
 
 
   saveData(isDataModified = true) {
+    // A failed/partial load (decrypt error or parse throw) leaves in-memory
+    // state empty or incomplete. Refuse to persist over the intact on-disk
+    // ciphertext — saving here would make the data loss permanent. The flag
+    // clears on the next clean load (page reload with the correct PIN).
+    if (this._loadFailed) {
+      console.warn(
+        "saveData skipped: load integrity failed, preserving on-disk data"
+      );
+      return false;
+    }
+
     // Cancel any pending debounced save since we're saving now
     if (this._saveDebounceTimer) {
       clearTimeout(this._saveDebounceTimer);
@@ -1635,6 +1673,9 @@ class TransactionStore {
         });
       });
 
+      // A successful import replaces in-memory state with valid data, so any
+      // prior load-integrity failure no longer applies — re-enable persistence.
+      this._loadFailed = false;
       this.saveData(true);
       return true;
     } catch (error) {

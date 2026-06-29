@@ -914,6 +914,15 @@ class RecurringTransactionManager {
     if (!targetDate || (endDate && targetDate > endDate)) {
       return;
     }
+    // Lower-bound guard: an "Nth weekday" can fall earlier in the month than
+    // the recurrence start (start Jan 20, rule "1st Monday" → Jan 5), which
+    // would materialize a phantom occurrence dated before the rule began.
+    // Compare by calendar date because getNthDayOfMonth returns local midnight
+    // while parseDateString (startDate) returns noon. The sibling
+    // countOccurrencesBefore gates the same way.
+    if (Utils.formatDateString(targetDate) < Utils.formatDateString(startDate)) {
+      return;
+    }
     let adjustedDate = targetDate;
     let originalDateString = null;
 

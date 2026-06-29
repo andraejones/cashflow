@@ -71,9 +71,9 @@ Settled/unsettled support: `setTransactionSettled(date, index, isSettled)` toggl
 
 **DebtSnowballUI** (`debt-snowball.js`) - Debt entry management, snowball payment generation, and plan timeline.
 
-**CloudSync** (`cloud-sync.js`) - GitHub Gist integration with bi-directional sync and debounced saves.
+**CloudSync** (`cloud-sync.js`) - GitHub Gist integration with bi-directional sync and debounced saves. Also owns the GitHub token at rest: it encrypts/decrypts `github_token_encrypted` with an AES-GCM key derived from the plaintext `_device_id` (PinProtection is not involved in token storage).
 
-**PinProtection** (`pin-protection.js`) - PIN setup/verification, XOR encryption, and session inactivity monitoring (120s timeout).
+**PinProtection** (`pin-protection.js`) - PIN setup/verification, XOR encryption of the TransactionStore data (transactions, debts, etc.) keyed by the current PIN, and session inactivity monitoring (120s timeout). It does **not** read or write `github_token_encrypted` — that is CloudSync's, encrypted separately via `_device_id`.
 
 ### Key Patterns
 

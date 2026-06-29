@@ -296,11 +296,23 @@ class CashflowApp {
 
     if (!this._recentEscHandler) {
       this._recentEscHandler = (e) => {
-        if (e.key === "Escape") {
-          this.hideRecentTransactions();
-        }
+        if (e.key !== "Escape") return;
+        // Recent and Allocated modals can be open at once. Only the topmost
+        // modal handles Escape, so an unconditional close wouldn't dismiss a
+        // modal stacked beneath it. Capture phase + topModal() guard mirrors
+        // BankReconcile's handler.
+        if (ModalManager.topModal() !== modal) return;
+        this.hideRecentTransactions();
       };
-      document.addEventListener("keydown", this._recentEscHandler);
+      document.addEventListener("keydown", this._recentEscHandler, true);
+    }
+  }
+
+
+  _removeRecentEscHandler() {
+    if (this._recentEscHandler) {
+      document.removeEventListener("keydown", this._recentEscHandler, true);
+      this._recentEscHandler = null;
     }
   }
 
@@ -311,11 +323,7 @@ class CashflowApp {
     modal.style.display = "none";
     modal.setAttribute("aria-hidden", "true");
     ModalManager.closeModal(modal);
-
-    if (this._recentEscHandler) {
-      document.removeEventListener("keydown", this._recentEscHandler);
-      this._recentEscHandler = null;
-    }
+    this._removeRecentEscHandler();
   }
 
 
@@ -486,11 +494,20 @@ class CashflowApp {
 
     if (!this._allocatedEscHandler) {
       this._allocatedEscHandler = (e) => {
-        if (e.key === "Escape") {
-          this.hideAllocatedTransactions();
-        }
+        if (e.key !== "Escape") return;
+        // Only the topmost modal handles Escape (see hideRecentTransactions).
+        if (ModalManager.topModal() !== modal) return;
+        this.hideAllocatedTransactions();
       };
-      document.addEventListener("keydown", this._allocatedEscHandler);
+      document.addEventListener("keydown", this._allocatedEscHandler, true);
+    }
+  }
+
+
+  _removeAllocatedEscHandler() {
+    if (this._allocatedEscHandler) {
+      document.removeEventListener("keydown", this._allocatedEscHandler, true);
+      this._allocatedEscHandler = null;
     }
   }
 
@@ -501,11 +518,7 @@ class CashflowApp {
     modal.style.display = "none";
     modal.setAttribute("aria-hidden", "true");
     ModalManager.closeModal(modal);
-
-    if (this._allocatedEscHandler) {
-      document.removeEventListener("keydown", this._allocatedEscHandler);
-      this._allocatedEscHandler = null;
-    }
+    this._removeAllocatedEscHandler();
   }
 
 
@@ -545,8 +558,8 @@ class CashflowApp {
 
   exportData() {
     try {
-      this.cloudSync.cancelPendingCloudSave();
-
+      // Export is read-only — it must not cancel a queued cloud push, or a
+      // pending change is needlessly delayed until the next sync trigger.
       const data = this.store.exportData();
 
       const now = new Date();
@@ -618,11 +631,33 @@ class CashflowApp {
                   window.ModalManager.closeModal(m);
                 }
               });
+              // The generic sweep hid modals directly, bypassing
+              // hideRecentTransactions / hideAllocatedTransactions, which would
+              // leak their document-level Escape handlers. Detach them.
+              this._removeRecentEscHandler();
+              this._removeAllocatedEscHandler();
               this.recurringManager.invalidateCache();
               this.calculationService.invalidateCache();
               this.updateUI();
 
-              Utils.showNotification("Data imported successfully!");
+              // An import is a restore, not an incremental edit. Push it
+              // authoritatively so it replaces the cloud copy instead of being
+              // merged into it (a merge lets newer remote items win and leaves
+              // the restore partial, or resurrects items deleted after the
+              // backup). Dropping the known ETag makes saveToCloud skip its
+              // GET-merge and PATCH local data straight up.
+              if (this.cloudSync && this.cloudSync.autoSyncEnabled) {
+                this.cloudSync.cancelPendingCloudSave();
+                this.cloudSync._lastKnownETag = null;
+                this.cloudSync
+                  .saveToCloud()
+                  .catch((err) => console.error("Post-import cloud push failed:", err));
+                Utils.showNotification(
+                  "Data imported — replacing your cloud copy with the import."
+                );
+              } else {
+                Utils.showNotification("Data imported successfully!");
+              }
             } else {
               throw new Error("Invalid file format");
             }
