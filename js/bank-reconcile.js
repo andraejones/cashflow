@@ -408,6 +408,13 @@ class BankReconcileUI {
       (a) => (a._normTokens = this._nameTokens(this._normalizeMerchant(a.description)))
     );
 
+    // Raw (un-normalized) tokens. Pass 2's conflict guard (below) needs the
+    // product word that normalization discards — "AMAZON MKTPLACE" and "Amazon
+    // Prime" both normalize to "Amazon", so only the raw tokens still carry
+    // MKTPLACE vs PRIME. Pass 3 also reads these for its rarity scoring.
+    sortedBank.forEach((b) => (b._tokens = this._nameTokens(b.description)));
+    appItems.forEach((a) => (a._tokens = this._nameTokens(a.description)));
+
     // Hard rule (see _blockMatch): a bank "Transfer To ... Share" line is a
     // person-to-person share transfer with no merchant. Its round amount
     // collides with unrelated bills (a $40 transfer silently matched a $40
@@ -637,6 +644,13 @@ class BankReconcileUI {
         this.nameMinTokenLen
       )
         continue;
+      // Same merchant, different product: normalization collapses "AMAZON
+      // MKTPLACE" and "Amazon Prime" both to "Amazon", so the shared-token
+      // check above passes on a coincidental near amount ($14.97 hold vs $15.16
+      // renewal). Reject when the raw descriptions each carry a distinctive word
+      // the other lacks — positive evidence they're different charges. A bare
+      // "Amazon" entry (no product word) still drift-matches.
+      if (this._hasConflictingProductToken(cand._tokens, bankRow._tokens)) continue;
       if (diff < bestDiff) {
         best = cand;
         bestDiff = diff;
@@ -650,8 +664,7 @@ class BankReconcileUI {
   // own corpus (statement + app), so the threshold adapts — a word is only a
   // basis for matching if it's rare here, regardless of any hardcoded list.
   _nameMatchPass(sortedBank, appItems, reviewPairs) {
-    sortedBank.forEach((b) => (b._tokens = this._nameTokens(b.description)));
-    appItems.forEach((a) => (a._tokens = this._nameTokens(a.description)));
+    // _tokens (raw) are built once up front in reconcile(); reused here.
     const bankFreq = this._docFreq(sortedBank.map((b) => b._tokens));
     const appFreq = this._docFreq(appItems.map((a) => a._tokens));
     const rare = (tok) =>
@@ -744,6 +757,26 @@ class BankReconcileUI {
       }
     }
     return best;
+  }
+
+  // True when each token set has a distinctive word (>= nameMinTokenLen) that
+  // the other set lacks entirely — i.e. both sides name a product/sub-brand and
+  // the names disagree (Amazon MKTPLACE vs Amazon PRIME). Prefix-tolerant so a
+  // truncated bank token still counts as shared. One-sided extras (a bank line's
+  // location/ref noise against a plain app name) are not a conflict, so genuine
+  // auth-hold drift on the same merchant still pairs.
+  _hasConflictingProductToken(aTokens, bTokens) {
+    const hasUnshared = (from, other) =>
+      [...from].some((t) => {
+        if (t.length < this.nameMinTokenLen) return false;
+        for (const o of other) {
+          const shorter = o.length <= t.length ? o : t;
+          const longer = o.length <= t.length ? t : o;
+          if (longer.startsWith(shorter)) return false; // shared (prefix-tolerant)
+        }
+        return true;
+      });
+    return hasUnshared(aTokens, bTokens) && hasUnshared(bTokens, aTokens);
   }
 
   _dayGap(isoA, isoB) {
