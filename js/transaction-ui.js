@@ -348,6 +348,37 @@ class TransactionUI {
   }
 
 
+  // Populates an inline edit form's "Draw from allocation" dropdown with the
+  // buckets active for the expense's own date, pre-selecting any current draw.
+  // Returns the number of live allocations offered. A current draw that's no
+  // longer in the active list (e.g. a superseded recurring period) is still
+  // added as an option so saving doesn't silently drop the existing link.
+  populateEditDrawAllocation(select, date, currentDrawId) {
+    const allocations = this.store.getAllocations(date);
+    select.innerHTML = '<option value="">No allocation draw</option>';
+    allocations.forEach((a) => {
+      const option = document.createElement("option");
+      option.value = a.id;
+      const period = a.recurring
+        ? ` (${this.formatShortDisplayDate(a.date)})`
+        : "";
+      option.textContent = `${a.description} — $${a.remaining.toFixed(2)} left${period}`;
+      select.appendChild(option);
+    });
+    if (currentDrawId && !allocations.some((a) => a.id === currentDrawId)) {
+      const info = this.store.getAllocationInfoById(currentDrawId);
+      const option = document.createElement("option");
+      option.value = currentDrawId;
+      option.textContent = info
+        ? `${info.description}, ${this.formatShortDisplayDate(info.date)}`
+        : "(current allocation)";
+      select.appendChild(option);
+    }
+    select.value = currentDrawId || "";
+    return allocations.length;
+  }
+
+
   // Selecting an allocation to draw from and the "Allocate" checkbox are
   // mutually exclusive — an allocation can't draw from another.
   syncDrawState() {
@@ -886,6 +917,27 @@ class TransactionUI {
           dateInput.setAttribute("aria-label", "Date");
           editForm.appendChild(dateInput);
 
+          // Regular one-time expenses can be billed against an allocation
+          // bucket. Mirror the add-modal "Draw from allocation" control so the
+          // association can be set or changed when editing in place. Skipped for
+          // recurring and allocation-bucket items (an allocation can't draw from
+          // another).
+          if (normalizedType === "expense" && !isRecurring && !isAllocated) {
+            const drawSelect = document.createElement("select");
+            drawSelect.id = `edit-draw-allocation-${date}-${index}`;
+            drawSelect.setAttribute("aria-label", "Draw from allocation");
+            const count = this.populateEditDrawAllocation(
+              drawSelect,
+              date,
+              t.drawsFromAllocationId
+            );
+            // Only surface the control when there's something to choose (a live
+            // bucket) or an existing link to preserve.
+            if (count > 0 || t.drawsFromAllocationId) {
+              editForm.appendChild(drawSelect);
+            }
+          }
+
           const saveButton = document.createElement("button");
           saveButton.setAttribute("aria-label", "Save changes");
           saveButton.textContent = "Save";
@@ -1417,6 +1469,15 @@ class TransactionUI {
         if (type !== "expense") {
           updatedFields.settled = undefined;
         }
+        // Apply any allocation-draw change from the edit form. Only present for
+        // one-time, non-allocated expenses; updateTransaction reconciles the
+        // bucket (refunds the old draw, re-debits the chosen one). Clearing the
+        // selection or switching away from expense drops the link.
+        const drawEl = document.getElementById(`edit-draw-allocation-${date}-${index}`);
+        if (drawEl) {
+          updatedFields.drawsFromAllocationId =
+            type === "expense" && drawEl.value ? drawEl.value : undefined;
+        }
         this.recurringManager.editTransaction(
           date,
           index,
@@ -1493,10 +1554,15 @@ class TransactionUI {
               newTransaction.autoCloseout = true;
             }
           }
-          // Preserve an allocation draw across the move (delete refunded the
-          // bucket; add re-debits it at the new date/amount).
-          if (type === "expense" && transaction.drawsFromAllocationId) {
-            newTransaction.drawsFromAllocationId = transaction.drawsFromAllocationId;
+          // Carry the allocation draw across the move, honoring any change made
+          // in the edit form (delete refunded the old bucket; add re-debits the
+          // chosen one at the new date/amount).
+          if (type === "expense") {
+            const drawEl = document.getElementById(`edit-draw-allocation-${date}-${index}`);
+            const drawId = drawEl ? drawEl.value : transaction.drawsFromAllocationId;
+            if (drawId) {
+              newTransaction.drawsFromAllocationId = drawId;
+            }
           }
           this.store.addTransaction(newDate, newTransaction);
         }
