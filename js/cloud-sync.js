@@ -438,6 +438,10 @@ class CloudSync {
     this.saveTimeout = setTimeout(async () => {
       const { token, gistId } = await this.getCloudCredentialsAsync();
       if (!token || !gistId) {
+        // No credentials to push with: drop the pending flag so
+        // hasPendingCloudSave() doesn't report unpushed work forever on an
+        // un-credentialed device.
+        this._pendingCloudSave = false;
         this.clearPendingMessage();
         return;
       }
@@ -743,8 +747,12 @@ class CloudSync {
     return localTime >= remoteTime ? local : remote;
   }
 
-  // Main merge function - combines local and remote data
-  _mergeData(localData, remoteData) {
+  // Main merge function - combines local and remote data.
+  // `localLastUpdated` is the genuine local save time used to pick the
+  // debtSnowballSettings winner. Callers that stamp localData.lastUpdated to
+  // "now" before merging (the push path) must pass the pre-stamp value, else
+  // local always wins and a newer remote settings edit is silently discarded.
+  _mergeData(localData, remoteData, localLastUpdated = localData.lastUpdated) {
     // Get deleted items lists
     const localDeleted = localData._deletedItems || {};
     const remoteDeleted = remoteData._deletedItems || {};
@@ -809,7 +817,7 @@ class CloudSync {
       debtSnowballSettings: this._mergeDebtSnowballSettings(
         localData.debtSnowballSettings || { dailyFloor: 0, autoGenerate: false },
         remoteData.debtSnowballSettings || { dailyFloor: 0, autoGenerate: false },
-        localData.lastUpdated,
+        localLastUpdated,
         remoteData.lastUpdated
       ),
       // monthlyBalances are derived data - will be recalculated
@@ -979,6 +987,11 @@ class CloudSync {
   async saveToCloud(quiet = false) {
     if (this._isSyncing) {
       console.log("Sync already in progress, skipping saveToCloud");
+      // Queue a follow-up push so a trigger that lands mid-sync (manual
+      // "save now", hide-time flush) isn't silently dropped — the in-flight
+      // sync's finally re-schedules it. scheduleCloudSave sets this at schedule
+      // time; direct callers reach the queue only here.
+      this._pendingSaveAfterSync = true;
       if (!quiet) Utils.showNotification("Sync already in progress...", "info");
       return;
     }
@@ -1043,8 +1056,13 @@ class CloudSync {
       this.store.flushPendingSave();
       clearTimeout(this.saveTimeout);   // cancel any queued auto-sync — we're saving now
 
+      const exportedData = this.store.exportData();
+      // Genuine local save time, captured before we stamp lastUpdated to "now".
+      // Passed into _mergeData so the debtSnowballSettings winner is decided by
+      // real edit recency, not by the push timestamp (which would always win).
+      const localLastUpdated = exportedData.lastUpdated;
       let dataToSave = {
-        ...this.store.exportData(),
+        ...exportedData,
         lastUpdated: new Date().toISOString(),
         autoSyncEnabled: this.autoSyncEnabled,
       };
@@ -1075,7 +1093,7 @@ class CloudSync {
               }
 
               // Merge local and remote data
-              const mergedData = this._mergeData(localData, remoteData);
+              const mergedData = this._mergeData(localData, remoteData, localLastUpdated);
               mergedData.autoSyncEnabled = this.autoSyncEnabled;
 
               // Cancel any pending debounced saves before import to prevent race condition
@@ -1116,6 +1134,14 @@ class CloudSync {
       }
 
       // Step 2: Save the data (original or merged)
+      //
+      // No optimistic-concurrency guard on this PATCH: the GitHub Gist API does
+      // not honor If-Match on writes, so a third device that writes between our
+      // merge GET (step 1) and this PATCH is overwritten. The residual TOCTOU
+      // window is mitigated by the heartbeat (checkForRemoteChanges) plus
+      // merge-on-next-sync, which reconciles the clobbered edit on the next
+      // round-trip. It cannot be fully closed without a backend that supports
+      // conditional writes.
       showLoading("Saving to cloud...");
       const response = await fetch(`https://api.github.com/gists/${gistId}`, {
         method: "PATCH",
@@ -1385,6 +1411,12 @@ class CloudSync {
     } finally {
       this._isSyncing = false;
       Utils.hideLoading();
+      // A save trigger that arrived mid-load (saveToCloud early-returned and set
+      // the flag) must still be flushed once the load releases the lock.
+      if (this._pendingSaveAfterSync) {
+        this._pendingSaveAfterSync = false;
+        this.scheduleCloudSave();
+      }
     }
   }
 

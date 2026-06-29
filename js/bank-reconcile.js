@@ -386,8 +386,14 @@ class BankReconcileUI {
     const appEnd = this._shiftIso(candHi, maxTol);
     const appItems = this._buildAppItems(appStart, appEnd);
 
-    // Reset match flags (a re-run after Add/Settle reuses fresh arrays anyway).
-    bankRows.forEach((b) => (b.matched = false));
+    // Reset match flags. Also clear _match: a re-run after Add/Settle/Fix
+    // rebuilds appItems, so a stale _match left from a prior run would point
+    // into the discarded array and the clearedUnsettled builder could emit a
+    // spurious "still unsettled" row off that ghost reference.
+    bankRows.forEach((b) => {
+      b.matched = false;
+      b._match = null;
+    });
 
     const sortedBank = [...bankRows].sort((a, b) => a.date.localeCompare(b.date));
 

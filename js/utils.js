@@ -75,12 +75,18 @@ const Utils = {
   },
 
 
-  // Parse date string to Date object using noon to avoid DST/timezone issues
+  // Parse date string to Date object using noon to avoid DST/timezone issues.
+  // Returns null for empty/malformed input — callers that immediately deref the
+  // result must null-check first.
   parseDateString: function (dateString) {
     if (!dateString || typeof dateString !== 'string') {
       return null;
     }
-    const [year, month, day] = dateString.split("-").map(Number);
+    // Tolerate ISO date-time strings ("2026-06-28T00:00") by keeping the date
+    // part — otherwise the "28T00:00" segment parses to NaN and returns null,
+    // throwing in callers that deref it (e.g. CSV-derived dates).
+    const datePart = dateString.split("T")[0];
+    const [year, month, day] = datePart.split("-").map(Number);
     if (isNaN(year) || isNaN(month) || isNaN(day)) {
       return null;
     }
@@ -171,6 +177,16 @@ const Utils = {
       return Promise.resolve();
     }
 
+    // Preempt any dialog still pending on the shared #appModal. Opening a second
+    // dialog before the first resolves would otherwise stack a duplicate set of
+    // listeners on the same buttons — a later click fires both and the abandoned
+    // promise resolves with the new dialog's input (the pin-protection
+    // lock/unlock PIN leak). Resolving the prior dialog's cancel path first
+    // removes its listeners and unblocks its awaiter.
+    if (this._activeModalClose) {
+      this._activeModalClose();
+    }
+
     const {
       modal,
       title: titleEl,
@@ -214,12 +230,30 @@ const Utils = {
         ModalManager.closeModal(modal);
         confirmButton.removeEventListener("click", handleConfirm);
         cancelButton.removeEventListener("click", handleCancel);
-        closeButton.removeEventListener("click", handleCancel);
+        closeButton.removeEventListener("click", handleClose);
         modal.removeEventListener("keydown", handleKeydown);
+        // Only clear the active-dialog handle if it's still ours; a newer dialog
+        // that preempted us already replaced it with its own.
+        if (Utils._activeModalClose === forceCancel) {
+          Utils._activeModalClose = null;
+        }
         if (previousActiveElement && previousActiveElement.focus) {
           previousActiveElement.focus();
         }
         resolve(result);
+      };
+
+      // Cancel path used when this dialog is preempted by a newer one or torn
+      // down externally (e.g. an inactivity lock). Resolves with the dialog's
+      // cancel value so awaiting callers don't hang.
+      const forceCancel = () => {
+        if (showInput || closeReturnsNull) {
+          closeModal(null);
+        } else if (showCancel) {
+          closeModal(false);
+        } else {
+          closeModal(undefined);
+        }
       };
 
       const handleConfirm = () => {
@@ -264,6 +298,8 @@ const Utils = {
       }
       modal.addEventListener("keydown", handleKeydown);
 
+      Utils._activeModalClose = forceCancel;
+
       setTimeout(() => {
         if (showInput) {
           input.focus();
@@ -272,6 +308,20 @@ const Utils = {
         }
       }, 50);
     });
+  },
+
+  // Tracks the close fn of the dialog currently pending on #appModal (if any),
+  // so a new dialog can preempt it and external teardown can resolve it.
+  _activeModalClose: null,
+
+  // Resolve any dialog currently pending on the shared #appModal via its cancel
+  // path, removing its listeners. Call before tearing the modal down externally
+  // (e.g. an inactivity lock) so the awaiting promise doesn't hang and stale
+  // handlers can't fire when the modal is reused.
+  cancelActiveModalDialog: function () {
+    if (this._activeModalClose) {
+      this._activeModalClose();
+    }
   },
 
   showModalAlert: function (message, title = "Notice") {

@@ -107,6 +107,19 @@ class PinProtection {
     return stored && !stored.includes(':');
   }
 
+  // Length-independent-then-constant-time string compare for hash verification.
+  // The timing risk is negligible for a local-only app, but cheap to remove.
+  // Hash lengths are fixed, so the length early-out leaks nothing useful.
+  _constantTimeEquals(a, b) {
+    if (typeof a !== "string" || typeof b !== "string") return false;
+    if (a.length !== b.length) return false;
+    let mismatch = 0;
+    for (let i = 0; i < a.length; i++) {
+      mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
+    }
+    return mismatch === 0;
+  }
+
   async verifyPin(pin) {
     const stored = localStorage.getItem("pin_hash");
     if (!stored) return false;
@@ -115,7 +128,7 @@ class PinProtection {
     if (this._isLegacyHash()) {
       // Verify against legacy hash
       const legacyHash = this.hashPinLegacy(pin);
-      if (legacyHash === stored) {
+      if (this._constantTimeEquals(legacyHash, stored)) {
         // Migrate to secure hash
         const secureHash = await this.hashPinSecure(pin);
         localStorage.setItem("pin_hash", secureHash);
@@ -128,7 +141,7 @@ class PinProtection {
     // Verify against secure hash
     const [saltBase64] = stored.split(':');
     const computedHash = await this.hashPinSecure(pin, saltBase64);
-    return computedHash === stored;
+    return this._constantTimeEquals(computedHash, stored);
   }
 
   async setPin(pin) {
@@ -304,7 +317,16 @@ class PinProtection {
     }
   }
 
-  // Store PIN for biometric unlock using device-bound key
+  // Store PIN for biometric unlock using device-bound key.
+  //
+  // SECURITY NOTE: this is obfuscation, not real encryption. The AES-GCM key is
+  // derived (PBKDF2) from the WebAuthn credential ID, which is itself stored in
+  // plaintext in localStorage (`webauthn_credential_id`). Anyone with
+  // localStorage read access can re-derive the key and recover the master PIN.
+  // It only raises the bar above storing the PIN in the clear; it does not
+  // protect against an attacker who already has localStorage access. (Same
+  // structural shape as cloud-sync's token "encryption" keyed off the plaintext
+  // _device_id.)
   async storePinForBiometrics(pin) {
     // Use a device-specific key derived from credential ID for encryption
     const credentialId = this.credentialId || localStorage.getItem("webauthn_credential_id");
@@ -772,6 +794,27 @@ class PinProtection {
   }
 
   closeAllModals() {
+    // Resolve any dialog pending on the shared #appModal via its cancel path
+    // BEFORE hiding it. Hiding alone leaves the in-flight showModalDialog promise
+    // unresolved and its button listeners attached; when promptUnlock reuses the
+    // modal, a click would fire the stale handler too and resolve the abandoned
+    // prompt (e.g. a change-PIN flow) with the PIN just typed to unlock.
+    if (typeof Utils !== "undefined" && typeof Utils.cancelActiveModalDialog === "function") {
+      Utils.cancelActiveModalDialog();
+    }
+
+    // The Recent/Allocated modals attach document-level Escape handlers that
+    // their hide*() methods remove. We hide them directly below, so detach those
+    // handlers here to avoid leaking them across a lock.
+    if (window.app) {
+      if (typeof window.app._removeRecentEscHandler === "function") {
+        window.app._removeRecentEscHandler();
+      }
+      if (typeof window.app._removeAllocatedEscHandler === "function") {
+        window.app._removeAllocatedEscHandler();
+      }
+    }
+
     // Close appModal if it's open
     const appModal = document.getElementById("appModal");
     if (appModal && appModal.style.display === "block") {

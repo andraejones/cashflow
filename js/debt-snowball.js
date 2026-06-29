@@ -2181,6 +2181,19 @@ class DebtSnowballUI {
     const epsilon = 0.01;
     let changed = false;
 
+    // Promoting an expanded recurring instance to a hand-edit (modifiedInstance)
+    // must also assign an id + _lastModified, or the cloud merge (_mergeById)
+    // drops it on the next sync — silently reverting the hide/reduce until
+    // re-expansion self-heals. Mirrors setTransactionSettled /
+    // autoSettleExpiredRecurring, which both promote expansions the same way.
+    const markModified = (transaction) => {
+      transaction.modifiedInstance = true;
+      if (!transaction.id) {
+        transaction.id = Utils.generateUniqueId();
+      }
+      transaction._lastModified = new Date().toISOString();
+    };
+
     Object.keys(minOccurrencesByDebtId).forEach((debtId) => {
       const targetTotal = Math.max(0, Number(minPaidByDebtId[debtId]) || 0);
       const occurrences = minOccurrencesByDebtId[debtId].sort((a, b) =>
@@ -2191,6 +2204,22 @@ class DebtSnowballUI {
         0
       );
       if (currentTotal <= targetTotal + epsilon) {
+        // At or below target. If strictly below AND we previously hid/reduced
+        // instances, the target has since risen (e.g. a debt's projected payoff
+        // moved later, so more minimums are now genuinely due). Clearing the
+        // hand-edit flags lets the next re-expansion regenerate those instances
+        // at their definition amount; a later adjust pass then re-reduces only
+        // what's truly needed. Without this a zeroed minimum (currentTotal 0)
+        // is trapped here forever and a real payment goes silently missing.
+        if (currentTotal < targetTotal - epsilon) {
+          occurrences.forEach(({ transaction }) => {
+            if (transaction.modifiedInstance === true) {
+              transaction.hidden = false;
+              transaction.modifiedInstance = false;
+              changed = true;
+            }
+          });
+        }
         return;
       }
       let remaining = targetTotal;
@@ -2201,10 +2230,10 @@ class DebtSnowballUI {
           if (amount !== 0 || transaction.hidden !== true) {
             transaction.amount = 0;
             transaction.hidden = true;
-            transaction.modifiedInstance = true;
+            markModified(transaction);
             changed = true;
           } else if (transaction.modifiedInstance !== true) {
-            transaction.modifiedInstance = true;
+            markModified(transaction);
             changed = true;
           }
           continue;
@@ -2213,17 +2242,17 @@ class DebtSnowballUI {
           if (Math.abs(amount - remaining) > epsilon || transaction.hidden === true) {
             transaction.amount = remaining;
             transaction.hidden = false;
-            transaction.modifiedInstance = true;
+            markModified(transaction);
             changed = true;
           } else if (transaction.modifiedInstance !== true) {
-            transaction.modifiedInstance = true;
+            markModified(transaction);
             changed = true;
           }
           remaining = 0;
         } else {
           if (transaction.hidden === true) {
             transaction.hidden = false;
-            transaction.modifiedInstance = true;
+            markModified(transaction);
             changed = true;
           }
           remaining -= amount;

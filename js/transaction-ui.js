@@ -942,7 +942,7 @@ class TransactionUI {
           saveButton.setAttribute("aria-label", "Save changes");
           saveButton.textContent = "Save";
           saveButton.addEventListener("click", () => {
-            this.saveEdit(date, index);
+            this.saveEdit(date, index, t.id);
           });
           editForm.appendChild(saveButton);
 
@@ -978,12 +978,12 @@ class TransactionUI {
             }
           });
           deleteBtn.addEventListener("click", () =>
-            this.deleteTransaction(date, index)
+            this.deleteTransaction(date, index, t.id)
           );
           deleteBtn.addEventListener("keydown", (event) => {
             if (event.key === "Enter" || event.key === " ") {
               event.preventDefault();
-              this.deleteTransaction(date, index);
+              this.deleteTransaction(date, index, t.id);
             }
           });
           if (skipBtn) {
@@ -1140,14 +1140,23 @@ class TransactionUI {
                   this.recurringManager.toggleSkipTransaction(u.date, recId);
                 }
                 this.store.moveTransaction(recId, u.date, date);
-                this.store.addTransaction(date, {
+                const movedCopy = {
                   amount: u.transaction.amount,
                   type: u.transaction.type,
                   description: u.transaction.description,
                   settled: true,
                   movedFrom: u.date,
                   originalRecurringId: recId,
-                });
+                };
+                // Carry the allocation link forward. Deleting the original
+                // refunds the bucket via _reverseAllocationDraw, so the settled
+                // copy must re-draw or the spend stands while the bucket is
+                // credited back. Drop the stale drawAmount (addTransaction
+                // recomputes it on draw).
+                if (u.transaction.drawsFromAllocationId) {
+                  movedCopy.drawsFromAllocationId = u.transaction.drawsFromAllocationId;
+                }
+                this.store.addTransaction(date, movedCopy);
               } else {
                 // One-time: delete from original date, create settled copy on viewed date
                 const transactions = this.store.getTransactions()[u.date] || [];
@@ -1158,12 +1167,17 @@ class TransactionUI {
                   return;
                 }
                 this.store.deleteTransaction(u.date, currentIndex);
-                this.store.addTransaction(date, {
+                const settledCopy = {
                   amount: u.transaction.amount,
                   type: u.transaction.type,
                   description: u.transaction.description,
                   settled: true,
-                });
+                };
+                // Carry the allocation link forward (see recurring branch).
+                if (u.transaction.drawsFromAllocationId) {
+                  settledCopy.drawsFromAllocationId = u.transaction.drawsFromAllocationId;
+                }
+                this.store.addTransaction(date, settledCopy);
               }
               this.showTransactionDetails(date);
               this._notifyChange();
@@ -1392,7 +1406,12 @@ class TransactionUI {
   }
 
 
-  saveEdit(date, index) {
+  saveEdit(date, index, txnId) {
+    // The edit-form DOM fields are keyed by the render-time `index`, so reads
+    // below keep `index`. Store mutations use `liveIndex` (re-resolved by id),
+    // because a background updateUI() (close-out, roll-forward, re-expansion)
+    // can shift transactions[date] after the form rendered — mutating the
+    // captured positional index would hit the wrong row.
     const amountElement = document.getElementById(`edit-amount-${date}-${index}`);
     const typeElement = document.getElementById(`edit-type-${date}-${index}`);
     const descriptionElement = document.getElementById(`edit-description-${date}-${index}`);
@@ -1419,13 +1438,20 @@ class TransactionUI {
     }
 
     const transactions = this.store.getTransactions();
-    if (!transactions[date] || !transactions[date][index]) {
+    let liveIndex =
+      txnId && transactions[date]
+        ? transactions[date].findIndex((x) => x.id === txnId)
+        : -1;
+    if (liveIndex === -1) {
+      liveIndex = index;
+    }
+    if (!transactions[date] || !transactions[date][liveIndex]) {
       console.error(`Transaction not found: date=${date}, index=${index}`);
       Utils.showNotification("Error: Transaction not found", "error");
       return;
     }
 
-    const transaction = transactions[date][index];
+    const transaction = transactions[date][liveIndex];
     const isRecurring = transaction.recurringId !== undefined;
     const hasBalanceConflict = (targetDate) => {
       const targetTransactions = transactions[targetDate] || [];
@@ -1433,7 +1459,7 @@ class TransactionUI {
         if (t.type !== "balance") {
           return false;
         }
-        return !(targetDate === date && targetIndex === index);
+        return !(targetDate === date && targetIndex === liveIndex);
       });
     };
 
@@ -1480,7 +1506,7 @@ class TransactionUI {
         }
         this.recurringManager.editTransaction(
           date,
-          index,
+          liveIndex,
           updatedFields,
           editScope
         );
@@ -1517,7 +1543,7 @@ class TransactionUI {
             if (this.recurringManager.isTransactionSkipped(transaction.movedFrom, transaction.originalRecurringId)) {
               this.recurringManager.toggleSkipTransaction(transaction.movedFrom, transaction.originalRecurringId);
             }
-            this.store.deleteTransaction(date, index);
+            this.store.deleteTransaction(date, liveIndex);
           } else {
             // Moving to a different date — update move info
             this.store.moveTransaction(
@@ -1525,7 +1551,7 @@ class TransactionUI {
               transaction.movedFrom,
               newDate
             );
-            this.store.deleteTransaction(date, index);
+            this.store.deleteTransaction(date, liveIndex);
             const reMovedTransaction = {
               amount,
               type,
@@ -1540,7 +1566,7 @@ class TransactionUI {
           }
         } else {
           // Regular one-time transaction
-          this.store.deleteTransaction(date, index);
+          this.store.deleteTransaction(date, liveIndex);
           const newTransaction = { amount, type, description };
           // Preserve settled status only when the new type is still expense
           if (type === "expense" && transaction.settled !== undefined) {
@@ -1578,15 +1604,27 @@ class TransactionUI {
   }
 
 
-  async deleteTransaction(date, index) {
+  async deleteTransaction(date, index, txnId) {
+    // The captured positional index can go stale if a background updateUI()
+    // shifts transactions[date] between render and click (and again across the
+    // confirm-dialog await). Re-resolve the live index by id, falling back to
+    // the captured index, both before reading and right before the mutation.
+    const liveIndexOf = () => {
+      const arr = this.store.getTransactions()[date] || [];
+      const byId = txnId ? arr.findIndex((x) => x.id === txnId) : -1;
+      if (byId !== -1) return byId;
+      return arr[index] ? index : -1;
+    };
+
     const transactions = this.store.getTransactions();
-    if (!transactions[date] || !transactions[date][index]) {
+    let liveIndex = liveIndexOf();
+    if (liveIndex === -1 || !transactions[date] || !transactions[date][liveIndex]) {
       console.error(`Transaction not found: date=${date}, index=${index}`);
       Utils.showNotification("Error: Transaction not found", "error");
       return;
     }
 
-    const transaction = transactions[date][index];
+    const transaction = transactions[date][liveIndex];
 
     if (transaction.recurringId) {
       const confirmDelete = await Utils.showModalConfirm(
@@ -1603,7 +1641,12 @@ class TransactionUI {
         return;
       }
 
-      this.recurringManager.deleteTransaction(date, index, confirmDelete);
+      liveIndex = liveIndexOf();
+      if (liveIndex === -1) {
+        Utils.showNotification("Error: Transaction not found", "error");
+        return;
+      }
+      this.recurringManager.deleteTransaction(date, liveIndex, confirmDelete);
     } else {
       const sign = transaction.type === "balance" ? "=" : transaction.type === "income" ? "+" : "-";
       const descPart = transaction.description ? `${transaction.description} – ` : "";
@@ -1615,7 +1658,12 @@ class TransactionUI {
       if (!shouldDelete) {
         return;
       }
-      this.store.deleteTransaction(date, index);
+      liveIndex = liveIndexOf();
+      if (liveIndex === -1) {
+        Utils.showNotification("Error: Transaction not found", "error");
+        return;
+      }
+      this.store.deleteTransaction(date, liveIndex);
     }
 
     this.showTransactionDetails(date);
