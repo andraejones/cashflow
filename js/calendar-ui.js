@@ -352,7 +352,6 @@ class CalendarUI {
       const hasMoveAnomaly = this.store.hasMoveAnomaly(dateString);
 
       const isCurrentDay = year === today.getFullYear() && month === today.getMonth() && i === today.getDate();
-      const isPastOrToday = dateString <= todayStr;
 
       // The cell's expense figure. The current day is "live": it shows its own
       // activity (settled + pending) PLUS every unsettled item carried forward
@@ -387,7 +386,7 @@ class CalendarUI {
           ? `<div class="expense">-${cellExpense.toFixed(2)}</div>`
           : ""
         }
-        ${balanceWithoutUnsettled !== null && isPastOrToday
+        ${balanceWithoutUnsettled !== null && isCurrentDay
           ? `<div class="balance-without-unsettled">${balanceWithoutUnsettled.toFixed(2)}</div>`
           : ""
         }
