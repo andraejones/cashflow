@@ -599,10 +599,19 @@ class BankReconcileUI {
     return false;
   }
 
-  // Among unmatched candidates passing `predicate`, pick the one closest in date
-  // (within tolerance), tie-broken by smallest date gap then earliest.
+  // Among unmatched candidates passing `predicate`, pick the best by name
+  // coherence first, then closest date (within tolerance), then earliest.
+  //
+  // Name coherence outranks date proximity on purpose: when several entries
+  // share the bank line's exact amount, a name-agreeing entry beats a
+  // name-conflicting one even if the conflict falls a day closer. Without this,
+  // equal-amount lines that cluster (two $20 charges on or near the same day)
+  // are assigned by date alone and can cross-match unrelated merchants — a
+  // "VISIBLE" hold pairing with a "Publix" entry while the real "Visible -
+  // Sofia" entry is left to land on the unrelated "Publix" ATM line.
   _bestMatch(bankRow, appItems, predicate) {
     let best = null;
+    let bestCoh = -Infinity;
     let bestGap = Infinity;
     for (const cand of appItems) {
       if (cand.matched) continue;
@@ -610,12 +619,56 @@ class BankReconcileUI {
       const gap = this._dayGap(bankRow.date, cand.date);
       if (gap > this._toleranceFor(cand)) continue;
       if (!predicate(cand)) continue;
-      if (gap < bestGap) {
+      const coh = this._nameCoherence(bankRow, cand);
+      if (coh > bestCoh || (coh === bestCoh && gap < bestGap)) {
         best = cand;
+        bestCoh = coh;
         bestGap = gap;
       }
     }
     return best;
+  }
+
+  // Name relationship between a bank line and an app entry, used to rank
+  // exact-amount candidates in pass 1:
+  //   +1  share a distinctive word — same payee
+  //   -1  each names a distinctive payee and none is shared — different payees
+  //    0  neutral: at least one side has no distinctive token (a bare amount, a
+  //        generic label), so name says nothing either way.
+  //
+  // "Shares a distinctive word" is checked on BOTH the normalized-merchant
+  // tokens (so "WAL-MART" lines up with "Walmart") AND the raw description
+  // tokens. Raw matters because normalization can rewrite the payee and hide
+  // the user's term: "MURPHY7456ATWALMRT" and "KLARNA*WALMART" both normalize
+  // to "Walmart", yet the raw line still carries MURPHY / KLARNA — the word the
+  // user actually labeled the entry with. Checking raw recovers those as
+  // same-payee instead of misreading them as a Walmart conflict (which would
+  // also let a generic "Walmart" entry outrank the real "Murphy Gas" one).
+  //
+  // This deliberately does NOT block a conflicting pair outright — a -1 still
+  // matches when it's the only same-amount candidate, because users routinely
+  // label by category ("Groceries" for a Publix line, "Movies" for a cinema).
+  // A conflict only loses to a better-named alternative; it isn't forbidden.
+  _nameCoherence(bankRow, appItem) {
+    const shares =
+      this._sharesDistinctiveWord(bankRow._normTokens, appItem._normTokens) ||
+      this._sharesDistinctiveWord(bankRow._tokens, appItem._tokens);
+    if (shares) return 1;
+    if (this._hasConflictingProductToken(bankRow._normTokens, appItem._normTokens)) {
+      return -1;
+    }
+    return 0;
+  }
+
+  // True when the two token sets share a distinctive word (prefix-tolerant,
+  // length >= nameMinTokenLen). Rarity is ignored here: a shared real word is
+  // evidence of the same payee regardless of how often it recurs.
+  _sharesDistinctiveWord(aTokens, bTokens) {
+    if (!aTokens || !bTokens) return false;
+    return (
+      this._distinctiveSharedScore(aTokens, bTokens, () => true) >=
+      this.nameMinTokenLen
+    );
   }
 
   // Unsettled expenses get the wider window; everything else the default.
