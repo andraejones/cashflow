@@ -339,6 +339,13 @@ class BankReconcileUI {
       list.forEach((t, index) => {
         if (t.hidden === true) return;
         if (t.type === "balance") return; // anchor, not a cashflow line
+        // Allocations (`allocated:true`) are set-aside buckets — funds reserved
+        // for a purpose, not money that has left the account — so they never
+        // appear on a bank statement. Exclude them so they aren't flagged
+        // "missing" or matched against real bank lines. Draws against a bucket
+        // carry `drawsFromAllocationId` (a regular expense) and ARE real
+        // spending, so they stay in the comparison set.
+        if (t.allocated === true) return;
         if (
           t.recurringId &&
           this.recurringManager.isTransactionSkipped(dateIso, t.recurringId)
@@ -716,6 +723,11 @@ class BankReconcileUI {
   _nameTokens(desc) {
     if (!desc) return new Set();
     let s = String(desc).toUpperCase();
+    // "Debt Payment: " is a system-applied label marking a snowball debt
+    // payment, not part of the payee name — strip it so only the debt name
+    // drives matching ("DEBT" must not become a false distinctive token; the
+    // accompanying "PAYMENT" is already a stopword).
+    s = s.replace(/^\s*DEBT PAYMENT:\s*/, " ");
     s = s.replace(/\b[A-Z]{2,4}\s*\*/g, " "); // SQ *, TST*, DD *
     s = s.replace(/[*#]/g, " ");
     s = s.replace(/\b\d[\d.\-]*\b/g, " ");     // amounts, ref/card numbers
