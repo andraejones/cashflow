@@ -519,6 +519,12 @@ class RecurringTransactionManager {
       });
     });
 
+    // Collapse superseded rolling-allocation expansions before capturing the
+    // cache, so the cached month and every re-render reflect the live bucket
+    // only (see method comment for why the per-occurrence supersede guard alone
+    // is insufficient here).
+    this._collapseSupersededRollingAllocations();
+
     // Store in cache for future use - capture ALL recurring transactions for this month
     // not just newly added ones, to ensure cache restore works correctly
     const allRecurringForMonth = [];
@@ -603,6 +609,67 @@ class RecurringTransactionManager {
         transactions[dateString].push({ ...transaction });
       }
     }
+  }
+
+
+  // A rolling recurring allocation (allocated, no autoCloseout) keeps only its
+  // latest occurrence on/before today live; earlier periods are forfeited so
+  // their unspent reserve releases when the next period's bucket arrives. The
+  // per-occurrence supersede guard in addRecurringTransactionToDate can't enforce
+  // this on its own: applyRecurringTransactions clears the month's recurring
+  // instances and re-expands chronologically, so when an early period is being
+  // re-added its later siblings haven't been re-materialized yet and the guard
+  // finds no supersedor. closeOutExpiredAllocations also runs *before* expansion,
+  // so on a fresh render every past period of the same series piles up. This pass
+  // runs right after expansion to drop the superseded ephemeral expansions,
+  // mirroring closeOutExpiredAllocations' rolling branch. It only removes pure
+  // expansions (no id, not a modified instance); persisted/drawn buckets are left
+  // to the sweep, which records the deletion in _deletedItems for sync safety.
+  _collapseSupersededRollingAllocations() {
+    const transactions = this.store.getTransactions();
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+
+    // Live bucket per rolling series = latest occurrence dated on/before today.
+    // Consider every materialized instance (including drawn, id-bearing ones) so
+    // the live date is correct even when the latest period was drawn from.
+    const liveDate = new Map();
+    Object.keys(transactions).forEach((date) => {
+      if (date > todayStr) return;
+      transactions[date].forEach((t) => {
+        if (
+          t.allocated === true &&
+          t.autoCloseout !== true &&
+          t.recurringId &&
+          t.type === "expense"
+        ) {
+          const cur = liveDate.get(t.recurringId);
+          if (!cur || date > cur) liveDate.set(t.recurringId, date);
+        }
+      });
+    });
+
+    if (liveDate.size === 0) return;
+
+    Object.keys(transactions).forEach((date) => {
+      const arr = transactions[date];
+      for (let i = arr.length - 1; i >= 0; i--) {
+        const t = arr[i];
+        if (
+          t.type !== "expense" ||
+          t.allocated !== true ||
+          t.autoCloseout === true ||
+          !t.recurringId ||
+          t.id ||
+          t.modifiedInstance
+        ) {
+          continue;
+        }
+        const live = liveDate.get(t.recurringId);
+        if (live && date < live) arr.splice(i, 1);
+      }
+      if (arr.length === 0) delete transactions[date];
+    });
   }
 
 
