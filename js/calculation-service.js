@@ -7,6 +7,7 @@ class CalculationService {
     this.recurringManager = recurringManager;
     this._cachedSummaries = {};
     this._cachedDailyTotals = {};
+    this._cachedReservedTotals = {};
   }
 
   // Round to cents to prevent floating-point drift in balance calculations
@@ -18,6 +19,37 @@ class CalculationService {
   invalidateCache() {
     this._cachedSummaries = {};
     this._cachedDailyTotals = {};
+    this._cachedReservedTotals = {};
+  }
+
+  // Sum of currently-live allocation reserves dated on/before `dateString`.
+  // An Ending Balance is the gross bank total (reserved funds are still
+  // physically in the account), so at every reconciliation anchor these
+  // reserves are subtracted from the entered figure — keeping them reserved
+  // across the anchor instead of letting the Ending Balance absorb them.
+  // Skip-aware, matching how calculateDailyTotals sums allocated expenses.
+  getReservedTotalOnOrBefore(dateString) {
+    if (this._cachedReservedTotals[dateString] !== undefined) {
+      return this._cachedReservedTotals[dateString];
+    }
+    const transactions = this.store.getTransactions();
+    let total = 0;
+    for (const d in transactions) {
+      if (d > dateString) continue;
+      transactions[d].forEach((t) => {
+        if (t.type !== "expense" || t.allocated !== true) return;
+        if (
+          t.recurringId &&
+          this.recurringManager.isTransactionSkipped(d, t.recurringId)
+        ) {
+          return;
+        }
+        total = this.roundToCents(total + t.amount);
+      });
+    }
+    total = this.roundToCents(total);
+    this._cachedReservedTotals[dateString] = total;
+    return total;
   }
 
 
@@ -168,11 +200,14 @@ class CalculationService {
             }
           });
           if (balanceSet) {
-            // An Ending Balance is a reconciliation anchor: the entered figure
-            // is the balance for the day, shown as-is. Unsettled expenses dated
-            // on/before it are considered reconciled; later unsettled items
-            // reduce subsequent days via normal expense subtraction.
-            dailyBalance = this.roundToCents(dailyBalance);
+            // An Ending Balance is the gross bank total, shown as-is for
+            // unsettled purposes (those on/before are reconciled). Allocation
+            // reserves, however, stay reserved across the anchor: subtract every
+            // still-live reserve dated on/before it so the running balance is
+            // available-after-reserves.
+            dailyBalance = this.roundToCents(
+              dailyBalance - this.getReservedTotalOnOrBefore(dateString)
+            );
           }
           if (day === 1 && balanceSet) {
             firstDayBalance = dailyBalance;
@@ -229,6 +264,7 @@ class CalculationService {
     let income = 0;
     let expense = 0;
     let unsettledExpense = 0;
+    let allocatedExpense = 0;
     let balance = null;
     let hasSkippedTransactions = false;
     let hasAllocated = false;
@@ -274,6 +310,12 @@ class CalculationService {
             if (t.settled === false) {
               unsettledExpense = this.roundToCents(unsettledExpense + t.amount);
             }
+            // Sum all allocated expenses (one-time + recurring) so the calendar
+            // can show a "balance excluding allocations" figure that adds these
+            // reserved buckets back to the running balance.
+            if (t.allocated === true) {
+              allocatedExpense = this.roundToCents(allocatedExpense + t.amount);
+            }
             // Only one-time allocated expenses tint the day purple. Recurring
             // allocated instances (carry a recurringId) repeat often enough that
             // shading every occurrence is noise, not signal.
@@ -289,6 +331,7 @@ class CalculationService {
       income: this.roundToCents(income),
       expense: this.roundToCents(expense),
       unsettledExpense: this.roundToCents(unsettledExpense),
+      allocatedExpense: this.roundToCents(allocatedExpense),
       balance: balance !== null ? this.roundToCents(balance) : null,
       hasSkippedTransactions,
       hasAllocated,
@@ -307,8 +350,11 @@ class CalculationService {
       const ds = `${year}-${String(month).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
       const dailyTotals = this.calculateDailyTotals(ds);
       if (dailyTotals.balance !== null) {
-        // Ending Balance is a reconciliation anchor — shown as entered.
-        runningBalance = this.roundToCents(dailyTotals.balance);
+        // Ending Balance = gross bank total; keep allocation reserves reserved
+        // by subtracting still-live reserves dated on/before this anchor.
+        runningBalance = this.roundToCents(
+          dailyTotals.balance - this.getReservedTotalOnOrBefore(ds)
+        );
       } else {
         runningBalance = this.roundToCents(runningBalance + dailyTotals.income - dailyTotals.expense);
       }
@@ -392,7 +438,11 @@ class CalculationService {
       const dailyTotals = this.calculateDailyTotals(dateString);
 
       if (dailyTotals.balance !== null) {
-        runningBalance = this.roundToCents(dailyTotals.balance);
+        // Ending Balance = gross bank total; keep allocation reserves reserved
+        // by subtracting still-live reserves dated on/before this anchor.
+        runningBalance = this.roundToCents(
+          dailyTotals.balance - this.getReservedTotalOnOrBefore(dateString)
+        );
       } else {
         runningBalance = this.roundToCents(runningBalance + dailyTotals.income - dailyTotals.expense);
       }
@@ -425,7 +475,11 @@ class CalculationService {
       const dailyTotals = this.calculateDailyTotals(dateString);
 
       if (dailyTotals.balance !== null) {
-        runningBalance = this.roundToCents(dailyTotals.balance);
+        // Ending Balance = gross bank total; keep allocation reserves reserved
+        // by subtracting still-live reserves dated on/before this anchor.
+        runningBalance = this.roundToCents(
+          dailyTotals.balance - this.getReservedTotalOnOrBefore(dateString)
+        );
       } else {
         runningBalance = this.roundToCents(runningBalance + dailyTotals.income - dailyTotals.expense);
       }

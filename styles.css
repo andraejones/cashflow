@@ -188,7 +188,7 @@ h4 {
   cursor: pointer;
   transition: background-color 0.2s, box-shadow 0.2s, transform 0.2s;
   border: 1px solid var(--border-color);
-  padding: 8px 6px;
+  padding: 6px 5px;
   position: relative;
   background-color: #ffffff;
   box-shadow: var(--shadow-soft);
@@ -287,7 +287,7 @@ h4 {
   width: 100%;
   text-align: center;
   margin-top: 2px;
-  line-height: 1.25;
+  line-height: 1.18;
 }
 
 .income {
@@ -2385,20 +2385,33 @@ body.app-locked #calendarOptions {
 
 /* Balance without unsettled (actual account balance) */
 .balance-without-unsettled {
-  font-size: 11px;
+  font-size: 10px;
+  line-height: 1.1;
   color: var(--muted-color);
   opacity: 0.75;
   font-weight: 600;
 }
 
+/* Balance excluding allocations (reserved buckets added back). Purple to match
+   the allocated-day tint so it reads as the "allocations" figure. */
+.balance-excluding-allocations {
+  font-size: 10px;
+  line-height: 1.1;
+  color: #7c5cd6;
+  opacity: 0.9;
+  font-weight: 600;
+}
+
 @media (max-width: 480px) {
-  .balance-without-unsettled {
+  .balance-without-unsettled,
+  .balance-excluding-allocations {
     font-size: 10px;
   }
 }
 
 @media (max-width: 768px) {
-  .balance-without-unsettled {
+  .balance-without-unsettled,
+  .balance-excluding-allocations {
     font-size: 10px;
   }
 }

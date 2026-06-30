@@ -696,13 +696,18 @@ try {
     allocated: true, autoCloseout: true, settled: true,
   });
   s.rollForwardAllocations();
-  const movedRolling = (s.getTransactions()["2026-06-16"] || []).some(
+  // Rolling allocations now carry forward onto TODAY (2026-06-15), not a day
+  // ahead, so they track the current day instead of sitting in the future.
+  const movedRolling = (s.getTransactions()["2026-06-15"] || []).some(
+    (t) => t.description === "Rolling"
+  );
+  const leftOldDate = !(s.getTransactions()["2026-06-10"] || []).some(
     (t) => t.description === "Rolling"
   );
   const pinnedStayed = (s.getTransactions()["2026-06-15"] || []).some(
     (t) => t.description === "Pinned"
   );
-  if (!movedRolling) throw new Error("Normal allocation should roll forward to tomorrow");
+  if (!movedRolling || !leftOldDate) throw new Error("Normal allocation should roll forward to today");
   if (!pinnedStayed) throw new Error("Auto-close-out allocation must stay pinned to its date");
   console.log("✅ Auto-close-out allocations are pinned; normal ones roll forward");
 
@@ -723,12 +728,13 @@ try {
   console.log("✅ Expiry sweep removes only past auto-close-out allocations");
 
   // A recurring allocation drops a fresh drawable bucket each period; drawing
-  // against it persists across re-expansion.
+  // against it persists across re-expansion. A bucket can't be drawn before its
+  // own date, so the instance is dated today (2026-06-15) to be drawable.
   const ralloc = new TransactionStore();
   ralloc.resetData();
   const rrm = new RecurringTransactionManager(ralloc);
   const rid = ralloc.addRecurringTransaction({
-    startDate: "2026-06-20", amount: 400, type: "expense", description: "Groceries",
+    startDate: "2026-06-15", amount: 400, type: "expense", description: "Groceries",
     recurrence: "monthly", allocated: true, autoCloseout: true, settled: true,
   });
   rrm.applyRecurringTransactions(2026, 5); // June
@@ -737,7 +743,7 @@ try {
   if (!bucket || bucket.recurring !== true) {
     throw new Error("Recurring allocation should surface as a drawable bucket");
   }
-  if (bucket.id !== `ralloc:${rid}:2026-06-20`) {
+  if (bucket.id !== `ralloc:${rid}:2026-06-15`) {
     throw new Error(`Unexpected synthetic bucket id: ${bucket.id}`);
   }
   // Draw $150 against it; the instance materializes and shrinks to $250.
@@ -748,7 +754,7 @@ try {
   const drawTxn = (ralloc.getTransactions()["2026-06-16"] || []).find(
     (t) => t.description === "Store run"
   );
-  const inst = (ralloc.getTransactions()["2026-06-20"] || []).find(
+  const inst = (ralloc.getTransactions()["2026-06-15"] || []).find(
     (t) => t.recurringId === rid
   );
   if (!inst || inst.modifiedInstance !== true || !inst.id) {
@@ -762,7 +768,7 @@ try {
   }
   // Re-expansion must not clobber the drawn-down (modified) instance.
   rrm.applyRecurringTransactions(2026, 5);
-  const instAfter = (ralloc.getTransactions()["2026-06-20"] || []).find(
+  const instAfter = (ralloc.getTransactions()["2026-06-15"] || []).find(
     (t) => t.recurringId === rid
   );
   if (!instAfter || ralloc._roundCents(instAfter.amount) !== 250) {
@@ -922,6 +928,76 @@ try {
   console.log("✅ Month-end view shows current balances, not next-month/zeroed balances");
 } finally {
   global.Date = ME_RealDate;
+}
+
+// TEST 16: Allocation reserves survive an Ending Balance. An Ending Balance is
+// the gross bank total (reserved funds are still physically in the account), so
+// every still-live allocation dated on/before an anchor is subtracted from the
+// entered figure — keeping it reserved instead of being absorbed. The "gross"
+// (balance + reserved) must equal the entered figure, and post-anchor reserves
+// reduce later days normally.
+console.log("TEST 16: Allocation Reserves Survive An Ending Balance");
+const ER_RealDate = Date;
+const ER_FIXED_TODAY = new ER_RealDate(2026, 5, 30, 12, 0, 0); // 2026-06-30
+class ER_FrozenDate extends ER_RealDate {
+  constructor(...args) {
+    if (args.length === 0) { super(ER_FIXED_TODAY.getTime()); } else { super(...args); }
+  }
+  static now() { return ER_FIXED_TODAY.getTime(); }
+}
+global.Date = ER_FrozenDate;
+try {
+  const s = new TransactionStore();
+  s.resetData();
+  const rm = new RecurringTransactionManager(s);
+  const calc = new CalculationService(s, rm);
+
+  // $1000 reserved June 1, Ending Balance $5000 entered June 15, $300 reserved
+  // June 20 (after the anchor).
+  s.addTransaction("2026-06-01", {
+    amount: 1000, type: "expense", description: "Reserve", allocated: true, settled: true,
+  });
+  s.addTransaction("2026-06-15", {
+    amount: 5000, type: "balance", description: "Ending Balance",
+  });
+  s.addTransaction("2026-06-20", {
+    amount: 300, type: "expense", description: "Later reserve", allocated: true, settled: true,
+  });
+
+  // Reserved-on/before sums only count buckets dated up to the date.
+  if (calc.getReservedTotalOnOrBefore("2026-06-15") !== 1000) {
+    throw new Error(`Reserved on/before anchor should be 1000, got ${calc.getReservedTotalOnOrBefore("2026-06-15")}`);
+  }
+  if (calc.getReservedTotalOnOrBefore("2026-06-20") !== 1300) {
+    throw new Error(`Reserved on/before 06-20 should be 1300, got ${calc.getReservedTotalOnOrBefore("2026-06-20")}`);
+  }
+
+  // After the anchor (before the later reserve): balance = entered - pre-anchor
+  // reserve = 5000 - 1000 = 4000. The June 1 reserve is NOT absorbed.
+  const b16 = calc.getRunningBalanceForDate("2026-06-16");
+  if (Math.abs(b16 - 4000) > 0.001) {
+    throw new Error(`Balance after anchor should be 4000 (reserve survives), got ${b16}`);
+  }
+  // Gross (balance + reserved on/before) must equal the entered figure.
+  if (Math.abs(b16 + calc.getReservedTotalOnOrBefore("2026-06-16") - 5000) > 0.001) {
+    throw new Error("balance + reserved must equal the entered gross (5000)");
+  }
+
+  // The post-anchor reserve reduces later days normally: 5000 - 1000 - 300.
+  const b21 = calc.getRunningBalanceForDate("2026-06-21");
+  if (Math.abs(b21 - 3700) > 0.001) {
+    throw new Error(`Balance after the later reserve should be 3700, got ${b21}`);
+  }
+
+  // Invariant: month-end running balance equals the monthly summary's ending.
+  const monthEnd = calc.getRunningBalanceForDate("2026-06-30");
+  const summaryEnd = calc.calculateMonthlySummary(2026, 5).endingBalance;
+  if (Math.abs(monthEnd - summaryEnd) > 0.001) {
+    throw new Error(`getRunningBalanceForDate(month-end)=${monthEnd} must equal summary ending=${summaryEnd}`);
+  }
+  console.log("✅ Reserves stay reserved across an Ending Balance; gross = entered; invariants hold");
+} finally {
+  global.Date = ER_RealDate;
 }
 
 console.log("ALL TESTS PASSED");
