@@ -1002,7 +1002,10 @@ class CloudSync {
     // In quiet mode (background/resume syncs) suppress the loading overlay so
     // routine syncs don't flash a spinner; merge/conflict and error
     // notifications still fire.
-    const showLoading = (msg) => { if (!quiet) Utils.showLoading(msg); };
+    // Full-screen loading overlay during save temporarily disabled — the
+    // cloud-sync-indicator + notifications still convey sync state.
+    // To restore: const showLoading = (msg) => { if (!quiet) Utils.showLoading(msg); };
+    const showLoading = (msg) => {};
 
     const syncIndicator = document.querySelector(".cloud-sync-indicator");
     if (syncIndicator) syncIndicator.className = "cloud-sync-indicator syncing";
