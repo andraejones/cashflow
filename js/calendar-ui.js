@@ -207,6 +207,30 @@ class CalendarUI {
       }
     }
 
+    // Pre-compute allocated-bucket carryover from prior months for the
+    // "balance excluding allocations" figure. Unlike unsettled, allocations are
+    // standing reserves that PERSIST across Ending Balances — an anchor does not
+    // reconcile them away — so include every live bucket before this month
+    // regardless of anchors. Skipped recurring instances aren't subtracted
+    // (calculateDailyTotals excludes them), so skip them here too.
+    let runningAllocatedExpense = 0;
+    const allTransactions = this.store.getTransactions();
+    Object.keys(allTransactions).forEach((d) => {
+      if (d >= monthStartStr) return;
+      allTransactions[d].forEach((t) => {
+        if (t.type !== "expense" || t.allocated !== true) return;
+        if (
+          t.recurringId &&
+          this.recurringManager.isTransactionSkipped(d, t.recurringId)
+        ) {
+          return;
+        }
+        runningAllocatedExpense = this.calculationService.roundToCents(
+          runningAllocatedExpense + t.amount
+        );
+      });
+    });
+
     // Calculate the end date of the 30-day minimum range (DST-safe)
     const minimumEndDate = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 30);
     const minimumEndYear = minimumEndDate.getFullYear();
@@ -235,7 +259,11 @@ class CalendarUI {
       const dateStr = Utils.formatDateString(new Date(today.getFullYear(), today.getMonth(), d));
       const dailyTotals = this.calculationService.calculateDailyTotals(dateStr);
       if (dailyTotals.balance !== null) {
-        currentBalance = this.calculationService.roundToCents(dailyTotals.balance);
+        // Ending Balance = gross bank total; keep allocation reserves reserved
+        // by subtracting still-live reserves dated on/before this anchor.
+        currentBalance = this.calculationService.roundToCents(
+          dailyTotals.balance - this.calculationService.getReservedTotalOnOrBefore(dateStr)
+        );
       } else {
         currentBalance = this.calculationService.roundToCents(currentBalance + dailyTotals.income - dailyTotals.expense);
       }
@@ -260,7 +288,11 @@ class CalendarUI {
       const dailyTotals = this.calculationService.calculateDailyTotals(dateStr);
 
       if (dailyTotals.balance !== null) {
-        currentBalance = this.calculationService.roundToCents(dailyTotals.balance);
+        // Ending Balance = gross bank total; keep allocation reserves reserved
+        // by subtracting still-live reserves dated on/before this anchor.
+        currentBalance = this.calculationService.roundToCents(
+          dailyTotals.balance - this.calculationService.getReservedTotalOnOrBefore(dateStr)
+        );
       } else {
         currentBalance = this.calculationService.roundToCents(currentBalance + dailyTotals.income - dailyTotals.expense);
       }
@@ -333,19 +365,38 @@ class CalendarUI {
         ? transactions[dateString].filter((t) => t.hidden !== true).length
         : 0;
       if (dailyTotals.balance !== null) {
-        // Ending Balance is a reconciliation anchor: the entered figure is the
-        // balance for the day, shown as-is, and everything dated on/before it
-        // is treated as reconciled — so the carried-forward unsettled
-        // accumulator resets to zero (collapsing the dual-line display).
-        runningBalance = this.calculationService.roundToCents(dailyTotals.balance);
+        // Ending Balance = gross bank total. Unsettled items dated on/before are
+        // reconciled (accumulator resets to 0). Allocation reserves, though,
+        // stay reserved across the anchor: subtract every still-live reserve
+        // dated on/before it so .balance is available-after-reserves, and set
+        // the allocation accumulator to that same reserved total so the
+        // "excluding allocations" figure equals the entered gross exactly.
+        const reservedOnOrBefore =
+          this.calculationService.getReservedTotalOnOrBefore(dateString);
+        runningBalance = this.calculationService.roundToCents(
+          dailyTotals.balance - reservedOnOrBefore
+        );
         runningUnsettledExpense = 0;
+        runningAllocatedExpense = reservedOnOrBefore;
       } else {
         runningBalance = this.calculationService.roundToCents(runningBalance + dailyTotals.income - dailyTotals.expense);
         runningUnsettledExpense = this.calculationService.roundToCents(runningUnsettledExpense + dailyTotals.unsettledExpense);
+        runningAllocatedExpense = this.calculationService.roundToCents(runningAllocatedExpense + dailyTotals.allocatedExpense);
       }
 
+      // Balance with both unsettled expenses AND allocated reserves added back
+      // (neither applied). Tied to having unsettled items so it doesn't just
+      // duplicate the "excluding allocations" line when only allocations exist.
       const balanceWithoutUnsettled = runningUnsettledExpense > 0
-        ? this.calculationService.roundToCents(runningBalance + runningUnsettledExpense)
+        ? this.calculationService.roundToCents(
+            runningBalance + runningUnsettledExpense + runningAllocatedExpense
+          )
+        : null;
+
+      // Balance with every allocated bucket added back (what's available if the
+      // reserved set-asides were freed). Shown on the current day only.
+      const balanceExcludingAllocations = runningAllocatedExpense > 0
+        ? this.calculationService.roundToCents(runningBalance + runningAllocatedExpense)
         : null;
 
       // Check if this date has any moved transactions (from or to)
@@ -388,6 +439,10 @@ class CalendarUI {
         }
         ${balanceWithoutUnsettled !== null && isCurrentDay
           ? `<div class="balance-without-unsettled">${balanceWithoutUnsettled.toFixed(2)}</div>`
+          : ""
+        }
+        ${balanceExcludingAllocations !== null && isCurrentDay
+          ? `<div class="balance-excluding-allocations" title="Balance excluding allocations">${balanceExcludingAllocations.toFixed(2)}</div>`
           : ""
         }
         <div class="balance">${runningBalance.toFixed(2)}</div>

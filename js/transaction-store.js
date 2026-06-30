@@ -787,10 +787,11 @@ class TransactionStore {
   // Allocations are `allocated:true` expenses that act as set-aside "buckets".
   // Each allocation's `amount` IS its remaining balance, so spending against it
   // simply shrinks that amount. Returns the buckets a regular expense can draw
-  // from, soonest first. Two flavors:
+  // from, soonest first. A bucket can't be drawn against before its own date, so
+  // only allocations dated on/before `referenceDate` are offered. Two flavors:
   //   - One-time allocations: a plain `allocated:true` expense, listed as-is.
-  //   - Recurring allocations: each period's instance is its own bucket. Only
-  //     the soonest instance per series on or after `referenceDate` is offered,
+  //   - Recurring allocations: each period's instance is its own bucket; the
+  //     latest instance per series dated on/before `referenceDate` is offered,
   //     so the dropdown shows the bucket active for the transaction being
   //     entered rather than every future month. `referenceDate` defaults to
   //     today; pass the transaction's own date to bill against that period.
@@ -809,6 +810,8 @@ class TransactionStore {
             : "(no description)";
         if (!t.recurringId) {
           if (!t.id) return;
+          // Can't draw against a bucket before its own date.
+          if (date > refStr) return;
           oneTime.push({
             id: t.id,
             date,
@@ -819,12 +822,10 @@ class TransactionStore {
           return;
         }
         // Recurring allocation instance — only the bucket active for the
-        // reference date is drawable. The "active" instance depends on flavor:
-        //   - Auto close-out (pinned): the soonest instance on/after refStr;
-        //     earlier instances have already closed by their own date.
-        //   - Rolling (no auto close-out): the latest instance on/before refStr
-        //     (the period containing the reference date); it stays live until
-        //     the next instance supersedes it.
+        // reference date is drawable, and (like all allocations) it can't be
+        // drawn before its own date. So for both flavors the active instance is
+        // the latest one dated on/before refStr.
+        if (date > refStr) return;
         const existing = recurringBySeries.get(t.recurringId);
         const candidate = {
           // Un-materialized instances have no id yet — use a synthetic key the
@@ -835,16 +836,8 @@ class TransactionStore {
           remaining: this._roundCents(t.amount),
           recurring: true,
         };
-        if (t.autoCloseout === true) {
-          if (date < refStr) return;
-          if (!existing || date < existing.date) {
-            recurringBySeries.set(t.recurringId, candidate);
-          }
-        } else {
-          if (date > refStr) return;
-          if (!existing || date > existing.date) {
-            recurringBySeries.set(t.recurringId, candidate);
-          }
+        if (!existing || date > existing.date) {
+          recurringBySeries.set(t.recurringId, candidate);
         }
       });
     });
@@ -1341,21 +1334,20 @@ class TransactionStore {
   }
 
 
-  // Allocations are rolling reserved cushions: once an allocation's date
-  // reaches today (or earlier) and it still holds a balance, it moves to
-  // tomorrow so it stays one day ahead of the current day. Future-dated
-  // allocations wait until time catches up; fully-drawn ($0) allocations
-  // freeze in place (the user clears them with Close Out). The id is preserved
-  // so any expenses drawing from the allocation stay linked.
+  // Allocations are rolling reserved cushions: once an allocation's date falls
+  // behind the current day and it still holds a balance, it moves up to today
+  // so it tracks the current day (rather than sitting a day ahead). Future-dated
+  // allocations wait until time catches up; allocations already dated today and
+  // fully-drawn ($0) allocations stay put (the user clears $0 ones with Close
+  // Out). The id is preserved so any expenses drawing from the allocation stay
+  // linked.
   rollForwardAllocations() {
     const now = new Date();
     const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-    const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-    const tomorrowStr = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, "0")}-${String(tomorrow.getDate()).padStart(2, "0")}`;
 
     const moves = [];
     Object.keys(this.transactions).forEach((date) => {
-      if (date > todayStr) return;
+      if (date >= todayStr) return;
       this.transactions[date].forEach((t) => {
         if (
           t.allocated === true &&
@@ -1387,10 +1379,10 @@ class TransactionStore {
         delete this.transactions[fromDate];
       }
       transaction._lastModified = new Date().toISOString();
-      if (!this.transactions[tomorrowStr]) {
-        this.transactions[tomorrowStr] = [];
+      if (!this.transactions[todayStr]) {
+        this.transactions[todayStr] = [];
       }
-      this.transactions[tomorrowStr].push(transaction);
+      this.transactions[todayStr].push(transaction);
     });
 
     this.debouncedSave();
