@@ -867,4 +867,61 @@ try {
   global.Date = B_RealDate;
 }
 
+// TEST 15: Month-end current-month view balances. On the last day of the month
+// the projection starts next month (projectionStartDate = tomorrow), so the
+// daily walk never visits the view month and its end-of-view-month capture
+// never fires. Before the fix, viewBalances fell through to post-walk balances
+// (after next month's payments — or, with surplus, to all-zero once the walk
+// runs every debt to payoff), so the snowball view understated debt / falsely
+// reported everything paid off. The view month's end balances must equal the
+// current balances (nothing in the view month remains to project). Frozen to a
+// month-end day for determinism.
+console.log("TEST 15: Month-End Current-Month View Balances");
+const ME_RealDate = Date;
+const ME_FIXED_TODAY = new ME_RealDate(2026, 5, 30, 12, 0, 0); // 2026-06-30 (last day of June)
+class ME_FrozenDate extends ME_RealDate {
+  constructor(...args) {
+    if (args.length === 0) { super(ME_FIXED_TODAY.getTime()); } else { super(...args); }
+  }
+  static now() { return ME_FIXED_TODAY.getTime(); }
+}
+global.Date = ME_FrozenDate;
+try {
+  const s = new TransactionStore();
+  s.resetData();
+  const rm = new RecurringTransactionManager(s);
+  const calc = new CalculationService(s, rm);
+  const ui = Object.create(DebtSnowballUI.prototype);
+  ui.store = s;
+  ui.recurringManager = rm;
+  ui.calculationService = calc;
+  ui.daySpecificOptions = [];
+
+  // Income so checking is healthy; a high floor blocks any lump-sum payoff so we
+  // isolate the view-balance capture (not the snowball sweep).
+  s.addRecurringTransaction({
+    startDate: "2026-06-01", amount: 2000, type: "income",
+    description: "Salary", recurrence: "monthly",
+  });
+  const debtId = s.addDebt({
+    name: "Card", balance: 100, minPayment: 50, dueDay: 1,
+    recurrence: "monthly", interestRate: 0, dueStartDate: "2026-06-01",
+  });
+  ui.ensureMinimumPaymentRecurring(s.getDebts().find((d) => d.id === debtId));
+  // Materialize June so the day-1 minimum ($50, already due) is counted "paid".
+  rm.applyRecurringTransactions(2026, 5);
+  s.setDebtSnowballSettings({ dailyFloor: 100000, extraPaymentStartMonth: "", autoGenerate: false });
+
+  const proj = ui.calculateSnowballProjection(2026, 5, true);
+  const vb = proj.viewBalances[debtId];
+  if (Math.abs(vb - 50) > 0.001) {
+    throw new Error(
+      `Month-end view balance must reflect this month's state (100 - 50 paid = 50), got ${vb}`
+    );
+  }
+  console.log("✅ Month-end view shows current balances, not next-month/zeroed balances");
+} finally {
+  global.Date = ME_RealDate;
+}
+
 console.log("ALL TESTS PASSED");

@@ -1516,6 +1516,21 @@ class DebtSnowballUI {
 
     const monthTargets = {};
     let viewBalances = null;
+    // When the current month is viewed on the last day of the month, the
+    // projection starts next month (projectionStartDate = tomorrow), so the
+    // daily walk below never visits the view month and its end-of-view-month
+    // capture never fires — leaving viewBalances to fall through to post-walk
+    // (next-month) balances, which understates every figure by next month's
+    // payments. Nothing in the view month remains to project in that case, so
+    // its end-of-month balances are exactly the starting balances. (Past months
+    // are handled by historicalViewBalances; future months are always walked.)
+    const projectionStartMonthIndex = this.getMonthIndex(
+      projectionStartDate.getFullYear(),
+      projectionStartDate.getMonth()
+    );
+    if (viewIndex >= currentIndex && viewIndex < projectionStartMonthIndex) {
+      viewBalances = { ...balances };
+    }
     const baseIndex = this.getMonthIndex(baseYear, baseMonth);
     const maxMonths = Math.max(
       600,
