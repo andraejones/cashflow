@@ -243,6 +243,22 @@ class TransactionStore {
           } else if (rt.recurrence === "semiannual") {
             rt.recurrence = "semi-annual";
           }
+          // Migration: "last day of every month" used to be inferred from a
+          // start date that landed on its month's last day. It is now an
+          // explicit flag, so stamp it on any legacy monthly recurrence that
+          // relied on the old inference — preserving its dates exactly (the
+          // user can turn it off if the start date was a coincidence).
+          if (
+            rt.recurrence === "monthly" &&
+            !rt.daySpecific &&
+            rt.lastDayOfMonth === undefined &&
+            Utils.isLastCalendarDayOfMonth(rt.startDate)
+          ) {
+            rt.lastDayOfMonth = true;
+            // Persist the stamped flag (encrypt() is only available in
+            // saveData(), so defer like the other load-time migrations).
+            this._needsMigrationSave = true;
+          }
         });
       }
 

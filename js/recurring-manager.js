@@ -905,13 +905,12 @@ class RecurringTransactionManager {
       return;
     }
     const startDay = startDate.getDate();
-    const lastDayOfStartMonth = new Date(
-      startDate.getFullYear(),
-      startDate.getMonth() + 1,
-      0
-    ).getDate();
-
-    const isLastDayOfMonth = startDay === lastDayOfStartMonth;
+    // "Last day of every month" is an explicit opt-in flag now, not inferred
+    // from the start date. Inferring it caused a bill started on the 30th (or a
+    // Feb-28 start) to silently jump to the 31st in longer months; the flag lets
+    // the user choose. Legacy recurrences that relied on the old inference are
+    // migrated to carry the flag on load (see TransactionStore.loadData).
+    const isLastDayOfMonth = rt.lastDayOfMonth === true;
     let targetDay;
 
     if (isLastDayOfMonth) {
@@ -1725,6 +1724,9 @@ class RecurringTransactionManager {
       }
       if (recurringTransaction.semiMonthlyLastDay) {
         newRecurringTransaction.semiMonthlyLastDay = true;
+      }
+      if (recurringTransaction.lastDayOfMonth) {
+        newRecurringTransaction.lastDayOfMonth = true;
       }
 
       if (recurringTransaction.customInterval) {

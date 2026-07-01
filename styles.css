@@ -2601,6 +2601,22 @@ body.app-locked #calendarOptions {
   cursor: pointer;
 }
 
+/* The "last day of month" toggle reuses `.settled-toggle-label` but lives inside
+   an `.option-group`, whose generic `label`/`input` rules would otherwise force a
+   bold block label and put a border + padding on the checkbox. Reassert the
+   toggle's flex-row layout and a bare checkbox. */
+.last-day-option-group label {
+  display: flex;
+  font-weight: normal;
+  margin-bottom: 0;
+}
+
+.last-day-option-group input[type="checkbox"] {
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
 /* Settled toggle disabled while "Allocate" is checked */
 .settled-toggle-label.is-disabled {
   opacity: 0.5;
