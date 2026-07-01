@@ -98,6 +98,20 @@ class CalendarUI {
       });
     }
 
+    // Mobile floating "+" button: open the add-transaction modal for today.
+    const mobileAddBtn = document.getElementById("mobileAddBtn");
+    if (mobileAddBtn) {
+      mobileAddBtn.addEventListener("click", () => {
+        const todayStr = Utils.formatDateString(new Date());
+        try {
+          this.transactionUI.showTransactionDetails(todayStr);
+        } catch (error) {
+          console.error("Error opening add-transaction for today:", error);
+          this.openTransactionModalFallback(todayStr);
+        }
+      });
+    }
+
     this._initAppMenu();
     this._initTopSearch();
 
