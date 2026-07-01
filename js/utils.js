@@ -432,6 +432,8 @@ const Utils = {
     "July", "August", "September", "October", "November", "December",
   ],
 
+  WEEKDAY_LABELS: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+
   cleanUpHtmlArtifacts: function () {
     const bodyChildren = Array.from(document.body.childNodes);
     for (let i = 0; i < bodyChildren.length; i++) {

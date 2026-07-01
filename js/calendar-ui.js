@@ -15,11 +15,39 @@ class CalendarUI {
     this.transactionUI = transactionUI;
     this.debtSnowball = debtSnowball;
     this.currentDate = new Date();
+    this.viewMode = this._loadViewMode();
 
     // Track bound event handlers for cleanup
     this._boundDayClickHandler = null;
 
     this.initEventListeners();
+  }
+
+
+  // Agenda view is the default (mobile-friendly); users can switch back to
+  // the grid from the menu, and the choice persists across visits.
+  _loadViewMode() {
+    try {
+      return localStorage.getItem("calendar_view_mode") === "grid" ? "grid" : "agenda";
+    } catch (e) {
+      return "agenda";
+    }
+  }
+
+
+  _saveViewMode(mode) {
+    try {
+      localStorage.setItem("calendar_view_mode", mode);
+    } catch (e) {
+      // Storage unavailable (e.g. private browsing) - view choice just won't persist.
+    }
+  }
+
+
+  toggleViewMode() {
+    this.viewMode = this.viewMode === "agenda" ? "grid" : "agenda";
+    this._saveViewMode(this.viewMode);
+    this.generateCalendar();
   }
 
 
@@ -37,25 +65,37 @@ class CalendarUI {
     if (notesCloseBtn) {
       notesCloseBtn.addEventListener("click", () => this.hideNotesModal());
     }
-    // Use event delegation for day clicks to avoid memory leaks
+    // Use event delegation for day clicks to avoid memory leaks. Shared
+    // between the grid and agenda views - only real days carry data-date.
     const calendarDays = document.getElementById("calendarDays");
-    if (calendarDays) {
-      this._boundDayClickHandler = (event) => {
-        const dayElement = event.target.closest('.day[data-date]');
-        if (dayElement && !dayElement.classList.contains('other-month')) {
-          const dateString = dayElement.getAttribute('data-date');
-          if (dateString) {
-            event.stopPropagation();
-            try {
-              this.transactionUI.showTransactionDetails(dateString);
-            } catch (error) {
-              console.error("Error showing transaction details:", error);
-              this.openTransactionModalFallback(dateString);
-            }
+    const calendarAgenda = document.getElementById("calendarAgenda");
+    this._boundDayClickHandler = (event) => {
+      const dayElement = event.target.closest('[data-date]');
+      if (dayElement) {
+        const dateString = dayElement.getAttribute('data-date');
+        if (dateString) {
+          event.stopPropagation();
+          try {
+            this.transactionUI.showTransactionDetails(dateString);
+          } catch (error) {
+            console.error("Error showing transaction details:", error);
+            this.openTransactionModalFallback(dateString);
           }
         }
-      };
+      }
+    };
+    if (calendarDays) {
       calendarDays.addEventListener("click", this._boundDayClickHandler);
+    }
+    if (calendarAgenda) {
+      calendarAgenda.addEventListener("click", this._boundDayClickHandler);
+      calendarAgenda.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        const row = event.target.closest('.agenda-row[data-date]');
+        if (!row) return;
+        event.preventDefault();
+        this._boundDayClickHandler(event);
+      });
     }
 
     this._initAppMenu();
@@ -181,15 +221,22 @@ class CalendarUI {
     const firstDay = new Date(year, month, 1).getDay();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     const calendarDays = document.getElementById("calendarDays");
-    if (!calendarDays) {
-      console.error("calendarDays element not found");
+    const calendarAgenda = document.getElementById("calendarAgenda");
+    if (!calendarDays || !calendarAgenda) {
+      console.error("calendar view element not found");
       return;
     }
+    const isAgendaView = this.viewMode === "agenda";
     calendarDays.innerHTML = "";
-    for (let i = 0; i < firstDay; i++) {
-      const day = document.createElement("div");
-      day.classList.add("day", "other-month");
-      calendarDays.appendChild(day);
+    calendarAgenda.innerHTML = "";
+    calendarDays.hidden = isAgendaView;
+    calendarAgenda.hidden = !isAgendaView;
+    if (!isAgendaView) {
+      for (let i = 0; i < firstDay; i++) {
+        const day = document.createElement("div");
+        day.classList.add("day", "other-month");
+        calendarDays.appendChild(day);
+      }
     }
     let runningBalance = summary.startingBalance;
     // Pre-compute unsettled expense carryover from prior months. An Ending
@@ -320,46 +367,26 @@ class CalendarUI {
     const payoffDates = this.debtSnowball ? this.debtSnowball.getPayoffDates() : null;
 
     for (let i = 1; i <= daysInMonth; i++) {
-      const day = document.createElement("div");
-      day.classList.add("day");
-      day.innerHTML = `${i}<div class="day-content"></div>`;
-      if (
-        year === today.getFullYear() &&
-        month === today.getMonth() &&
-        i === today.getDate()
-      ) {
-        day.classList.add("current");
-      }
+      const isCurrentDay = year === today.getFullYear() && month === today.getMonth() && i === today.getDate();
       // Highlight the last day of the 30-day minimum range
-      if (
+      const isMinimumEnd =
         year === minimumEndYear &&
         month === minimumEndMonth &&
-        i === minimumEndDay
-      ) {
-        day.classList.add("minimum-end");
-      }
+        i === minimumEndDay;
       // Highlight the day(s) with the lowest balance in the 30-day range
       const currentDateString = Utils.formatDateString(new Date(year, month, i));
-      if (lowestBalanceDates.includes(currentDateString)) {
-        day.classList.add("lowest-balance");
-      }
+      const isLowestBalance = lowestBalanceDates.includes(currentDateString);
       // Highlight first crisis day (first day with balance ≤0)
-      if (currentDateString === firstCrisisDate) {
-        day.classList.add("first-crisis");
-      }
+      const isFirstCrisis = currentDateString === firstCrisisDate;
       // Highlight all negative/zero balance days
-      if (negativeBalanceDates.includes(currentDateString)) {
-        day.classList.add("negative-balance");
-      }
+      const isNegativeBalance = negativeBalanceDates.includes(currentDateString);
       // Flag days where a debt gets fully paid off by the snowball plan.
       const isPayoffDay = payoffDates ? payoffDates.has(currentDateString) : false;
       const dateString = currentDateString;
       const dailyTotals =
         this.calculationService.calculateDailyTotals(dateString);
       // Light-purple highlight for days containing an allocated expense.
-      if (dailyTotals.hasAllocated) {
-        day.classList.add("allocated-day");
-      }
+      const hasAllocated = dailyTotals.hasAllocated;
       const transactions = this.store.getTransactions();
       const transactionCount = transactions[dateString]
         ? transactions[dateString].filter((t) => t.hidden !== true).length
@@ -402,8 +429,6 @@ class CalendarUI {
       // Check if this date has any moved transactions (from or to)
       const hasMoveAnomaly = this.store.hasMoveAnomaly(dateString);
 
-      const isCurrentDay = year === today.getFullYear() && month === today.getMonth() && i === today.getDate();
-
       // The cell's expense figure. The current day is "live": it shows its own
       // activity (settled + pending) PLUS every unsettled item carried forward
       // from earlier days, which sit on today until settled. Every other day
@@ -428,7 +453,25 @@ class CalendarUI {
             dailyTotals.expense - dailyTotals.unsettledExpense
           );
 
-      day.querySelector(".day-content").innerHTML = `
+      // Event listener is handled via delegation in initEventListeners()
+      if (isAgendaView) {
+        calendarAgenda.appendChild(this._buildAgendaRow({
+          dayNumber: i, dateString, year, month,
+          isCurrentDay, isMinimumEnd, isLowestBalance, isFirstCrisis, isNegativeBalance,
+          hasAllocated, isPayoffDay, hasMoveAnomaly,
+          dailyTotals, cellExpense, runningBalance, balanceWithoutUnsettled, balanceExcludingAllocations,
+          transactionCount,
+        }));
+      } else {
+        const day = document.createElement("div");
+        day.classList.add("day");
+        if (isCurrentDay) day.classList.add("current");
+        if (isMinimumEnd) day.classList.add("minimum-end");
+        if (isLowestBalance) day.classList.add("lowest-balance");
+        if (isFirstCrisis) day.classList.add("first-crisis");
+        if (isNegativeBalance) day.classList.add("negative-balance");
+        if (hasAllocated) day.classList.add("allocated-day");
+        day.innerHTML = `${i}<div class="day-content">
         ${dailyTotals.income > 0
           ? `<div class="income">+${dailyTotals.income.toFixed(2)}</div>`
           : ""
@@ -452,18 +495,19 @@ class CalendarUI {
         }
         ${this._getDayIndicatorHtml(dailyTotals, hasMoveAnomaly)}
         ${isPayoffDay ? '<div class="payoff-indicator" title="Debt paid off">🎯</div>' : ""}
-      `;
-      day.setAttribute('data-date', dateString);
-      // Event listener is handled via delegation in initEventListeners()
-
-      calendarDays.appendChild(day);
+      </div>`;
+        day.setAttribute('data-date', dateString);
+        calendarDays.appendChild(day);
+      }
     }
-    const remainingDays = 42 - (firstDay + daysInMonth);
-    for (let i = 1; i <= remainingDays; i++) {
-      const day = document.createElement("div");
-      day.classList.add("day", "other-month");
-      day.innerHTML = `${i}<div class="day-content"></div>`;
-      calendarDays.appendChild(day);
+    if (!isAgendaView) {
+      const remainingDays = 42 - (firstDay + daysInMonth);
+      for (let i = 1; i <= remainingDays; i++) {
+        const day = document.createElement("div");
+        day.classList.add("day", "other-month");
+        day.innerHTML = `${i}<div class="day-content"></div>`;
+        calendarDays.appendChild(day);
+      }
     }
     // Determine if we should show Minimum
     // Show only if the viewed month overlaps with the 30-day window from today
@@ -515,7 +559,18 @@ class CalendarUI {
       </button>`;
     }
 
+    const viewModeLabel = this.viewMode === "agenda" ? "Switch to Calendar View" : "Switch to Agenda View";
+
     document.getElementById("calendarOptions").innerHTML = `
+      <button
+        type="button"
+        role="menuitemcheckbox"
+        aria-checked="${this.viewMode === "agenda"}"
+        class="calendar-option"
+        onclick="app.calendarUI.toggleViewMode(); app.calendarUI.closeAppMenu();"
+      >
+        ${viewModeLabel}
+      </button>
       <button
         type="button"
         role="menuitem"
@@ -593,6 +648,62 @@ class CalendarUI {
         Build ${window.APP_BUILD || "unknown"}
       </div>
     `;
+  }
+
+
+  // Builds one row for the agenda (list) view, using the same per-day figures
+  // computed inline in generateCalendar()'s walk - no second balance walk.
+  _buildAgendaRow(d) {
+    const row = document.createElement("div");
+    row.classList.add("agenda-row");
+    if (d.isCurrentDay) row.classList.add("current");
+    if (d.isMinimumEnd) row.classList.add("minimum-end");
+    if (d.isLowestBalance) row.classList.add("lowest-balance");
+    if (d.isFirstCrisis) row.classList.add("first-crisis");
+    if (d.isNegativeBalance) row.classList.add("negative-balance");
+    if (d.hasAllocated) row.classList.add("allocated-day");
+    row.setAttribute("role", "listitem");
+    row.setAttribute("tabindex", "0");
+    row.setAttribute("data-date", d.dateString);
+
+    const weekday = Utils.WEEKDAY_LABELS[new Date(d.year, d.month, d.dayNumber).getDay()];
+
+    row.innerHTML = `
+      <div class="agenda-date-col">
+        <span class="agenda-weekday">${weekday}</span>
+        <span class="agenda-daynum">${d.dayNumber}</span>
+      </div>
+      <div class="agenda-main">
+        <div class="agenda-figures">
+          ${d.dailyTotals.income > 0
+            ? `<span class="income">+${d.dailyTotals.income.toFixed(2)}</span>`
+            : ""
+          }
+          ${d.cellExpense > 0
+            ? `<span class="expense">-${d.cellExpense.toFixed(2)}</span>`
+            : ""
+          }
+          <span class="balance">${d.runningBalance.toFixed(2)}</span>
+        </div>
+        <div class="agenda-meta">
+          ${d.balanceWithoutUnsettled !== null && d.isCurrentDay
+            ? `<span class="balance-without-unsettled">${d.balanceWithoutUnsettled.toFixed(2)}</span>`
+            : ""
+          }
+          ${d.balanceExcludingAllocations !== null && d.isCurrentDay
+            ? `<span class="balance-excluding-allocations" title="Balance excluding allocations">${d.balanceExcludingAllocations.toFixed(2)}</span>`
+            : ""
+          }
+          ${d.transactionCount > 0
+            ? `<span class="transaction-count">(${d.transactionCount})</span>`
+            : ""
+          }
+          ${this._getDayIndicatorHtml(d.dailyTotals, d.hasMoveAnomaly)}
+          ${d.isPayoffDay ? '<span class="payoff-indicator" title="Debt paid off">🎯</span>' : ""}
+        </div>
+      </div>
+    `;
+    return row;
   }
 
 
