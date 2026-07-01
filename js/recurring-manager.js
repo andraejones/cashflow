@@ -1351,9 +1351,19 @@ class RecurringTransactionManager {
         result.getDate() + customInterval.value * 7 * occurrenceCount
       );
     } else if (customInterval.unit === "months") {
-      result.setMonth(
-        result.getMonth() + customInterval.value * occurrenceCount
-      );
+      // Advance whole months from the start date, clamping the day to the target
+      // month's last day. Using setMonth alone lets a month-end start overflow
+      // into the following month — e.g. "every 2 months from Jan 31" turns the
+      // September occurrence (Sep 31) into Oct 1, which skips September entirely
+      // and doubles an occurrence into October. Clamping mirrors how the standard
+      // monthly recurrence handles short months (adjustDayForMonth).
+      const startDay = startDate.getDate();
+      const totalMonths =
+        startDate.getMonth() + customInterval.value * occurrenceCount;
+      const targetYear = startDate.getFullYear() + Math.floor(totalMonths / 12);
+      const targetMonth = ((totalMonths % 12) + 12) % 12;
+      const lastDay = new Date(targetYear, targetMonth + 1, 0).getDate();
+      result.setFullYear(targetYear, targetMonth, Math.min(startDay, lastDay));
     }
 
     return result;
