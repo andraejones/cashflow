@@ -348,6 +348,96 @@ h4 {
   font-size: 12px;
 }
 
+/* Agenda view - mobile-friendly list alternative to the day grid. Reuses
+   .current/.negative-balance/etc. highlight classes shared with .day. */
+.agenda-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  background-color: var(--surface-muted);
+}
+
+.agenda-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background-color: #ffffff;
+  box-shadow: var(--shadow-soft);
+  cursor: pointer;
+  position: relative;
+  transition: background-color 0.2s, box-shadow 0.2s, transform 0.2s;
+}
+
+.agenda-row:hover,
+.agenda-row:focus {
+  background-color: #fffdf8;
+  box-shadow: 0 12px 26px rgba(16, 28, 24, 0.18);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.agenda-date-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  line-height: 1.15;
+}
+
+.agenda-weekday {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--muted-color);
+  letter-spacing: 0.03em;
+}
+
+.agenda-daynum {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--ink-color);
+}
+
+.agenda-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.agenda-figures {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 15px;
+}
+
+.agenda-figures .balance {
+  margin-left: auto;
+}
+
+.agenda-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted-color);
+}
+
+.agenda-row .skip-indicator,
+.agenda-row .ending-balance-indicator,
+.agenda-row .move-indicator,
+.agenda-row .payoff-indicator {
+  position: static;
+}
+
 #transactionForm {
   background-color: var(--surface-muted);
   padding: 12px;
@@ -1488,6 +1578,15 @@ body.app-locked #calendarOptions {
     padding: 10px;
   }
 
+  .agenda-list {
+    gap: 6px;
+    padding: 10px;
+  }
+
+  .agenda-row {
+    padding: 8px 10px;
+  }
+
   .app-toolbar {
     padding: 8px 10px;
     gap: 8px;
@@ -1502,6 +1601,14 @@ body.app-locked #calendarOptions {
   .day {
     aspect-ratio: auto;
     min-height: 64px;
+  }
+
+  .agenda-daynum {
+    font-size: 16px;
+  }
+
+  .agenda-figures {
+    font-size: 14px;
   }
 
   .day-content {
