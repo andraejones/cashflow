@@ -70,7 +70,7 @@
       <div id="modalBalance" class="modal-balance"></div>
       <div id="transactionForm" role="form" aria-label="Add transaction">
         <input type="date" id="transactionDate" aria-label="Transaction date" />
-        <input type="number" id="transactionAmount" placeholder="Amount" step="0.01" aria-label="Transaction amount" />
+        <input type="text" inputmode="numeric" id="transactionAmount" placeholder="Amount" aria-label="Transaction amount" autocomplete="off" />
         <select id="transactionType" aria-label="Transaction type">
           <option value="expense">Expense</option>
           <option value="income">Income</option>
