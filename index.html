@@ -16,36 +16,40 @@
 
 <body>
   <div class="calendar" role="application" aria-label="Cashflow calendar">
-    <div class="app-toolbar" role="toolbar" aria-label="Application toolbar">
-      <div class="app-menu-wrapper">
-        <button id="menuButton" class="menu-btn" type="button" aria-label="Menu" aria-haspopup="true"
-          aria-expanded="false" aria-controls="calendarOptions">
-          <span class="menu-btn-icon" aria-hidden="true">
-            <span></span><span></span><span></span>
-          </span>
-        </button>
-        <div id="calendarOptions" class="app-menu" role="menu" aria-hidden="true"></div>
+    <!-- Toolbar, month nav, and summary are grouped so they can stick together
+         at the top of the viewport while the calendar/agenda scrolls (mobile). -->
+    <div class="app-sticky-header">
+      <div class="app-toolbar" role="toolbar" aria-label="Application toolbar">
+        <div class="app-menu-wrapper">
+          <button id="menuButton" class="menu-btn" type="button" aria-label="Menu" aria-haspopup="true"
+            aria-expanded="false" aria-controls="calendarOptions">
+            <span class="menu-btn-icon" aria-hidden="true">
+              <span></span><span></span><span></span>
+            </span>
+          </button>
+          <div id="calendarOptions" class="app-menu" role="menu" aria-hidden="true"></div>
+        </div>
+
+        <form id="topSearchForm" class="app-search" role="search" aria-label="Search transactions">
+          <span class="app-search-icon" aria-hidden="true">&#128269;</span>
+          <input type="search" id="topSearchInput" class="app-search-input"
+            placeholder="Search transactions..." aria-label="Search transactions"
+            autocomplete="off" />
+        </form>
       </div>
 
-      <form id="topSearchForm" class="app-search" role="search" aria-label="Search transactions">
-        <span class="app-search-icon" aria-hidden="true">&#128269;</span>
-        <input type="search" id="topSearchInput" class="app-search-input"
-          placeholder="Search transactions..." aria-label="Search transactions"
-          autocomplete="off" />
-      </form>
-    </div>
+      <div class="header" role="heading" aria-level="1">
+        <button id="prevMonth" class="nav-btn" aria-label="Previous month">
+          &#10094;
+        </button>
+        <span id="currentMonth" role="heading" aria-level="2"></span>
+        <button id="nextMonth" class="nav-btn" aria-label="Next month">
+          &#10095;
+        </button>
+      </div>
 
-    <div class="header" role="heading" aria-level="1">
-      <button id="prevMonth" class="nav-btn" aria-label="Previous month">
-        &#10094;
-      </button>
-      <span id="currentMonth" role="heading" aria-level="2"></span>
-      <button id="nextMonth" class="nav-btn" aria-label="Next month">
-        &#10095;
-      </button>
+      <div id="monthSummary" role="region" aria-label="Monthly summary" aria-live="polite"></div>
     </div>
-
-    <div id="monthSummary" role="region" aria-label="Monthly summary" aria-live="polite"></div>
 
     <div id="calendarDays" class="days" role="grid" aria-label="Calendar days"></div>
     <div id="calendarAgenda" class="agenda-list" role="list" aria-label="Calendar agenda" hidden></div>
@@ -53,6 +57,11 @@
     <!-- ARIA live region for screen reader announcements -->
     <div id="ariaLiveRegion" class="sr-only" aria-live="polite" aria-atomic="true"></div>
   </div>
+
+  <!-- Mobile-only floating action button: add a transaction to the current day. -->
+  <button id="mobileAddBtn" class="fab-add" type="button" aria-label="Add transaction to today">
+    <span aria-hidden="true">+</span>
+  </button>
 
   <div id="transactionModal" class="modal" role="dialog" aria-labelledby="modalDate" aria-hidden="true">
     <div class="modal-content">

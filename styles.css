@@ -133,6 +133,24 @@ h4 {
   animation: panelIn 0.45s ease both;
 }
 
+/* Groups the toolbar, month nav, and summary. On desktop it's a plain
+   passthrough block (no positioning, so dropdown/modal stacking is unchanged);
+   on mobile it becomes a sticky bar (see the max-width: 767px rules). */
+.app-sticky-header {
+  display: block;
+}
+
+/* Mobile-only floating action button (add-to-today). Hidden on desktop, where
+   day cells/agenda rows are clicked directly to add. */
+.fab-add {
+  display: none;
+}
+
+/* Never float the FAB over the PIN lock screen. */
+body.app-locked .fab-add {
+  display: none !important;
+}
+
 .header {
   background: linear-gradient(120deg, #0f7a6c 0%, #13907a 55%, #f6b042 100%);
   color: #fff;
@@ -2283,6 +2301,60 @@ body.app-locked #calendarOptions {
     max-width: 100%;
     margin: 0;
     border-radius: 0;
+    /* overflow:hidden (desktop) turns .calendar into a scroll container, which
+       scopes any sticky descendant to itself — so the sticky header can't pin
+       to the page. At this full-bleed/square breakpoint there are no rounded
+       corners to clip, so letting it overflow visibly is free. */
+    overflow: visible;
+  }
+
+  /* Pin the toolbar + month nav + summary to the top while the calendar/agenda
+     scrolls beneath them. */
+  .app-sticky-header {
+    position: sticky;
+    /* Pin below the notch/status bar in standalone mode (0 in a normal tab). */
+    top: env(safe-area-inset-top, 0px);
+    z-index: 30;
+    background-color: var(--surface-color);
+    box-shadow: 0 6px 18px rgba(12, 40, 34, 0.18);
+  }
+
+  /* Floating action button — add a transaction to today with one tap. */
+  .fab-add {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    right: calc(18px + env(safe-area-inset-right));
+    bottom: calc(18px + env(safe-area-inset-bottom));
+    width: 58px;
+    height: 58px;
+    padding: 0;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #13907a 0%, #0f7a6c 60%, #f6b042 140%);
+    color: #fff;
+    font-size: 34px;
+    line-height: 1;
+    font-weight: 400;
+    box-shadow: 0 10px 24px rgba(12, 40, 34, 0.38);
+    cursor: pointer;
+    z-index: 800;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .fab-add span {
+    /* Optically center the "+" glyph within the circle. */
+    margin-top: -2px;
+  }
+
+  .fab-add:active {
+    transform: scale(0.94);
+    box-shadow: 0 6px 16px rgba(12, 40, 34, 0.32);
+  }
+
+  .fab-add:focus-visible {
+    outline: 3px solid rgba(255, 255, 255, 0.7);
+    outline-offset: 2px;
   }
 
   .day {
