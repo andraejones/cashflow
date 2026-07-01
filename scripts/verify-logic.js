@@ -1077,4 +1077,48 @@ console.log("TEST 17: Monthly Last-Day-Of-Month Is An Explicit Flag");
   console.log("✅ Legacy last-day recurrences are migrated; mid-month ones are left untouched");
 }
 
+// TEST 18: Custom "every N months" recurrences don't overflow month-end starts.
+// A start date on a month's last day (e.g. Jan 31) advanced by whole months must
+// clamp to each target month's last day, never spill into the next month. The
+// old setMonth-based math turned Sep 31 into Oct 1 — skipping September and
+// duplicating an occurrence into October.
+console.log("TEST 18: Custom Monthly Interval Clamps Month-End Starts");
+{
+  const expandDates = (rt, months) => {
+    const s = new TransactionStore();
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    s.addRecurringTransaction(rt);
+    months.forEach(([y, mo]) => rm.applyRecurringTransactions(y, mo));
+    const t = s.getTransactions();
+    return Object.keys(t)
+      .filter((d) => t[d].some((x) => x.recurringId === rt.id))
+      .sort();
+  };
+
+  // "Every 2 months from Jan 31, 2026": Jan 31, Mar 31, May 31, Jul 31,
+  // Sep 30 (clamped, NOT Oct 1), Nov 30 (clamped, NOT Dec 1).
+  const rt = {
+    id: "cm-2mo", amount: 10, type: "expense", description: "x",
+    recurrence: "custom", startDate: "2026-01-31",
+    customInterval: { unit: "months", value: 2 },
+  };
+  const months = [];
+  for (let mo = 0; mo <= 11; mo++) months.push([2026, mo]);
+  const dates = expandDates(rt, months);
+  const expected = [
+    "2026-01-31", "2026-03-31", "2026-05-31",
+    "2026-07-31", "2026-09-30", "2026-11-30",
+  ];
+  if (dates.join(",") !== expected.join(",")) {
+    throw new Error(`Custom every-2-months from Jan 31 should clamp, not overflow.\n got: ${dates.join(",")}\n exp: ${expected.join(",")}`);
+  }
+  // Guard against the old duplication bug: no month may hold two occurrences.
+  const monthPrefixes = dates.map((d) => d.slice(0, 7));
+  if (new Set(monthPrefixes).size !== monthPrefixes.length) {
+    throw new Error(`Custom monthly interval produced two occurrences in one month: ${dates.join(",")}`);
+  }
+  console.log("✅ Month-end custom intervals clamp to each month's last day; no skips or duplicates");
+}
+
 console.log("ALL TESTS PASSED");
