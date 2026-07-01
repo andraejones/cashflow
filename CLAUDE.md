@@ -88,7 +88,7 @@ transactions, monthlyBalances, recurringTransactions, skippedTransactions,
 debts, cashInfusions, debtSnowballSettings, monthlyNotes, movedTransactions,
 deletedItems, pin_hash, github_token_encrypted, gist_id, auto_sync_enabled,
 webauthn_credential_id, biometric_pin, _device_id, gist_etag,
-local_last_sync, _backup_before_merge
+local_last_sync, _backup_before_merge, calendar_view_mode
 ```
 
 ## Important Files
