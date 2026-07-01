@@ -86,10 +86,39 @@ class TransactionUI {
     document.getElementById("transactionDate").addEventListener("change", () => {
       this.updateDrawAllocationVisibility();
     });
+    // Cents-first entry on the add form: with the numeric-keypad inputmode there
+    // is no "." key, so the user types raw digits and each keystroke fills in from
+    // the cents place ("1424" → "14.24"). Only the add form uses this; edit-form
+    // amount fields stay standard number inputs.
+    const transactionAmount = document.getElementById("transactionAmount");
+    if (transactionAmount) {
+      transactionAmount.addEventListener("input", () => {
+        this.formatAmountAsCents(transactionAmount);
+      });
+    }
     this.setupFocusTrap("transactionModal");
     this.setupFocusTrap("searchModal");
   }
 
+  // Reformat the add-form amount field as the user types, treating the raw
+  // digits as a cents value ("1424" → "14.24"). The displayed value stays a
+  // plain parseable number (no thousands separators) so addTransaction's
+  // parseFloat keeps working. Clears to empty when no digits remain.
+  formatAmountAsCents(el) {
+    const digits = el.value.replace(/\D/g, "");
+    if (!digits) {
+      el.value = "";
+      return;
+    }
+    el.value = (parseInt(digits, 10) / 100).toFixed(2);
+    // Keep the caret at the end so each new digit keeps shifting into cents.
+    const end = el.value.length;
+    try {
+      el.setSelectionRange(end, end);
+    } catch (_) {
+      // setSelectionRange can throw on some input types/browsers; ignore.
+    }
+  }
 
   setupFocusTrap(modalId) {
     const modal = document.getElementById(modalId);
