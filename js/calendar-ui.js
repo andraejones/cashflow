@@ -455,12 +455,15 @@ class CalendarUI {
 
       // Event listener is handled via delegation in initEventListeners()
       if (isAgendaView) {
+        const dayTransactions = transactions[dateString]
+          ? transactions[dateString].filter((t) => t.hidden !== true)
+          : [];
         calendarAgenda.appendChild(this._buildAgendaRow({
           dayNumber: i, dateString, year, month,
           isCurrentDay, isMinimumEnd, isLowestBalance, isFirstCrisis, isNegativeBalance,
           hasAllocated, isPayoffDay, hasMoveAnomaly,
           dailyTotals, cellExpense, runningBalance, balanceWithoutUnsettled, balanceExcludingAllocations,
-          transactionCount,
+          transactionCount, dayTransactions,
         }));
       } else {
         const day = document.createElement("div");
@@ -662,11 +665,53 @@ class CalendarUI {
     if (d.isFirstCrisis) row.classList.add("first-crisis");
     if (d.isNegativeBalance) row.classList.add("negative-balance");
     if (d.hasAllocated) row.classList.add("allocated-day");
+
+    const items = d.dayTransactions || [];
+    // Days with no activity, no Ending Balance anchor, and no special flag are
+    // just balance carry-forward — render them compact so the eye lands on the
+    // days that actually change the plan. The current day stays full-size.
+    const hasContent =
+      items.length > 0 ||
+      d.dailyTotals.balance !== null ||
+      d.dailyTotals.hasSkippedTransactions ||
+      d.hasMoveAnomaly ||
+      d.isPayoffDay;
+    const isEmpty = !hasContent && !d.isCurrentDay;
+    if (isEmpty) row.classList.add("is-empty");
+
     row.setAttribute("role", "listitem");
     row.setAttribute("tabindex", "0");
     row.setAttribute("data-date", d.dateString);
 
     const weekday = Utils.WEEKDAY_LABELS[new Date(d.year, d.month, d.dayNumber).getDay()];
+
+    // Per-day line items — the list layout has the room the grid cell doesn't,
+    // so show what's actually happening rather than a bare "(N)" count. Skipped
+    // recurring instances are struck through (they don't count toward figures).
+    const itemsHtml = items.length > 0
+      ? `<ul class="agenda-items">${items
+          .map((t) => {
+            const isSkipped =
+              t.recurringId &&
+              this.recurringManager.isTransactionSkipped(d.dateString, t.recurringId);
+            const sign = t.type === "balance" ? "=" : t.type === "income" ? "+" : "-";
+            const amountClass = t.type === "balance" ? "ending-balance" : t.type;
+            const fallback =
+              t.type === "balance" ? "Ending Balance" : t.type === "income" ? "Income" : "Expense";
+            const desc = (typeof t.description === "string" && t.description.trim())
+              ? Utils.escapeHtml(t.description.trim())
+              : fallback;
+            const flags = [];
+            if (t.allocated === true) flags.push('<span class="agenda-item-flag" title="Reserved bucket">🔒</span>');
+            if (t.type === "expense" && t.settled === false) flags.push('<span class="agenda-item-flag" title="Unsettled">⏳</span>');
+            return `<li class="agenda-item${isSkipped ? " skipped" : ""}">
+              <span class="agenda-item-desc">${desc}</span>
+              ${flags.length ? `<span class="agenda-item-flags">${flags.join("")}</span>` : ""}
+              <span class="agenda-item-amount ${amountClass}">${sign}${t.amount.toFixed(2)}</span>
+            </li>`;
+          })
+          .join("")}</ul>`
+      : "";
 
     row.innerHTML = `
       <div class="agenda-date-col">
@@ -685,6 +730,7 @@ class CalendarUI {
           }
           <span class="balance">${d.runningBalance.toFixed(2)}</span>
         </div>
+        ${itemsHtml}
         <div class="agenda-meta">
           ${d.balanceWithoutUnsettled !== null && d.isCurrentDay
             ? `<span class="balance-without-unsettled">${d.balanceWithoutUnsettled.toFixed(2)}</span>`
@@ -692,10 +738,6 @@ class CalendarUI {
           }
           ${d.balanceExcludingAllocations !== null && d.isCurrentDay
             ? `<span class="balance-excluding-allocations" title="Balance excluding allocations">${d.balanceExcludingAllocations.toFixed(2)}</span>`
-            : ""
-          }
-          ${d.transactionCount > 0
-            ? `<span class="transaction-count">(${d.transactionCount})</span>`
             : ""
           }
           ${this._getDayIndicatorHtml(d.dailyTotals, d.hasMoveAnomaly)}

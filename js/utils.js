@@ -67,6 +67,19 @@ const Utils = {
   },
 
 
+  // Escape a string for safe interpolation into innerHTML. Used where template
+  // literals build markup that includes user-entered text (e.g. transaction
+  // descriptions in the agenda view).
+  escapeHtml: function (str) {
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  },
+
+
   formatDateString: function (date) {
     const year = date.getFullYear();
     const month = (date.getMonth() + 1).toString().padStart(2, "0");

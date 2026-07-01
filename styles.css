@@ -360,7 +360,7 @@ h4 {
 
 .agenda-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 12px;
   padding: 10px 12px;
   border-radius: var(--radius-md);
@@ -370,6 +370,26 @@ h4 {
   cursor: pointer;
   position: relative;
   transition: background-color 0.2s, box-shadow 0.2s, transform 0.2s;
+}
+
+/* Days with no activity and no anchor are just balance carry-forward — dim
+   them and shrink the padding so days that change the plan stand out. */
+.agenda-row.is-empty {
+  padding: 5px 12px;
+  box-shadow: none;
+  background-color: transparent;
+  border-color: transparent;
+  opacity: 0.72;
+}
+
+.agenda-row.is-empty:hover,
+.agenda-row.is-empty:focus {
+  opacity: 1;
+}
+
+.agenda-row.is-empty .agenda-daynum {
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .agenda-row:hover,
@@ -420,6 +440,71 @@ h4 {
 
 .agenda-figures .balance {
   margin-left: auto;
+  font-weight: 700;
+}
+
+/* Per-day transaction line items — the payoff of the list layout: each row can
+   show what's actually happening, not just a count. */
+.agenda-items {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.agenda-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm, 6px);
+  background-color: var(--surface-muted);
+}
+
+.agenda-item-desc {
+  flex: 1;
+  color: var(--ink-color);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.agenda-item-flags {
+  flex-shrink: 0;
+  display: inline-flex;
+  gap: 3px;
+}
+
+.agenda-item-flag {
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+/* Amount color comes from the shared .income/.expense classes the span also
+   carries; ending-balance amounts fall back to ink. */
+.agenda-item-amount {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.agenda-item-amount.ending-balance {
+  color: var(--ink-color);
+}
+
+/* Skipped recurring instances don't count toward the day's figures — show them
+   struck through so it's clear why the totals don't include them. */
+.agenda-item.skipped {
+  opacity: 0.55;
+}
+
+.agenda-item.skipped .agenda-item-desc,
+.agenda-item.skipped .agenda-item-amount {
+  text-decoration: line-through;
 }
 
 .agenda-meta {
