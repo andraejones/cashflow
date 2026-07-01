@@ -472,12 +472,24 @@ class CalendarUI {
         const dayTransactions = transactions[dateString]
           ? transactions[dateString].filter((t) => t.hidden !== true)
           : [];
+        // The current day's aggregate expense folds in every unsettled expense
+        // carried forward from earlier days. Surface those items in the list too,
+        // so the figure reconciles with what's visible instead of exceeding the
+        // sum of the day's own line items (mirrors the day-detail modal's
+        // "UNSETTLED (CARRIED FORWARD)" section).
+        let carriedUnsettled = [];
+        if (isCurrentDay && carriedForwardUnsettled > 0) {
+          const reconAnchor = this.calculationService.getReconciliationAnchor(dateString, { inclusive: true });
+          carriedUnsettled = allUnsettled.filter(
+            (u) => u.date < dateString && (reconAnchor === null || u.date > reconAnchor)
+          );
+        }
         calendarAgenda.appendChild(this._buildAgendaRow({
           dayNumber: i, dateString, year, month,
           isCurrentDay, isMinimumEnd, isLowestBalance, isFirstCrisis, isNegativeBalance,
           hasAllocated, isPayoffDay, hasMoveAnomaly,
           dailyTotals, cellExpense, runningBalance, balanceWithoutUnsettled, balanceExcludingAllocations,
-          transactionCount, dayTransactions,
+          transactionCount, dayTransactions, carriedUnsettled,
         }));
       } else {
         const day = document.createElement("div");
@@ -727,6 +739,29 @@ class CalendarUI {
           .join("")}</ul>`
       : "";
 
+    // Carried-forward unsettled expenses (current day only). They're already
+    // counted in the aggregate expense figure above; listing them here keeps the
+    // figure and the visible items reconciled. Each shows the date it came from.
+    const carried = d.carriedUnsettled || [];
+    const carriedHtml = carried.length > 0
+      ? `<ul class="agenda-items agenda-carried">${carried
+          .map((u) => {
+            const t = u.transaction;
+            const desc = (typeof t.description === "string" && t.description.trim())
+              ? Utils.escapeHtml(t.description.trim())
+              : "Expense";
+            const [yr, mo, dy] = u.date.split("-");
+            const fromLabel = `from ${mo}-${dy}-${yr.slice(2)}`;
+            return `<li class="agenda-item carried-forward">
+              <span class="agenda-item-desc">${desc}</span>
+              <span class="agenda-item-flags"><span class="agenda-item-flag" title="Unsettled, carried forward">⏳</span></span>
+              <span class="agenda-item-from">${fromLabel}</span>
+              <span class="agenda-item-amount expense">-${t.amount.toFixed(2)}</span>
+            </li>`;
+          })
+          .join("")}</ul>`
+      : "";
+
     row.innerHTML = `
       <div class="agenda-date-col">
         <span class="agenda-weekday">${weekday}</span>
@@ -745,6 +780,7 @@ class CalendarUI {
           <span class="balance">${d.runningBalance.toFixed(2)}</span>
         </div>
         ${itemsHtml}
+        ${carriedHtml}
         <div class="agenda-meta">
           ${d.balanceWithoutUnsettled !== null && d.isCurrentDay
             ? `<span class="balance-without-unsettled">${d.balanceWithoutUnsettled.toFixed(2)}</span>`

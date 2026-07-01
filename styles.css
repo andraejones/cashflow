@@ -514,6 +514,26 @@ body.app-locked .fab-add {
   color: var(--ink-color);
 }
 
+/* Carried-forward unsettled items (current day). Set apart from the day's own
+   line items with a subtle top divider so it's clear they originate elsewhere,
+   even though they're folded into the aggregate expense figure. */
+.agenda-carried {
+  margin-top: 3px;
+  padding-top: 3px;
+  border-top: 1px dashed var(--border-color, rgba(0, 0, 0, 0.12));
+}
+
+.agenda-item.carried-forward {
+  opacity: 0.9;
+}
+
+.agenda-item-from {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--muted-color);
+  font-variant-numeric: tabular-nums;
+}
+
 /* Skipped recurring instances don't count toward the day's figures — show them
    struck through so it's clear why the totals don't include them. */
 .agenda-item.skipped {
