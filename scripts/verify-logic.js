@@ -24,6 +24,13 @@ global.Utils = {
   parseDateString: (str) => {
     const [y, m, d] = str.split('-').map(Number);
     return new Date(y, m - 1, d, 12, 0, 0);
+  },
+  isLastCalendarDayOfMonth: (str) => {
+    if (!str || typeof str !== 'string') return false;
+    const [y, m, d] = str.split('-').map(Number);
+    if (isNaN(y) || isNaN(m) || isNaN(d)) return false;
+    const lastDay = new Date(y, m, 0).getDate();
+    return d === lastDay;
   }
 };
 
@@ -998,6 +1005,76 @@ try {
   console.log("✅ Reserves stay reserved across an Ending Balance; gross = entered; invariants hold");
 } finally {
   global.Date = ER_RealDate;
+}
+
+// TEST 17: "Last day of every month" is an explicit flag, not inferred from the
+// start date. Previously a monthly recurrence whose start date happened to be
+// the last day of a short month (e.g. the 30th, or Feb 28) silently jumped to
+// the 31st in longer months. Now: the flag drives last-day behavior; without it
+// the day is clamped; and legacy recurrences that relied on the old inference
+// are migrated to carry the flag on load so their dates never change.
+console.log("TEST 17: Monthly Last-Day-Of-Month Is An Explicit Flag");
+{
+  const expandDates = (rt) => {
+    const s = new TransactionStore();
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    s.addRecurringTransaction(rt);
+    // Expand June–December 2026 (June start), covering 30- and 31-day months.
+    for (let mo = 5; mo <= 11; mo++) rm.applyRecurringTransactions(2026, mo);
+    const t = s.getTransactions();
+    return Object.keys(t)
+      .filter((d) => t[d].some((x) => x.recurringId === rt.id))
+      .sort()
+      .join(",");
+  };
+
+  // With the flag: every month's last calendar day.
+  const withFlag = expandDates({
+    id: "ld-flag", amount: 10, type: "expense", description: "x",
+    recurrence: "monthly", startDate: "2026-06-30", lastDayOfMonth: true,
+  });
+  const expectFlag =
+    "2026-06-30,2026-07-31,2026-08-31,2026-09-30,2026-10-31,2026-11-30,2026-12-31";
+  if (withFlag !== expectFlag) {
+    throw new Error(`lastDayOfMonth flag should land on each month's last day.\n got: ${withFlag}\n exp: ${expectFlag}`);
+  }
+
+  // Without the flag: the 30th is preserved (no silent jump to the 31st).
+  const noFlag = expandDates({
+    id: "ld-none", amount: 10, type: "expense", description: "x",
+    recurrence: "monthly", startDate: "2026-06-30",
+  });
+  const expectNoFlag =
+    "2026-06-30,2026-07-30,2026-08-30,2026-09-30,2026-10-30,2026-11-30,2026-12-30";
+  if (noFlag !== expectNoFlag) {
+    throw new Error(`Without the flag a day-30 start must stay on the 30th.\n got: ${noFlag}\n exp: ${expectNoFlag}`);
+  }
+  console.log("✅ Flag drives last-day behavior; without it the day is clamped, not inflated");
+
+  // Migration: a legacy stored monthly recurrence whose start date is its
+  // month's last day gains lastDayOfMonth=true on load, preserving its dates.
+  localStorage.setItem(
+    "recurringTransactions",
+    JSON.stringify([{ id: "ld-legacy", amount: 10, type: "expense", description: "x", recurrence: "monthly", startDate: "2026-06-30" }])
+  );
+  const migrated = new TransactionStore();
+  const legacyRt = migrated.getRecurringTransactions().find((r) => r.id === "ld-legacy");
+  if (!legacyRt || legacyRt.lastDayOfMonth !== true) {
+    throw new Error("Legacy last-day recurrence should be migrated to carry lastDayOfMonth=true");
+  }
+  // A normal mid-month recurrence must NOT be stamped.
+  localStorage.setItem(
+    "recurringTransactions",
+    JSON.stringify([{ id: "ld-mid", amount: 10, type: "expense", description: "x", recurrence: "monthly", startDate: "2026-06-15" }])
+  );
+  const migratedMid = new TransactionStore();
+  const midRt = migratedMid.getRecurringTransactions().find((r) => r.id === "ld-mid");
+  if (!midRt || midRt.lastDayOfMonth !== undefined) {
+    throw new Error("A mid-month recurrence must not be stamped with lastDayOfMonth");
+  }
+  localStorage.removeItem("recurringTransactions");
+  console.log("✅ Legacy last-day recurrences are migrated; mid-month ones are left untouched");
 }
 
 console.log("ALL TESTS PASSED");

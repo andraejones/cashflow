@@ -532,6 +532,38 @@ class TransactionUI {
     group.appendChild(label);
     group.appendChild(daySpecificSelect);
     container.appendChild(group);
+
+    // Explicit "last day of every month" toggle. Mutually exclusive with the
+    // Nth-weekday day pattern above (the expansion prioritizes the day pattern),
+    // so the two disable each other to keep the choice unambiguous.
+    const lastDayGroup = document.createElement("div");
+    // `last-day-option-group` neutralizes the generic `.option-group label` /
+    // `.option-group input` rules (bold block label, bordered/padded input) so
+    // the reused `.settled-toggle-label` renders as its intended flex-row toggle.
+    lastDayGroup.className = "option-group last-day-option-group";
+    const lastDayLabel = document.createElement("label");
+    lastDayLabel.className = "settled-toggle-label";
+    const lastDayCheckbox = document.createElement("input");
+    lastDayCheckbox.type = "checkbox";
+    lastDayCheckbox.id = "lastDayOfMonthOption";
+    lastDayCheckbox.name = "lastDayOfMonthOption";
+    lastDayLabel.appendChild(lastDayCheckbox);
+    lastDayLabel.appendChild(
+      document.createTextNode(" Repeat on the last day of each month")
+    );
+    lastDayGroup.appendChild(lastDayLabel);
+    container.appendChild(lastDayGroup);
+
+    const syncMutualExclusion = () => {
+      const patternChosen = !!daySpecificSelect.value;
+      lastDayCheckbox.disabled = patternChosen;
+      if (patternChosen) {
+        lastDayCheckbox.checked = false;
+      }
+      daySpecificSelect.disabled = lastDayCheckbox.checked;
+    };
+    daySpecificSelect.addEventListener("change", syncMutualExclusion);
+    lastDayCheckbox.addEventListener("change", syncMutualExclusion);
   }
 
 
@@ -1933,6 +1965,13 @@ class TransactionUI {
       if (daySpecificOption && daySpecificOption.value) {
         recurringTransaction.daySpecific = true;
         recurringTransaction.daySpecificData = daySpecificOption.value;
+      } else {
+        // Day pattern wins over last-day (expansion checks daySpecific first),
+        // so only honor the last-day toggle when no pattern is selected.
+        const lastDayOption = document.getElementById("lastDayOfMonthOption");
+        if (lastDayOption && lastDayOption.checked) {
+          recurringTransaction.lastDayOfMonth = true;
+        }
       }
     }
     if (recurringTransaction.recurrence === "semi-monthly") {

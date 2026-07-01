@@ -107,6 +107,19 @@ const Utils = {
   },
 
 
+  // True when the date string falls on the last calendar day of its month
+  // (Jan 31, Feb 28/29, Apr 30, …). Used to preserve legacy "last day of month"
+  // monthly recurrences created before the explicit lastDayOfMonth flag existed.
+  isLastCalendarDayOfMonth: function (dateString) {
+    const date = this.parseDateString(dateString);
+    if (!date) {
+      return false;
+    }
+    const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+    return date.getDate() === lastDay;
+  },
+
+
   formatDisplayDate: function (dateString) {
     const dateObj = this.parseDateString(dateString);
     if (!dateObj) {

@@ -925,6 +925,14 @@ class DebtSnowballUI {
       recurrence,
       daySpecific: Boolean(dueDayPattern),
       daySpecificData: dueDayPattern || null,
+      // Preserve the legacy "due on the last day" behavior for monthly debts
+      // whose start date lands on its month's last day (e.g. a day-31 due date).
+      // Set explicitly — not inferred at expansion time — so a later due-day edit
+      // can never leave a stale last-day flag behind.
+      lastDayOfMonth:
+        recurrence === "monthly" &&
+        !dueDayPattern &&
+        Utils.isLastCalendarDayOfMonth(startDate),
       semiMonthlyDays:
         recurrence === "semi-monthly" && Array.isArray(debt.semiMonthlyDays)
           ? [...debt.semiMonthlyDays]
