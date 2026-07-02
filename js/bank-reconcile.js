@@ -1369,6 +1369,34 @@ class BankReconcileUI {
       updates.endDate = this._shiftIso(rec.endDate, delta);
     }
     this.store.updateRecurringTransaction(rec.id, updates);
+    // A materialized MODIFIED instance at the old date survives re-expansion
+    // (hand-edits are preserved by design), so it would duplicate the instance
+    // the shifted series regenerates on the new day. Relocate it to the bank
+    // date instead — its occurrence key (recurringId-newDate) then matches the
+    // regenerated slot and suppresses the duplicate, keeping the user's edit.
+    // Pure expansions need nothing; the cache invalidation in _afterMutation
+    // clears and regenerates them.
+    const instIndex = this._currentIndex(pair.app);
+    if (instIndex !== -1) {
+      const transactions = this.store.getTransactions();
+      const list = transactions[pair.app.date];
+      const inst = list && list[instIndex];
+      if (inst && inst.modifiedInstance === true) {
+        list.splice(instIndex, 1);
+        if (list.length === 0) {
+          delete transactions[pair.app.date];
+        }
+        // _seriesShiftable excludes business-day-adjusted series, so any
+        // originalDate here is stale bookkeeping — drop it, or the occurrence
+        // key would still point at the old date and the duplicate would return.
+        delete inst.originalDate;
+        inst._lastModified = new Date().toISOString();
+        if (!transactions[pair.bank.date]) {
+          transactions[pair.bank.date] = [];
+        }
+        transactions[pair.bank.date].push(inst);
+      }
+    }
     Utils.showNotification(
       `Series moved — now recurring from ${this._shortDate(updates.startDate)}.`
     );
