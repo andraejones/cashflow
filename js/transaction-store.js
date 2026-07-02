@@ -19,12 +19,16 @@ class TransactionStore {
       extraPaymentStartMonth: "",
       autoGenerate: false,
     };
-    // Track deleted item IDs for merge conflict resolution
+    // Track deleted item IDs for merge conflict resolution. `skips` holds
+    // timestamped skip-toggle events ({date, recurringId, skipped, at}) so the
+    // cloud merge can apply last-write-wins — a plain union of skip lists can
+    // never propagate an unskip (the other device's stale skip resurrects it).
     this._deletedItems = {
       transactions: [],
       recurringTransactions: [],
       debts: [],
-      cashInfusions: []
+      cashInfusions: [],
+      skips: []
     };
     this.onSaveCallbacks = [];
 
@@ -339,6 +343,7 @@ class TransactionStore {
           cashInfusions: Array.isArray(parsedDeleted.cashInfusions)
             ? parsedDeleted.cashInfusions
             : [],
+          skips: Array.isArray(parsedDeleted.skips) ? parsedDeleted.skips : [],
         };
       }
 
@@ -411,6 +416,13 @@ class TransactionStore {
         });
       }
     });
+
+    // Skip-toggle events age out the same way once every device has converged.
+    if (Array.isArray(this._deletedItems.skips)) {
+      this._deletedItems.skips = this._deletedItems.skips.filter(
+        (e) => e && typeof e.at === "number" && e.at > thirtyDaysAgo
+      );
+    }
   }
 
 
@@ -543,7 +555,8 @@ class TransactionStore {
       transactions: [],
       recurringTransactions: [],
       debts: [],
-      cashInfusions: []
+      cashInfusions: [],
+      skips: []
     };
     this.saveData();
     return true;
@@ -1247,6 +1260,24 @@ class TransactionStore {
         }
       }
 
+      // Record the toggle as a timestamped skip event (latest per occurrence)
+      // so the cloud merge can apply last-write-wins. Without it, the merge's
+      // plain union of skip lists resurrects any unskip as soon as another
+      // device that still holds the old skip syncs (see
+      // CloudSync._mergeSkippedTransactions).
+      if (!Array.isArray(this._deletedItems.skips)) {
+        this._deletedItems.skips = [];
+      }
+      this._deletedItems.skips = this._deletedItems.skips.filter(
+        (e) => !(e && e.date === date && e.recurringId === recurringId)
+      );
+      this._deletedItems.skips.push({
+        date,
+        recurringId,
+        skipped: isSkipped === true,
+        at: Date.now(),
+      });
+
       this.debouncedSave(isDataModified);
       return true;
     } catch (error) {
@@ -1616,6 +1647,7 @@ class TransactionStore {
         cashInfusions: Array.isArray(importedDeleted.cashInfusions)
           ? importedDeleted.cashInfusions
           : [],
+        skips: Array.isArray(importedDeleted.skips) ? importedDeleted.skips : [],
       };
 
       // Clean up stale movedTransactions entries where fromDate equals toDate

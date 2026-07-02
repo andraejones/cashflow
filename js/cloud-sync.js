@@ -649,8 +649,13 @@ class CloudSync {
     return deduped;
   }
 
-  // Merge skipped transactions (date -> array of recurring IDs)
-  _mergeSkippedTransactions(local, remote) {
+  // Merge skipped transactions (date -> array of recurring IDs). A plain union
+  // can never propagate an UNskip — the other side's stale skip always
+  // resurrects it — so timestamped skip events (recorded by
+  // TransactionStore.setTransactionSkipped) apply last-write-wins on top of
+  // the union: the newest recorded toggle per (date, recurringId) decides.
+  // Datasets without events (legacy exports) keep pure-union behavior.
+  _mergeSkippedTransactions(local, remote, skipEvents = null) {
     const merged = {};
     const allDates = new Set([
       ...Object.keys(local || {}),
@@ -666,6 +671,21 @@ class CloudSync {
         merged[date] = mergedSkips;
       }
     });
+
+    if (skipEvents) {
+      skipEvents.forEach((event) => {
+        if (!event || !event.date || !event.recurringId) return;
+        const list = merged[event.date] || [];
+        const has = list.includes(event.recurringId);
+        if (event.skipped === false && has) {
+          const next = list.filter((id) => id !== event.recurringId);
+          if (next.length > 0) merged[event.date] = next;
+          else delete merged[event.date];
+        } else if (event.skipped === true && !has) {
+          merged[event.date] = [...list, event.recurringId];
+        }
+      });
+    }
 
     return merged;
   }
@@ -774,11 +794,24 @@ class CloudSync {
         return true;
       });
     };
+    // Last-write-wins skip events: newest toggle per (date, recurringId)
+    // across both sides. Applied on top of the skip-list union so an unskip
+    // can beat the other side's stale skip (and a newer re-skip wins back).
+    const skipEventByKey = new Map();
+    [...(localDeleted.skips || []), ...(remoteDeleted.skips || [])].forEach((e) => {
+      if (!e || !e.date || !e.recurringId) return;
+      const key = `${e.date}|${e.recurringId}`;
+      const prev = skipEventByKey.get(key);
+      if (!prev || (e.at || 0) > (prev.at || 0)) skipEventByKey.set(key, e);
+    });
+    const mergedSkipEvents = Array.from(skipEventByKey.values());
+
     const deletedItems = {
       transactions: dedupeDeletedItems([...(localDeleted.transactions || []), ...(remoteDeleted.transactions || [])]),
       recurringTransactions: dedupeDeletedItems([...(localDeleted.recurringTransactions || []), ...(remoteDeleted.recurringTransactions || [])]),
       debts: dedupeDeletedItems([...(localDeleted.debts || []), ...(remoteDeleted.debts || [])]),
-      cashInfusions: dedupeDeletedItems([...(localDeleted.cashInfusions || []), ...(remoteDeleted.cashInfusions || [])])
+      cashInfusions: dedupeDeletedItems([...(localDeleted.cashInfusions || []), ...(remoteDeleted.cashInfusions || [])]),
+      skips: mergedSkipEvents
     };
 
     const merged = {
@@ -794,7 +827,8 @@ class CloudSync {
       ),
       skippedTransactions: this._mergeSkippedTransactions(
         localData.skippedTransactions,
-        remoteData.skippedTransactions
+        remoteData.skippedTransactions,
+        mergedSkipEvents
       ),
       movedTransactions: this._mergeMovedTransactions(
         localData.movedTransactions,
