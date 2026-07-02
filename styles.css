@@ -1406,13 +1406,39 @@ body.app-locked #calendarOptions {
 }
 
 .modal-balance {
-  font-size: 0.95em;
-  font-weight: 600;
+  font-size: 0.9em;
   color: var(--ink-color);
-  margin: -4px 0 8px;
+  margin: -4px 0 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
-.modal-balance.negative {
+.modal-balance-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.modal-balance-label {
+  color: var(--muted-color, #667);
+  font-weight: 500;
+}
+
+.modal-balance-value {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.modal-balance-total {
+  margin-top: 3px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border-color, rgba(0, 0, 0, 0.12));
+  font-size: 1.05em;
+}
+
+.modal-balance.negative .modal-balance-total .modal-balance-value {
   color: var(--error-color-contrast);
 }
 

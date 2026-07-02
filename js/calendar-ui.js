@@ -509,14 +509,6 @@ class CalendarUI {
           ? `<div class="expense">-${cellExpense.toFixed(2)}</div>`
           : ""
         }
-        ${balanceWithoutUnsettled !== null && isCurrentDay
-          ? `<div class="balance-without-unsettled">${balanceWithoutUnsettled.toFixed(2)}</div>`
-          : ""
-        }
-        ${balanceExcludingAllocations !== null && isCurrentDay
-          ? `<div class="balance-excluding-allocations" title="Balance excluding allocations">${balanceExcludingAllocations.toFixed(2)}</div>`
-          : ""
-        }
         <div class="balance">${runningBalance.toFixed(2)}</div>
         ${transactionCount > 0
           ? `<div class="transaction-count">(${transactionCount})</div>`
@@ -782,14 +774,6 @@ class CalendarUI {
         ${itemsHtml}
         ${carriedHtml}
         <div class="agenda-meta">
-          ${d.balanceWithoutUnsettled !== null && d.isCurrentDay
-            ? `<span class="balance-without-unsettled">${d.balanceWithoutUnsettled.toFixed(2)}</span>`
-            : ""
-          }
-          ${d.balanceExcludingAllocations !== null && d.isCurrentDay
-            ? `<span class="balance-excluding-allocations" title="Balance excluding allocations">${d.balanceExcludingAllocations.toFixed(2)}</span>`
-            : ""
-          }
           ${this._getDayIndicatorHtml(d.dailyTotals, d.hasMoveAnomaly)}
           ${d.isPayoffDay ? '<span class="payoff-indicator" title="Debt paid off">🎯</span>' : ""}
         </div>
