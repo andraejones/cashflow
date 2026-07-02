@@ -299,35 +299,6 @@ class RecurringTransactionManager {
   }
 
 
-  matchesDaySpecificRecurrence(rt, targetDate) {
-    if (!rt.daySpecific) return false;
-
-    try {
-      const year = targetDate.getFullYear();
-      const month = targetDate.getMonth();
-      const parsed = this.parseDaySpecificData(rt.daySpecificData);
-      if (!parsed) {
-        return false;
-      }
-      const matchDate = this.getNthDayOfMonth(
-        year,
-        month,
-        parsed.dayOfWeek,
-        parsed.occurrence
-      );
-      if (!matchDate) return false;
-      return (
-        matchDate.getFullYear() === targetDate.getFullYear() &&
-        matchDate.getMonth() === targetDate.getMonth() &&
-        matchDate.getDate() === targetDate.getDate()
-      );
-    } catch (error) {
-      console.error(`Error in matchesDaySpecificRecurrence: ${error.message}`);
-      return false;
-    }
-  }
-
-
   applyRecurringTransactions(year, month) {
     // Check cache validity and use cached result if available
     const cacheKey = this._getCacheKey(year, month);
