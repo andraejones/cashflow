@@ -31,7 +31,18 @@ global.Utils = {
     if (isNaN(y) || isNaN(m) || isNaN(d)) return false;
     const lastDay = new Date(y, m, 0).getDate();
     return d === lastDay;
-  }
+  },
+  // No-op UI helpers so headless tests can drive UI-adjacent methods
+  // (e.g. BankReconcileUI._shiftSeries) that fire notifications.
+  showNotification: () => {},
+  formatDisplayDate: (str) => str
+};
+// Minimal ModalManager stub — bank-reconcile references it only in show/hide,
+// which these tests never call, but the stub keeps accidental calls harmless.
+global.ModalManager = {
+  openModal: () => {},
+  closeModal: () => {},
+  topModal: () => null
 };
 
 const vm = require('vm');
@@ -43,7 +54,8 @@ const files = [
   'recurring-manager.js',
   'calculation-service.js',
   'cloud-sync.js',
-  'debt-snowball.js'
+  'debt-snowball.js',
+  'bank-reconcile.js'
 ];
 
 files.forEach(file => {
@@ -1168,6 +1180,292 @@ console.log("TEST 18: Custom Monthly Interval Clamps Month-End Starts");
     throw new Error(`Custom monthly interval produced two occurrences in one month: ${dates.join(",")}`);
   }
   console.log("✅ Month-end custom intervals clamp to each month's last day; no skips or duplicates");
+}
+
+// TEST 19: Future-scope recurring splits anchor on the SCHEDULED occurrence
+// date, not the business-day-adjusted landing date. Splitting at the landing
+// date silently rewrote the recurrence pattern (a monthly bill due the 1st,
+// edited on its Fri Oct 30 landing, became "monthly on the 30th").
+console.log("TEST 19: Future Split Anchors On The Scheduled Date");
+{
+  const s = new TransactionStore();
+  s.resetData();
+  const rm = new RecurringTransactionManager(s);
+
+  // Monthly bill due the 1st, adjusted to the previous business day.
+  const rtId = s.addRecurringTransaction({
+    startDate: "2026-08-01",
+    amount: 100,
+    type: "expense",
+    description: "Rent",
+    recurrence: "monthly",
+    businessDayAdjustment: "previous",
+  });
+
+  // Nov 1 2026 is a Sunday -> lands Fri 2026-10-30 with originalDate 2026-11-01.
+  rm.applyRecurringTransactions(2026, 9); // Oct
+  rm.applyRecurringTransactions(2026, 10); // Nov
+  const oct30 = (s.getTransactions()["2026-10-30"] || []).findIndex(
+    (t) => t.recurringId === rtId && t.originalDate === "2026-11-01"
+  );
+  if (oct30 === -1) throw new Error("Setup: adjusted Nov-1 instance not found on 2026-10-30");
+
+  rm.editTransaction(
+    "2026-10-30",
+    oct30,
+    { amount: 250, type: "expense", description: "Rent (new)" },
+    "future"
+  );
+
+  const oldRt = s.getRecurringTransactions().find((r) => r.id === rtId);
+  const newRt = s.getRecurringTransactions().find((r) => r.id !== rtId);
+  if (!newRt || newRt.startDate !== "2026-11-01") {
+    throw new Error(`New series must anchor on the scheduled date 2026-11-01, got ${newRt && newRt.startDate}`);
+  }
+  if (oldRt.endDate !== "2026-10-29") {
+    throw new Error(`Old series must end the day before the landing date, got ${oldRt.endDate}`);
+  }
+
+  // Re-expansion: exactly one instance for the Nov-1 occurrence, on the
+  // landing day, with the edit; December stays on the 1st (not the 30th).
+  rm.invalidateCache();
+  rm.applyRecurringTransactions(2026, 9);
+  rm.applyRecurringTransactions(2026, 10);
+  rm.applyRecurringTransactions(2026, 11);
+  const tx = s.getTransactions();
+  const nov1 = [];
+  Object.keys(tx).forEach((d) => tx[d].forEach((t) => {
+    if (t.recurringId && (t.originalDate || d) === "2026-11-01") nov1.push({ d, t });
+  }));
+  if (nov1.length !== 1) {
+    throw new Error(`Expected exactly one Nov-1 occurrence, got ${nov1.length} (${nov1.map((r) => r.d).join(",")})`);
+  }
+  if (nov1[0].d !== "2026-10-30" || nov1[0].t.amount !== 250 || nov1[0].t.recurringId !== newRt.id) {
+    throw new Error("Re-expanded Nov-1 occurrence must land on 2026-10-30 with the edited amount, from the new series");
+  }
+  if (!(tx["2026-12-01"] || []).some((t) => t.recurringId === newRt.id)) {
+    throw new Error("December occurrence must stay on the 1st");
+  }
+  if ((tx["2026-12-30"] || []).some((t) => t.recurringId === newRt.id)) {
+    throw new Error("Phantom December occurrence on the 30th (pre-fix landing-date anchor)");
+  }
+  if (!(tx["2026-10-01"] || []).some((t) => t.recurringId === rtId)) {
+    throw new Error("Prior Oct-1 occurrence must still expand from the old series");
+  }
+  console.log("✅ Future split keeps the schedule pattern for adjusted instances");
+}
+
+// TEST 20: Bulk-delete paths tombstone persisted instances. CloudSync._mergeById
+// resurrects any id-bearing remote item unless its id is in _deletedItems, so
+// deleteRecurringTransaction and delete-all-future must record the persisted
+// modified instances they remove; a partial legacy _deletedItems object must
+// also load without breaking tombstone pushes.
+console.log("TEST 20: Deletion Tombstones For Bulk-Removed Instances");
+{
+  const tombstoneIds = (s) => s._deletedItems.transactions.map((x) => x.id);
+
+  // (a) Deleting a series tombstones its persisted modified instances.
+  {
+    const s = new TransactionStore();
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    const rtId = s.addRecurringTransaction({
+      startDate: "2026-06-01", amount: 50, type: "expense",
+      description: "Gym", recurrence: "monthly",
+    });
+    rm.applyRecurringTransactions(2026, 5);
+    const idx = s.getTransactions()["2026-06-01"].findIndex((t) => t.recurringId === rtId);
+    s.setTransactionSettled("2026-06-01", idx, false); // promote to modified instance
+    const instId = s.getTransactions()["2026-06-01"][idx].id;
+    if (!instId) throw new Error("Setup: promoted instance must carry an id");
+
+    s.deleteRecurringTransaction(rtId);
+    if (!tombstoneIds(s).includes(instId)) {
+      throw new Error("deleteRecurringTransaction must tombstone the removed modified instance");
+    }
+    if (!s._deletedItems.recurringTransactions.some((x) => x.id === rtId)) {
+      throw new Error("Recurring id must still be tombstoned");
+    }
+  }
+
+  // (b) Delete-all-future tombstones removed persisted instances.
+  {
+    const s = new TransactionStore();
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    const rtId = s.addRecurringTransaction({
+      startDate: "2026-06-01", amount: 25, type: "expense",
+      description: "Sub", recurrence: "monthly",
+    });
+    rm.applyRecurringTransactions(2026, 5);
+    rm.applyRecurringTransactions(2026, 6);
+    const julIdx = s.getTransactions()["2026-07-01"].findIndex((t) => t.recurringId === rtId);
+    s.setTransactionSettled("2026-07-01", julIdx, false);
+    const julId = s.getTransactions()["2026-07-01"][julIdx].id;
+
+    const junIdx = s.getTransactions()["2026-06-01"].findIndex((t) => t.recurringId === rtId);
+    rm.deleteTransaction("2026-06-01", junIdx, true);
+    if (!tombstoneIds(s).includes(julId)) {
+      throw new Error("deleteFuture must tombstone the persisted July instance");
+    }
+    if (s.getTransactions()["2026-07-01"]) {
+      throw new Error("July instance must be removed");
+    }
+  }
+
+  // (c) A partial legacy deletedItems object is normalized on load.
+  {
+    localStorage.clear();
+    localStorage.setItem(
+      "deletedItems",
+      JSON.stringify({ transactions: [{ id: "x", deletedAt: Date.now() }] })
+    );
+    const s = new TransactionStore();
+    s.trackDeletedTransaction("abc");
+    s._deletedItems.debts.push({ id: "d", deletedAt: Date.now() });
+    s._deletedItems.recurringTransactions.push({ id: "r", deletedAt: Date.now() });
+    s._deletedItems.cashInfusions.push({ id: "c", deletedAt: Date.now() });
+    if (!s._deletedItems.transactions.some((x) => x.id === "x")) {
+      throw new Error("Existing tombstones must be preserved through normalization");
+    }
+    localStorage.clear();
+  }
+  console.log("✅ Bulk deletions tombstone persisted instances; partial deletedItems normalizes");
+}
+
+// TEST 21: Bank reconcile "Move series" relocates a materialized MODIFIED
+// instance to the bank date. Modified instances survive re-expansion, so
+// leaving one at the old date duplicated the occurrence the shifted series
+// regenerates on the new day (silent double-count).
+console.log("TEST 21: Shift-Series Relocates Modified Instances");
+{
+  const s = new TransactionStore();
+  s.resetData();
+  const rm = new RecurringTransactionManager(s);
+  const ui = new BankReconcileUI(s, rm, () => {}, () => {});
+
+  // Monthly bill, first occurrence 2026-07-03; bank drafts it 2026-07-02.
+  const rtId = s.addRecurringTransaction({
+    startDate: "2026-07-03", amount: 262.21, type: "expense",
+    description: "OneMain", recurrence: "monthly",
+  });
+  rm.applyRecurringTransactions(2026, 6);
+  const idx = s.getTransactions()["2026-07-03"].findIndex((t) => t.recurringId === rtId);
+  rm.editTransaction(
+    "2026-07-03", idx,
+    { amount: 262.21, type: "expense", description: "OneMain (edited)" },
+    "this"
+  );
+  const inst = s.getTransactions()["2026-07-03"].find((t) => t.recurringId === rtId);
+  if (inst.modifiedInstance !== true || !inst.id) {
+    throw new Error("Setup: instance must be a promoted modified instance");
+  }
+
+  ui._shiftSeries({
+    bank: { date: "2026-07-02", postedDate: "2026-07-02", signed: -262.21, description: "ACH ONEMAIN" },
+    app: {
+      date: "2026-07-03", index: idx, id: inst.id, recurringId: rtId,
+      amount: 262.21, signed: -262.21, type: "expense",
+      description: "OneMain (edited)", settled: inst.settled,
+    },
+  });
+
+  const rec = s.getRecurringTransactions().find((r) => r.id === rtId);
+  if (rec.startDate !== "2026-07-02") {
+    throw new Error(`Series startDate must shift to the bank date, got ${rec.startDate}`);
+  }
+  rm.invalidateCache();
+  rm.applyRecurringTransactions(2026, 6);
+  const julyRows = [];
+  const tx = s.getTransactions();
+  Object.keys(tx).forEach((d) => {
+    if (d.startsWith("2026-07")) tx[d].forEach((t) => { if (t.recurringId === rtId) julyRows.push({ d, t }); });
+  });
+  if (julyRows.length !== 1) {
+    throw new Error(`Expected exactly one July occurrence after shift, got ${julyRows.length} (${julyRows.map((r) => r.d).join(",")})`);
+  }
+  if (julyRows[0].d !== "2026-07-02" || julyRows[0].t.description !== "OneMain (edited)" || julyRows[0].t.modifiedInstance !== true) {
+    throw new Error("Relocated instance must sit on the bank date with the user's edit preserved");
+  }
+  rm.applyRecurringTransactions(2026, 7);
+  if (!(s.getTransactions()["2026-08-02"] || []).some((t) => t.recurringId === rtId)) {
+    throw new Error("August occurrence must regenerate on the shifted day");
+  }
+  console.log("✅ Move series keeps one occurrence, on the bank date, edit intact");
+}
+
+// TEST 22: Skip toggles merge last-write-wins. A pure union of skip lists can
+// never propagate an UNskip (the other device's stale skip resurrects it), so
+// setTransactionSkipped records timestamped events and the merge applies the
+// newest toggle per occurrence. Legacy datasets keep union behavior.
+console.log("TEST 22: Skip Merge Applies Last-Write-Wins Events");
+{
+  const baseData = () => ({
+    transactions: {}, recurringTransactions: [], debts: [], cashInfusions: [],
+    monthlyNotes: {}, movedTransactions: {},
+    debtSnowballSettings: { dailyFloor: 0, autoGenerate: false },
+    lastUpdated: new Date().toISOString(),
+  });
+  const deleted = (skips) => ({
+    transactions: [], recurringTransactions: [], debts: [], cashInfusions: [],
+    ...(skips ? { skips } : {}),
+  });
+  const s = new TransactionStore();
+  s.resetData();
+  const sync = new CloudSync(s, () => {});
+  const RID = "rid123";
+  const DATE = "2026-07-05";
+
+  // (a) Local unskip (newer event) beats the remote's stale skip.
+  {
+    const local = { ...baseData(), skippedTransactions: {}, _deletedItems: deleted([{ date: DATE, recurringId: RID, skipped: false, at: 2000 }]) };
+    const remote = { ...baseData(), skippedTransactions: { [DATE]: [RID] }, _deletedItems: deleted([{ date: DATE, recurringId: RID, skipped: true, at: 1000 }]) };
+    const merged = sync._mergeData(local, remote);
+    if (merged.skippedTransactions[DATE]) {
+      throw new Error("Unskip (newer event) must win over the stale remote skip");
+    }
+    const evt = merged._deletedItems.skips.find((e) => e.recurringId === RID);
+    if (!evt || evt.skipped !== false || evt.at !== 2000) {
+      throw new Error("Merged skip events must keep the newest toggle");
+    }
+  }
+
+  // (b) A genuinely newer re-skip wins back.
+  {
+    const local = { ...baseData(), skippedTransactions: {}, _deletedItems: deleted([{ date: DATE, recurringId: RID, skipped: false, at: 1000 }]) };
+    const remote = { ...baseData(), skippedTransactions: { [DATE]: [RID] }, _deletedItems: deleted([{ date: DATE, recurringId: RID, skipped: true, at: 3000 }]) };
+    const merged = sync._mergeData(local, remote);
+    if (!merged.skippedTransactions[DATE] || !merged.skippedTransactions[DATE].includes(RID)) {
+      throw new Error("Newer re-skip must win over the older unskip");
+    }
+  }
+
+  // (c) Legacy datasets (no events) keep pure-union behavior.
+  {
+    const local = { ...baseData(), skippedTransactions: { [DATE]: [RID] }, _deletedItems: deleted(null) };
+    const remote = { ...baseData(), skippedTransactions: { "2026-07-09": ["other"] }, _deletedItems: deleted(null) };
+    const merged = sync._mergeData(local, remote);
+    if (!merged.skippedTransactions[DATE] || !merged.skippedTransactions["2026-07-09"]) {
+      throw new Error("Legacy union behavior must be preserved when no events exist");
+    }
+  }
+
+  // (d) The store records one latest event per occurrence.
+  {
+    s.setTransactionSkipped(DATE, RID, true);
+    s.setTransactionSkipped(DATE, RID, false);
+    const events = s._deletedItems.skips.filter((e) => e.recurringId === RID);
+    if (events.length !== 1 || events[0].skipped !== false) {
+      throw new Error("setTransactionSkipped must keep exactly the latest toggle per occurrence");
+    }
+    if (s.skippedTransactions[DATE]) {
+      throw new Error("Store must be unskipped after the toggle");
+    }
+    // Kill the debounced save so its deferred CloudSync callback doesn't hit
+    // the DOM-less mock after the suite finishes.
+    s.cancelPendingSave();
+  }
+  console.log("✅ Unskips propagate; newer re-skips win back; legacy union preserved");
 }
 
 console.log("ALL TESTS PASSED");
