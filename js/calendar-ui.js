@@ -86,6 +86,13 @@ class CalendarUI {
     };
     if (calendarDays) {
       calendarDays.addEventListener("click", this._boundDayClickHandler);
+      calendarDays.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        const day = event.target.closest('.day[data-date]');
+        if (!day) return;
+        event.preventDefault();
+        this._boundDayClickHandler(event);
+      });
     }
     if (calendarAgenda) {
       calendarAgenda.addEventListener("click", this._boundDayClickHandler);
@@ -518,6 +525,7 @@ class CalendarUI {
         ${isPayoffDay ? '<div class="payoff-indicator" title="Debt paid off">🎯</div>' : ""}
       </div>`;
         day.setAttribute('data-date', dateString);
+        day.setAttribute('tabindex', '0');
         calendarDays.appendChild(day);
       }
     }
