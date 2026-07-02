@@ -639,6 +639,17 @@ class TransactionUI {
       transactionRecurrence.style.display = "";
     }
 
+    // Reset the Settled toggle to its checked default so an unchecked state
+    // from an abandoned entry doesn't leak into the next add (addTransaction
+    // only resets it after a successful save).
+    const transactionSettled = document.getElementById("transactionSettled");
+    if (transactionSettled) {
+      transactionSettled.checked = true;
+      transactionSettled.disabled = false;
+    }
+    const settledToggleLabel = document.getElementById("settledToggleLabel");
+    if (settledToggleLabel) settledToggleLabel.classList.remove("is-disabled");
+
     // Clear the Allocate toggle so its hidden-recurrence / autocomplete-off
     // state doesn't linger into the next time the add form opens.
     const transactionAllocate = document.getElementById("transactionAllocate");
@@ -1722,6 +1733,16 @@ class TransactionUI {
           if (type === "expense" && transaction.settled !== undefined) {
             movedTransaction.settled = transaction.settled;
           }
+          // Preserve allocation-bucket status so a moved recurring allocation
+          // instance stays a reserve at the new date instead of degrading into
+          // a plain expense (allocations always count as settled).
+          if (type === "expense" && transaction.allocated === true) {
+            movedTransaction.allocated = true;
+            movedTransaction.settled = true;
+            if (transaction.autoCloseout === true) {
+              movedTransaction.autoCloseout = true;
+            }
+          }
           this.store.addTransaction(newDate, movedTransaction);
         } else if (transaction.movedFrom && transaction.originalRecurringId) {
           // One-time that was previously moved from a recurring
@@ -1749,6 +1770,30 @@ class TransactionUI {
             };
             if (type === "expense" && transaction.settled !== undefined) {
               reMovedTransaction.settled = transaction.settled;
+            }
+            // Preserve allocation-bucket status across the re-move (mirrors
+            // the regular one-time branch below).
+            if (type === "expense" && transaction.allocated === true) {
+              reMovedTransaction.allocated = true;
+              if (transaction.autoCloseout === true) {
+                reMovedTransaction.autoCloseout = true;
+                const carried =
+                  editedCloseout || transaction.closeoutDate || newDate;
+                reMovedTransaction.closeoutDate =
+                  carried < newDate ? newDate : carried;
+              }
+            }
+            // Carry the allocation draw across the re-move, honoring any change
+            // made in the edit form. Without this, deleting the old row refunds
+            // the bucket via _reverseAllocationDraw and the re-add never
+            // re-debits it — the spend stands while the bucket is silently
+            // credited back (mirrors the regular one-time branch below).
+            if (type === "expense") {
+              const reDrawEl = document.getElementById(`edit-draw-allocation-${date}-${index}`);
+              const reDrawId = reDrawEl ? reDrawEl.value : transaction.drawsFromAllocationId;
+              if (reDrawId) {
+                reMovedTransaction.drawsFromAllocationId = reDrawId;
+              }
             }
             this.store.addTransaction(newDate, reMovedTransaction);
           }
