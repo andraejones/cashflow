@@ -20,6 +20,11 @@ class CalendarUI {
     // Track bound event handlers for cleanup
     this._boundDayClickHandler = null;
 
+    // Agenda "jump to today" support: the current-day row (rebuilt each render)
+    // and the observer that shows/hides the jump button as it scrolls in/out.
+    this._todayRow = null;
+    this._todayObserver = null;
+
     this.initEventListeners();
   }
 
@@ -115,6 +120,16 @@ class CalendarUI {
         } catch (error) {
           console.error("Error opening add-transaction for today:", error);
           this.openTransactionModalFallback(todayStr);
+        }
+      });
+    }
+
+    // Jump-to-today button: smooth-scroll the current agenda day back into view.
+    const todayJumpBtn = document.getElementById("todayJumpBtn");
+    if (todayJumpBtn) {
+      todayJumpBtn.addEventListener("click", () => {
+        if (this._todayRow) {
+          this._todayRow.scrollIntoView({ behavior: "smooth", block: "center" });
         }
       });
     }
@@ -260,6 +275,9 @@ class CalendarUI {
       }
     }
     let runningBalance = summary.startingBalance;
+    // Captured while walking the agenda so the jump-to-today button can scroll
+    // back to it; stays null in grid view or when off the current month.
+    let currentDayRow = null;
     // Pre-compute unsettled expense carryover from prior months. An Ending
     // Balance reconciles everything dated on/before it, so only unsettled items
     // after the most recent anchor before this month still carry in.
@@ -491,13 +509,15 @@ class CalendarUI {
             (u) => u.date < dateString && (reconAnchor === null || u.date > reconAnchor)
           );
         }
-        calendarAgenda.appendChild(this._buildAgendaRow({
+        const agendaRow = this._buildAgendaRow({
           dayNumber: i, dateString, year, month,
           isCurrentDay, isMinimumEnd, isLowestBalance, isFirstCrisis, isNegativeBalance,
           hasAllocated, isPayoffDay, hasMoveAnomaly,
           dailyTotals, cellExpense, runningBalance, balanceWithoutUnsettled, balanceExcludingAllocations,
           transactionCount, dayTransactions, carriedUnsettled,
-        }));
+        });
+        calendarAgenda.appendChild(agendaRow);
+        if (isCurrentDay) currentDayRow = agendaRow;
       } else {
         const day = document.createElement("div");
         day.classList.add("day");
@@ -677,6 +697,44 @@ class CalendarUI {
         Build ${window.APP_BUILD || "unknown"}
       </div>
     `;
+
+    // Refresh the jump-to-today button for this render (agenda + current month only).
+    this._updateTodayJump(currentDayRow);
+  }
+
+
+  // Wires the mobile "jump to today" button to the just-rendered current-day
+  // agenda row. The button only appears while that row is scrolled out of view;
+  // in grid view or off the current month there's no row, so it stays hidden.
+  _updateTodayJump(currentDayRow) {
+    const btn = document.getElementById("todayJumpBtn");
+    if (!btn) return;
+
+    // The agenda is rebuilt every render, so any prior observer points at a
+    // detached node - tear it down before wiring the fresh row.
+    if (this._todayObserver) {
+      this._todayObserver.disconnect();
+      this._todayObserver = null;
+    }
+    this._todayRow = currentDayRow || null;
+
+    if (!currentDayRow || typeof IntersectionObserver === "undefined") {
+      btn.classList.remove("is-visible");
+      return;
+    }
+
+    // Show the button whenever today's row isn't intersecting the viewport. The
+    // negative top rootMargin (~sticky header height) keeps a row tucked behind
+    // the header counting as "not visible" so the button still offers a jump.
+    this._todayObserver = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (!entry) return;
+        btn.classList.toggle("is-visible", !entry.isIntersecting);
+      },
+      { threshold: 0, rootMargin: "-64px 0px 0px 0px" }
+    );
+    this._todayObserver.observe(currentDayRow);
   }
 
 

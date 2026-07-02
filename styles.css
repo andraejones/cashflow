@@ -142,12 +142,14 @@ h4 {
 
 /* Mobile-only floating action button (add-to-today). Hidden on desktop, where
    day cells/agenda rows are clicked directly to add. */
-.fab-add {
+.fab-add,
+.fab-today {
   display: none;
 }
 
-/* Never float the FAB over the PIN lock screen. */
-body.app-locked .fab-add {
+/* Never float the FABs over the PIN lock screen. */
+body.app-locked .fab-add,
+body.app-locked .fab-today {
   display: none !important;
 }
 
@@ -2418,6 +2420,43 @@ body.app-locked #calendarOptions {
   }
 
   .fab-add:focus-visible {
+    outline: 3px solid rgba(255, 255, 255, 0.7);
+    outline-offset: 2px;
+  }
+
+  /* Jump-to-today button — mirrors the add FAB but sits bottom-left, opposite
+     it. Stays hidden until JS adds .is-visible (today's row scrolled away). */
+  .fab-today {
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    left: calc(18px + env(safe-area-inset-left));
+    bottom: calc(18px + env(safe-area-inset-bottom));
+    width: 58px;
+    height: 58px;
+    padding: 0;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #13907a 0%, #0f7a6c 60%, #f6b042 140%);
+    color: #fff;
+    font-size: 30px;
+    line-height: 1;
+    font-weight: 400;
+    box-shadow: 0 10px 24px rgba(12, 40, 34, 0.38);
+    cursor: pointer;
+    z-index: 800;
+    transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+  }
+
+  .fab-today.is-visible {
+    display: flex;
+  }
+
+  .fab-today:active {
+    transform: scale(0.94);
+    box-shadow: 0 6px 16px rgba(12, 40, 34, 0.32);
+  }
+
+  .fab-today:focus-visible {
     outline: 3px solid rgba(255, 255, 255, 0.7);
     outline-offset: 2px;
   }
