@@ -825,6 +825,12 @@ body.app-locked .fab-add {
   color: var(--ink-color);
 }
 
+/* Allocated Transactions modal: the amount is a reserve still held, not a
+   cash movement — allocation purple, no sign. */
+.recent-transaction-amount.allocated {
+  color: #7c5cd6;
+}
+
 .recent-transaction-desc {
   grid-area: desc;
   color: var(--ink-color);
