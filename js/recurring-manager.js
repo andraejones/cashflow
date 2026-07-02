@@ -1728,11 +1728,16 @@ class RecurringTransactionManager {
       if (recurringTransaction.settled !== undefined) {
         newRecurringTransaction.settled = recurringTransaction.settled;
       }
-      if (recurringTransaction.allocated !== undefined) {
-        newRecurringTransaction.allocated = recurringTransaction.allocated;
-      }
-      if (recurringTransaction.autoCloseout !== undefined) {
-        newRecurringTransaction.autoCloseout = recurringTransaction.autoCloseout;
+      // Allocation-bucket flags only carry over while the series remains an
+      // expense — carrying them across a type change off expense would create
+      // a phantom recurring allocation (e.g. income flagged as a reserve).
+      if (updatedTransaction.type === "expense") {
+        if (recurringTransaction.allocated !== undefined) {
+          newRecurringTransaction.allocated = recurringTransaction.allocated;
+        }
+        if (recurringTransaction.autoCloseout !== undefined) {
+          newRecurringTransaction.autoCloseout = recurringTransaction.autoCloseout;
+        }
       }
       if (recurringTransaction.debtId) {
         newRecurringTransaction.debtId = recurringTransaction.debtId;
@@ -1772,12 +1777,21 @@ class RecurringTransactionManager {
         });
       }
       this.store.addRecurringTransaction(newRecurringTransaction);
-      this.store.updateTransaction(date, index, {
+      const instanceUpdates = {
         amount: updatedTransaction.amount,
         type: updatedTransaction.type,
         description: updatedTransaction.description,
         recurringId: newRecurringId,
-      });
+      };
+      // The clicked instance would otherwise keep stale expense-only flags
+      // through the spread merge when the series' type moves off expense.
+      if (updatedTransaction.type !== "expense") {
+        instanceUpdates.settled = undefined;
+        instanceUpdates.allocated = undefined;
+        instanceUpdates.autoCloseout = undefined;
+        instanceUpdates.closeoutDate = undefined;
+      }
+      this.store.updateTransaction(date, index, instanceUpdates);
       const skippedTransactions = this.store.getSkippedTransactions();
       Object.keys(skippedTransactions).forEach((skipDate) => {
         if (Utils.parseDateString(skipDate) >= startDate) {
@@ -1797,19 +1811,36 @@ class RecurringTransactionManager {
 
     if (editScope === "all") {
       if (recurringTransaction) {
-        this.store.updateRecurringTransaction(recurringId, {
+        // Clear expense-only allocation flags when the series' type moves off
+        // expense (mirrors the future-scope guard above) so neither the
+        // definition nor its expanded instances linger as phantom buckets.
+        const clearAllocation =
+          updatedTransaction.type !== "expense" &&
+          recurringTransaction.allocated === true;
+        const recurringUpdates = {
           amount: updatedTransaction.amount,
           type: updatedTransaction.type,
           description: updatedTransaction.description,
-        });
+        };
+        if (clearAllocation) {
+          recurringUpdates.allocated = undefined;
+          recurringUpdates.autoCloseout = undefined;
+        }
+        this.store.updateRecurringTransaction(recurringId, recurringUpdates);
         Object.keys(transactions).forEach((dateKey) => {
           transactions[dateKey].forEach((t, i) => {
             if (t.recurringId === recurringId && !t.modifiedInstance) {
-              this.store.updateTransaction(dateKey, i, {
+              const instanceUpdates = {
                 amount: updatedTransaction.amount,
                 type: updatedTransaction.type,
                 description: updatedTransaction.description,
-              });
+              };
+              if (clearAllocation) {
+                instanceUpdates.allocated = undefined;
+                instanceUpdates.autoCloseout = undefined;
+                instanceUpdates.closeoutDate = undefined;
+              }
+              this.store.updateTransaction(dateKey, i, instanceUpdates);
             }
           });
         });

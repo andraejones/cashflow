@@ -1688,6 +1688,15 @@ class TransactionUI {
         if (type !== "expense") {
           updatedFields.settled = undefined;
         }
+        // Allocation-bucket semantics only apply to expenses: a type change
+        // off expense clears the bucket flags too, so an income row can't
+        // linger as a phantom allocation. Outstanding draws degrade the same
+        // way they do after a Close Out deletes their bucket.
+        if (type !== "expense" && transaction.allocated === true) {
+          updatedFields.allocated = undefined;
+          updatedFields.autoCloseout = undefined;
+          updatedFields.closeoutDate = undefined;
+        }
         // Apply any allocation-draw change from the edit form. Only present for
         // one-time, non-allocated expenses; updateTransaction reconciles the
         // bucket (refunds the old draw, re-debits the chosen one). Clearing the
