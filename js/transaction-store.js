@@ -323,9 +323,23 @@ class TransactionStore {
         this.lastUpdated = storedLastUpdated;
       }
 
-      // Load deleted items tracking for merge conflict resolution
+      // Load deleted items tracking for merge conflict resolution. Normalize
+      // the shape — a legacy/partial object missing any of the four keys would
+      // make every later tombstone push throw.
       if (storedDeletedItems) {
-        this._deletedItems = JSON.parse(storedDeletedItems);
+        const parsedDeleted = JSON.parse(storedDeletedItems);
+        this._deletedItems = {
+          transactions: Array.isArray(parsedDeleted.transactions)
+            ? parsedDeleted.transactions
+            : [],
+          recurringTransactions: Array.isArray(parsedDeleted.recurringTransactions)
+            ? parsedDeleted.recurringTransactions
+            : [],
+          debts: Array.isArray(parsedDeleted.debts) ? parsedDeleted.debts : [],
+          cashInfusions: Array.isArray(parsedDeleted.cashInfusions)
+            ? parsedDeleted.cashInfusions
+            : [],
+        };
       }
 
       if (this.debts.length > 0 && this.recurringTransactions.length > 0) {
@@ -1139,6 +1153,15 @@ class TransactionStore {
   }
 
 
+  // Record a transaction id as deleted so cloud merges don't resurrect the
+  // remote copy (see CloudSync._mergeById). No-op for id-less expansions,
+  // which are never persisted or synced.
+  trackDeletedTransaction(id) {
+    if (!id) return;
+    this._deletedItems.transactions.push({ id, deletedAt: Date.now() });
+  }
+
+
   deleteRecurringTransaction(id) {
     if (!id) {
       console.error("Invalid ID for deleteRecurringTransaction");
@@ -1156,9 +1179,17 @@ class TransactionStore {
 
     this.recurringTransactions.splice(index, 1);
     for (const dateKey in this.transactions) {
-      this.transactions[dateKey] = this.transactions[dateKey].filter(
-        t => !t.recurringId || t.recurringId !== id
-      );
+      this.transactions[dateKey] = this.transactions[dateKey].filter((t) => {
+        if (!t.recurringId || t.recurringId !== id) {
+          return true;
+        }
+        // Persisted instances of the series (modified/settled hand-edits)
+        // carry ids and exist in the synced copy — tombstone them, or the
+        // next sync-merge resurrects them as ghost rows for a series that no
+        // longer exists (nothing re-expands or cleans non-debt orphans).
+        this.trackDeletedTransaction(t.id);
+        return false;
+      });
 
       if (this.transactions[dateKey].length === 0) {
         delete this.transactions[dateKey];
@@ -1572,11 +1603,19 @@ class TransactionStore {
         typeof data.lastUpdated === "string" ? data.lastUpdated : this.lastUpdated;
 
       // Import deleted items tracking for merge conflict resolution
-      this._deletedItems = data._deletedItems || {
-        transactions: [],
-        recurringTransactions: [],
-        debts: [],
-        cashInfusions: []
+      // (normalized per-key — a partial object would break tombstone pushes).
+      const importedDeleted = data._deletedItems || {};
+      this._deletedItems = {
+        transactions: Array.isArray(importedDeleted.transactions)
+          ? importedDeleted.transactions
+          : [],
+        recurringTransactions: Array.isArray(importedDeleted.recurringTransactions)
+          ? importedDeleted.recurringTransactions
+          : [],
+        debts: Array.isArray(importedDeleted.debts) ? importedDeleted.debts : [],
+        cashInfusions: Array.isArray(importedDeleted.cashInfusions)
+          ? importedDeleted.cashInfusions
+          : [],
       };
 
       // Clean up stale movedTransactions entries where fromDate equals toDate

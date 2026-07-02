@@ -1896,9 +1896,15 @@ class RecurringTransactionManager {
         }
         Object.keys(transactions).forEach((dateKey) => {
           if (Utils.parseDateString(dateKey) >= currentDate) {
-            const newTransactions = transactions[dateKey].filter(
-              (t) => t.recurringId !== recurringId
-            );
+            const newTransactions = transactions[dateKey].filter((t) => {
+              if (t.recurringId !== recurringId) {
+                return true;
+              }
+              // Tombstone persisted (id-bearing) instances so a sync-merge
+              // can't resurrect them past the new endDate.
+              this.store.trackDeletedTransaction(t.id);
+              return false;
+            });
 
             if (newTransactions.length === 0) {
               delete transactions[dateKey];

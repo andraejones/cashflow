@@ -2104,6 +2104,8 @@ class DebtSnowballUI {
             ? payoffIndex <= viewIndex
             : payoffIndex < viewIndex;
         if (shouldPrune) {
+          // Tombstone persisted rows so a sync-merge doesn't resurrect them.
+          this.store.trackDeletedTransaction(t.id);
           changed = true;
           return false;
         }
@@ -2152,7 +2154,9 @@ class DebtSnowballUI {
         }
         const rt = recurringById.get(t.recurringId);
         if (!rt) {
-          // Recurrence definition is gone — orphaned instance.
+          // Recurrence definition is gone — orphaned instance. Tombstone so a
+          // sync-merge doesn't resurrect the remote copy.
+          this.store.trackDeletedTransaction(t.id);
           changed = true;
           return false;
         }
@@ -2164,11 +2168,13 @@ class DebtSnowballUI {
           (rt.startDate && occurrence < rt.startDate) ||
           (rt.endDate && occurrence > rt.endDate)
         ) {
+          this.store.trackDeletedTransaction(t.id);
           changed = true;
           return false;
         }
         const occurrenceKey = `${t.recurringId}|${occurrence}`;
         if (seenOccurrences.has(occurrenceKey)) {
+          this.store.trackDeletedTransaction(t.id);
           changed = true;
           return false;
         }
@@ -2327,6 +2333,10 @@ class DebtSnowballUI {
           return true;
         }
         if (!includeExtra) {
+          // Tombstone persisted snowball rows so a sync-merge doesn't
+          // resurrect them (they'd double-count until the next maintenance
+          // pass on every device).
+          this.store.trackDeletedTransaction(t.id);
           changed = true;
           return false;
         }
@@ -2340,6 +2350,7 @@ class DebtSnowballUI {
           expected.dateString !== dateKey ||
           expected.matched === true
         ) {
+          this.store.trackDeletedTransaction(t.id);
           changed = true;
           return false;
         }
