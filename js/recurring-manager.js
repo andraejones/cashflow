@@ -1258,6 +1258,13 @@ class RecurringTransactionManager {
       console.warn("Custom recurrence missing interval data");
       return;
     }
+    // A zero/negative/NaN interval would leave the catch-up loop below stepping
+    // in place forever (browser hang); the add form does not validate the value.
+    const intervalStep = Number(rt.customInterval.value);
+    if (!Number.isFinite(intervalStep) || intervalStep < 1) {
+      console.warn("Custom recurrence has a non-positive interval; skipping");
+      return;
+    }
 
     const startOfMonth = new Date(year, month, 1, 12, 0, 0);
     const endOfMonth = new Date(year, month + 1, 0, 12, 0, 0);
@@ -1677,11 +1684,23 @@ class RecurringTransactionManager {
 
     if (editScope === "future") {
       const startDate = Utils.parseDateString(date);
+      // Anchor the new series on the SCHEDULED occurrence date, not the
+      // business-day-adjusted landing date the instance rendered on. Splitting
+      // at the landing date silently rewrites the recurrence pattern — e.g. a
+      // monthly bill due the 1st, adjusted back to Fri Oct 30, would become
+      // "monthly on the 30th" from the split forward.
+      const scheduledStart = transaction.originalDate
+        ? Utils.parseDateString(transaction.originalDate)
+        : startDate;
+      // Split boundary for ending the old series / clearing skips: the earlier
+      // of the scheduled and landing dates, so the edited occurrence can't
+      // re-expand from the old series whichever direction the adjustment moved.
+      const splitCutoff = scheduledStart < startDate ? scheduledStart : startDate;
       const newRecurringId = Utils.generateUniqueId();
 
       const newRecurringTransaction = {
         id: newRecurringId,
-        startDate: Utils.formatDateString(startDate),
+        startDate: Utils.formatDateString(scheduledStart),
         amount: updatedTransaction.amount,
         type: updatedTransaction.type,
         description: updatedTransaction.description,
@@ -1753,7 +1772,7 @@ class RecurringTransactionManager {
         const originalEndDate = Utils.parseDateString(
           recurringTransaction.endDate
         );
-        if (originalEndDate >= startDate) {
+        if (originalEndDate >= scheduledStart) {
           newRecurringTransaction.endDate = recurringTransaction.endDate;
         }
       }
@@ -1761,7 +1780,7 @@ class RecurringTransactionManager {
       if (recurringTransaction.maxOccurrences) {
         const occurrencesBefore = this.countOccurrencesBefore(
           recurringTransaction,
-          startDate
+          scheduledStart
         );
 
         if (recurringTransaction.maxOccurrences > occurrencesBefore) {
@@ -1770,7 +1789,7 @@ class RecurringTransactionManager {
         }
       }
       if (recurringTransaction) {
-        const endDate = new Date(startDate);
+        const endDate = new Date(splitCutoff);
         endDate.setDate(endDate.getDate() - 1);
         this.store.updateRecurringTransaction(recurringId, {
           endDate: Utils.formatDateString(endDate),
@@ -1794,7 +1813,7 @@ class RecurringTransactionManager {
       this.store.updateTransaction(date, index, instanceUpdates);
       const skippedTransactions = this.store.getSkippedTransactions();
       Object.keys(skippedTransactions).forEach((skipDate) => {
-        if (Utils.parseDateString(skipDate) >= startDate) {
+        if (Utils.parseDateString(skipDate) >= splitCutoff) {
           const skipIndex = skippedTransactions[skipDate].indexOf(recurringId);
           if (skipIndex > -1) {
             skippedTransactions[skipDate].splice(skipIndex, 1);
