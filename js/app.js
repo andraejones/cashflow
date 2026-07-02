@@ -444,14 +444,17 @@ class CashflowApp {
         row.className = "recent-transaction-row";
         row.setAttribute("role", "listitem");
 
-        const amountText = `-$${Number(transaction.amount).toFixed(2)}`;
+        // Amount held in the bucket, not a cash movement: no sign, and the
+        // allocation purple (not expense red) to match 🔒/allocated styling
+        // everywhere else.
+        const amountText = `$${Number(transaction.amount).toFixed(2)}`;
 
         const meta = document.createElement("span");
         meta.className = "recent-transaction-meta";
         meta.textContent = Utils.formatDisplayDate(date);
 
         const amount = document.createElement("span");
-        amount.className = `recent-transaction-amount ${transaction.type}`;
+        amount.className = "recent-transaction-amount allocated";
         amount.textContent = amountText;
 
         const desc = document.createElement("span");
