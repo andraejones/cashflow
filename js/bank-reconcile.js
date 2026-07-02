@@ -430,6 +430,33 @@ class BankReconcileUI {
     sortedBank.forEach((b) => (b._shareTransfer = this._isShareTransfer(b.description)));
     appItems.forEach((a) => (a._isTransferEntry = /transfer/i.test(a.description || "")));
 
+    // Cross-attestation flags for the payee-conflict guard (see _blockMatch).
+    // The app vocabulary spans the full dataset — not just the window items —
+    // so a payee whose app entry falls outside the statement (a bill logged on
+    // its due date weeks out) still attests its bank line.
+    const appVocab = this._appPayeeVocabulary();
+    const bankVocab = new Set();
+    sortedBank.forEach((b) => {
+      b._payeeKnownToApp =
+        this._attestedIn(b._normTokens, appVocab) ||
+        this._attestedIn(b._tokens, appVocab);
+      b._normTokens.forEach((t) => bankVocab.add(t));
+      b._tokens.forEach((t) => bankVocab.add(t));
+    });
+    const debtRecurringIds = new Set(
+      (this.store.getRecurringTransactions() || [])
+        .filter((r) => r && r.debtId)
+        .map((r) => r.id)
+    );
+    appItems.forEach((a) => {
+      // A debt payment's description is the creditor's actual name (system-
+      // labeled), never a category — authoritative for the conflict guard.
+      a._isDebtPayment = !!(a.recurringId && debtRecurringIds.has(a.recurringId));
+      a._payeeKnownToBank =
+        this._attestedIn(a._normTokens, bankVocab) ||
+        this._attestedIn(a._tokens, bankVocab);
+    });
+
     // Pass 1: exact amount, same sign, nearest date within tolerance.
     sortedBank.forEach((b) => {
       const a = this._bestMatch(b, appItems, (cand) =>
@@ -590,12 +617,31 @@ class BankReconcileUI {
     return s.includes("transfer to") && s.includes("share");
   }
 
-  // Hard match guard, applied in every pass. A share transfer (flagged on the
-  // bank row) may match ONLY an app entry whose description contains "transfer";
-  // its round amount must never absorb into an unrelated bill. Returns true to
-  // block the pairing.
+  // Hard match guard, applied in every pass. Returns true to block the pairing.
+  //
+  //  - A share transfer (flagged on the bank row) may match ONLY an app entry
+  //    whose description contains "transfer"; its round amount must never
+  //    absorb into an unrelated bill.
+  //  - A cross-attested payee conflict. A name conflict alone never blocks —
+  //    users label by category ("Groceries" for a Publix line) — but when the
+  //    bank line's payee is a name the app already knows (it appears among the
+  //    user's own entries, recurring definitions, or debt names) AND the app
+  //    entry's name is authoritative (a system-labeled debt payment, or a payee
+  //    that itself appears elsewhere on this statement), both sides name real,
+  //    different payees that each have their own counterpart. Pairing them
+  //    cross-wise is wrong: an ACH "MISSION LANE" must not absorb an unsettled
+  //    "Debt Payment: Apple Card - Dayra" that simply hasn't posted yet.
+  //    Category labels can't trip this — they aren't payees the bank prints,
+  //    so the app-side attestation fails and the conflict stays matchable.
   _blockMatch(bankRow, appItem) {
     if (bankRow._shareTransfer && !appItem._isTransferEntry) return true;
+    if (
+      bankRow._payeeKnownToApp &&
+      (appItem._isDebtPayment || appItem._payeeKnownToBank) &&
+      this._nameCoherence(bankRow, appItem) === -1
+    ) {
+      return true;
+    }
     return false;
   }
 
@@ -822,6 +868,40 @@ class BankReconcileUI {
       }
     }
     return best;
+  }
+
+  // Every payee word the app knows, drawn from the full dataset: all logged
+  // transaction descriptions, recurring definitions (including debt names),
+  // and debts. Both raw and normalized forms are included so a bank token can
+  // attest against either (a raw "WAL" fragment misses "Walmart"; the
+  // normalized form doesn't). Feeds the cross-attestation guard in _blockMatch.
+  _appPayeeVocabulary() {
+    const vocab = new Set();
+    const addDesc = (desc) => {
+      if (!desc) return;
+      this._nameTokens(desc).forEach((t) => vocab.add(t));
+      this._nameTokens(this._normalizeMerchant(desc)).forEach((t) => vocab.add(t));
+    };
+    const transactions = this.store.getTransactions();
+    Object.keys(transactions).forEach((date) => {
+      const list = transactions[date];
+      if (Array.isArray(list)) list.forEach((t) => addDesc(t.description));
+    });
+    (this.store.getRecurringTransactions() || []).forEach((r) => {
+      if (!r) return;
+      addDesc(r.description);
+      addDesc(r.debtName);
+    });
+    (this.store.getDebts() || []).forEach((d) => d && addDesc(d.name));
+    return vocab;
+  }
+
+  // True when any token prefix-matches a vocabulary word at nameMinTokenLen+.
+  _attestedIn(tokens, vocab) {
+    return (
+      this._distinctiveSharedScore(tokens, vocab, () => true) >=
+      this.nameMinTokenLen
+    );
   }
 
   // True when each token set has a distinctive word (>= nameMinTokenLen) that
