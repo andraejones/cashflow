@@ -907,29 +907,39 @@ class TransactionUI {
             transactionDiv.appendChild(remainingSpan);
           }
 
-          const editBtn = document.createElement("span");
-          editBtn.className = "edit-btn";
-          editBtn.setAttribute("role", "button");
-          editBtn.setAttribute("tabindex", "0");
-          editBtn.setAttribute(
-            "aria-label",
-            `Edit ${normalizedType} of $${t.amount.toFixed(2)}${descriptionText ? " " + descriptionText : ""
-            }`
-          );
-          editBtn.textContent = "Edit";
-          transactionDiv.appendChild(editBtn);
+          // Debt-linked transactions (minimum payments, snowball payments) are
+          // managed from the Debt Snowball panel — editing/deleting them here
+          // never sticks (the projection re-materializes them every render), so
+          // don't surface the Edit/Delete buttons for them.
+          const isDebtManaged = Boolean(t.debtId);
 
-          const deleteBtn = document.createElement("span");
-          deleteBtn.className = "delete-btn";
-          deleteBtn.setAttribute("role", "button");
-          deleteBtn.setAttribute("tabindex", "0");
-          deleteBtn.setAttribute(
-            "aria-label",
-            `Delete ${normalizedType} of $${t.amount.toFixed(2)}${descriptionText ? " " + descriptionText : ""
-            }`
-          );
-          deleteBtn.textContent = "Delete";
-          transactionDiv.appendChild(deleteBtn);
+          let editBtn = null;
+          let deleteBtn = null;
+          if (!isDebtManaged) {
+            editBtn = document.createElement("span");
+            editBtn.className = "edit-btn";
+            editBtn.setAttribute("role", "button");
+            editBtn.setAttribute("tabindex", "0");
+            editBtn.setAttribute(
+              "aria-label",
+              `Edit ${normalizedType} of $${t.amount.toFixed(2)}${descriptionText ? " " + descriptionText : ""
+              }`
+            );
+            editBtn.textContent = "Edit";
+            transactionDiv.appendChild(editBtn);
+
+            deleteBtn = document.createElement("span");
+            deleteBtn.className = "delete-btn";
+            deleteBtn.setAttribute("role", "button");
+            deleteBtn.setAttribute("tabindex", "0");
+            deleteBtn.setAttribute(
+              "aria-label",
+              `Delete ${normalizedType} of $${t.amount.toFixed(2)}${descriptionText ? " " + descriptionText : ""
+              }`
+            );
+            deleteBtn.textContent = "Delete";
+            transactionDiv.appendChild(deleteBtn);
+          }
 
           let skipBtn = null;
           if (isRecurring) {
@@ -1125,24 +1135,28 @@ class TransactionUI {
 
           transactionDiv.appendChild(editForm);
 
-          editBtn.addEventListener("click", () =>
-            this.showEditForm(date, index)
-          );
-          editBtn.addEventListener("keydown", (event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              this.showEditForm(date, index);
-            }
-          });
-          deleteBtn.addEventListener("click", () =>
-            this.deleteTransaction(date, index, t.id)
-          );
-          deleteBtn.addEventListener("keydown", (event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              this.deleteTransaction(date, index, t.id);
-            }
-          });
+          if (editBtn) {
+            editBtn.addEventListener("click", () =>
+              this.showEditForm(date, index)
+            );
+            editBtn.addEventListener("keydown", (event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                this.showEditForm(date, index);
+              }
+            });
+          }
+          if (deleteBtn) {
+            deleteBtn.addEventListener("click", () =>
+              this.deleteTransaction(date, index, t.id)
+            );
+            deleteBtn.addEventListener("keydown", (event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                this.deleteTransaction(date, index, t.id);
+              }
+            });
+          }
           if (skipBtn) {
             skipBtn.addEventListener("click", () =>
               this.toggleSkipTransaction(date, t.recurringId)
