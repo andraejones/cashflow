@@ -2794,39 +2794,6 @@ body.app-locked #calendarOptions {
   font-weight: 500;
 }
 
-/* Balance without unsettled (actual account balance) */
-.balance-without-unsettled {
-  font-size: 10px;
-  line-height: 1.1;
-  color: var(--muted-color);
-  opacity: 0.75;
-  font-weight: 600;
-}
-
-/* Balance excluding allocations (reserved buckets added back). Purple to match
-   the allocated-day tint so it reads as the "allocations" figure. */
-.balance-excluding-allocations {
-  font-size: 10px;
-  line-height: 1.1;
-  color: #7c5cd6;
-  opacity: 0.9;
-  font-weight: 600;
-}
-
-@media (max-width: 480px) {
-  .balance-without-unsettled,
-  .balance-excluding-allocations {
-    font-size: 10px;
-  }
-}
-
-@media (max-width: 768px) {
-  .balance-without-unsettled,
-  .balance-excluding-allocations {
-    font-size: 10px;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
 
   .calendar,

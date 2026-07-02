@@ -293,30 +293,6 @@ class CalendarUI {
       }
     }
 
-    // Pre-compute allocated-bucket carryover from prior months for the
-    // "balance excluding allocations" figure. Unlike unsettled, allocations are
-    // standing reserves that PERSIST across Ending Balances — an anchor does not
-    // reconcile them away — so include every live bucket before this month
-    // regardless of anchors. Skipped recurring instances aren't subtracted
-    // (calculateDailyTotals excludes them), so skip them here too.
-    let runningAllocatedExpense = 0;
-    const allTransactions = this.store.getTransactions();
-    Object.keys(allTransactions).forEach((d) => {
-      if (d >= monthStartStr) return;
-      allTransactions[d].forEach((t) => {
-        if (t.type !== "expense" || t.allocated !== true) return;
-        if (
-          t.recurringId &&
-          this.recurringManager.isTransactionSkipped(d, t.recurringId)
-        ) {
-          return;
-        }
-        runningAllocatedExpense = this.calculationService.roundToCents(
-          runningAllocatedExpense + t.amount
-        );
-      });
-    });
-
     // Calculate the end date of the 30-day minimum range (DST-safe)
     const minimumEndDate = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 30);
     const minimumEndYear = minimumEndDate.getFullYear();
@@ -443,27 +419,10 @@ class CalendarUI {
           dailyTotals.balance - reservedOnOrBefore
         );
         runningUnsettledExpense = 0;
-        runningAllocatedExpense = reservedOnOrBefore;
       } else {
         runningBalance = this.calculationService.roundToCents(runningBalance + dailyTotals.income - dailyTotals.expense);
         runningUnsettledExpense = this.calculationService.roundToCents(runningUnsettledExpense + dailyTotals.unsettledExpense);
-        runningAllocatedExpense = this.calculationService.roundToCents(runningAllocatedExpense + dailyTotals.allocatedExpense);
       }
-
-      // Balance with both unsettled expenses AND allocated reserves added back
-      // (neither applied). Tied to having unsettled items so it doesn't just
-      // duplicate the "excluding allocations" line when only allocations exist.
-      const balanceWithoutUnsettled = runningUnsettledExpense > 0
-        ? this.calculationService.roundToCents(
-            runningBalance + runningUnsettledExpense + runningAllocatedExpense
-          )
-        : null;
-
-      // Balance with every allocated bucket added back (what's available if the
-      // reserved set-asides were freed). Shown on the current day only.
-      const balanceExcludingAllocations = runningAllocatedExpense > 0
-        ? this.calculationService.roundToCents(runningBalance + runningAllocatedExpense)
-        : null;
 
       // Check if this date has any moved transactions (from or to)
       const hasMoveAnomaly = this.store.hasMoveAnomaly(dateString);
@@ -513,7 +472,7 @@ class CalendarUI {
           dayNumber: i, dateString, year, month,
           isCurrentDay, isMinimumEnd, isLowestBalance, isFirstCrisis, isNegativeBalance,
           hasAllocated, isPayoffDay, hasMoveAnomaly,
-          dailyTotals, cellExpense, runningBalance, balanceWithoutUnsettled, balanceExcludingAllocations,
+          dailyTotals, cellExpense, runningBalance,
           transactionCount, dayTransactions, carriedUnsettled,
         });
         calendarAgenda.appendChild(agendaRow);
