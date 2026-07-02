@@ -2677,6 +2677,33 @@ body.app-locked #calendarOptions {
   accent-color: #8b5cf6;
 }
 
+/* Close-out date picker for one-time auto-close-out allocations (add form).
+   A labeled date input matching the toggle column's muted styling. */
+.closeout-date-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-grow: 1;
+  min-width: 140px;
+  color: var(--muted-color);
+  font-size: 0.95em;
+  white-space: nowrap;
+}
+
+.closeout-date-field input[type="date"] {
+  flex-grow: 1;
+}
+
+/* Same control inside the day-detail inline edit form. */
+.edit-closeout-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted-color);
+  font-size: 0.9em;
+  white-space: nowrap;
+}
+
 /* Allocated transaction in modal */
 .allocated-transaction {
   border-left: 3px solid #8b5cf6;

@@ -828,6 +828,12 @@ class TransactionStore {
           if (!t.id) return;
           // Can't draw against a bucket before its own date.
           if (date > refStr) return;
+          // An auto-close-out bucket is only drawable through its close-out
+          // date (its own date for legacy entries) — don't offer it to an
+          // expense dated after the bucket will have been forfeited.
+          if (t.autoCloseout === true && (t.closeoutDate || date) < refStr) {
+            return;
+          }
           oneTime.push({
             id: t.id,
             date,
@@ -1448,7 +1454,11 @@ class TransactionStore {
 
         let forfeit = false;
         if (t.autoCloseout === true) {
-          forfeit = date < todayStr;
+          // The bucket lives through its close-out date — drawable on that
+          // day, forfeited the day after. Legacy entries (and recurring
+          // instances, which never carry closeoutDate) fall back to the
+          // bucket's own date, preserving the original behavior.
+          forfeit = (t.closeoutDate || date) < todayStr;
         } else if (t.recurringId) {
           const live = liveRollingDate.get(t.recurringId);
           forfeit = !!live && date < live;

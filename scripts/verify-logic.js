@@ -734,6 +734,55 @@ try {
   if (!todayKept) throw new Error("Today's auto-close-out allocation must survive the sweep");
   console.log("✅ Expiry sweep removes only past auto-close-out allocations");
 
+  // An explicit closeoutDate overrides the bucket's own date for the sweep:
+  // the bucket lives through the close-out date (drawable that day) and is
+  // forfeited the day after. Legacy buckets without closeoutDate keep the
+  // "closes when its own date passes" rule (covered by "Expired" above).
+  s.addTransaction("2026-06-12", {
+    amount: 40, type: "expense", description: "ClosedEarly",
+    allocated: true, autoCloseout: true, settled: true, closeoutDate: "2026-06-14",
+  });
+  s.addTransaction("2026-06-10", {
+    amount: 60, type: "expense", description: "ClosesToday",
+    allocated: true, autoCloseout: true, settled: true, closeoutDate: "2026-06-15",
+  });
+  s.addTransaction("2026-06-10", {
+    amount: 80, type: "expense", description: "ClosesLater",
+    allocated: true, autoCloseout: true, settled: true, closeoutDate: "2026-06-20",
+  });
+  s.closeOutExpiredAllocations();
+  const findByDesc = (date, desc) =>
+    (s.getTransactions()[date] || []).some((t) => t.description === desc);
+  if (findByDesc("2026-06-12", "ClosedEarly")) {
+    throw new Error("Bucket past its closeoutDate should be swept");
+  }
+  if (!findByDesc("2026-06-10", "ClosesToday")) {
+    throw new Error("Bucket closing today must survive the sweep (drawable through its close-out date)");
+  }
+  if (!findByDesc("2026-06-10", "ClosesLater")) {
+    throw new Error("Bucket with a future closeoutDate must outlive its own past date");
+  }
+  // The future-closing bucket stays pinned to its own date (never rolls
+  // forward) even though it outlives it.
+  s.rollForwardAllocations();
+  if (!findByDesc("2026-06-10", "ClosesLater")) {
+    throw new Error("Auto-close-out bucket must stay pinned despite a future closeoutDate");
+  }
+  // Drawable window: offered for reference dates inside [date, closeoutDate],
+  // not before its date and not after its close-out date.
+  const offeredOn = (ref) =>
+    s.getAllocations(ref).some((a) => a.description === "ClosesLater");
+  if (offeredOn("2026-06-09")) {
+    throw new Error("Bucket must not be drawable before its own date");
+  }
+  if (!offeredOn("2026-06-15") || !offeredOn("2026-06-20")) {
+    throw new Error("Bucket must be drawable through its close-out date");
+  }
+  if (offeredOn("2026-06-21")) {
+    throw new Error("Bucket must not be offered to expenses dated after its close-out date");
+  }
+  console.log("✅ closeoutDate extends a bucket's life and bounds its drawable window");
+
   // A recurring allocation drops a fresh drawable bucket each period; drawing
   // against it persists across re-expansion. A bucket can't be drawn before its
   // own date, so the instance is dated today (2026-06-15) to be drawable.
