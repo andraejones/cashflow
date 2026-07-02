@@ -629,6 +629,38 @@ class TransactionUI {
   }
 
 
+  // Render the day-detail modal's balance summary. Shows the running balance
+  // plus the same supporting figures the calendar cell surfaces (day expense,
+  // balance without unsettled, balance excluding allocations, transaction
+  // count), each labeled. Figures come from CalculationService.getDayBalanceBreakdown
+  // so the modal reuses the calendar's balance walk instead of re-deriving it.
+  renderModalBalance(date) {
+    const modalBalance = document.getElementById("modalBalance");
+    if (!modalBalance || !this.calculationService) return;
+
+    const b = this.calculationService.getDayBalanceBreakdown(date);
+    const rows = [];
+    if (b.income > 0) {
+      rows.push(`<div class="modal-balance-row"><span class="modal-balance-label">Income</span><span class="modal-balance-value income">+$${b.income.toFixed(2)}</span></div>`);
+    }
+    if (b.expense > 0) {
+      rows.push(`<div class="modal-balance-row"><span class="modal-balance-label">Expenses</span><span class="modal-balance-value expense">-$${b.expense.toFixed(2)}</span></div>`);
+    }
+    if (b.balanceWithoutUnsettled !== null) {
+      rows.push(`<div class="modal-balance-row"><span class="modal-balance-label">Balance without unsettled</span><span class="modal-balance-value">$${b.balanceWithoutUnsettled.toFixed(2)}</span></div>`);
+    }
+    if (b.balanceExcludingAllocations !== null) {
+      rows.push(`<div class="modal-balance-row"><span class="modal-balance-label">Balance excluding allocations</span><span class="modal-balance-value">$${b.balanceExcludingAllocations.toFixed(2)}</span></div>`);
+    }
+    rows.push(`<div class="modal-balance-row modal-balance-total"><span class="modal-balance-label">Balance</span><span class="modal-balance-value">$${b.balance.toFixed(2)}</span></div>`);
+    if (b.transactionCount > 0) {
+      rows.push(`<div class="modal-balance-row"><span class="modal-balance-label">Transactions</span><span class="modal-balance-value">${b.transactionCount}</span></div>`);
+    }
+
+    modalBalance.innerHTML = rows.join("");
+    modalBalance.className = b.balance < 0 ? "modal-balance negative" : "modal-balance";
+  }
+
   showTransactionDetails(date) {
     try {
 
@@ -661,12 +693,7 @@ class TransactionUI {
 
       modalDate.textContent = formattedDate;
 
-      const modalBalance = document.getElementById("modalBalance");
-      if (modalBalance && this.calculationService) {
-        const balance = this.calculationService.getRunningBalanceForDate(date);
-        modalBalance.textContent = `Balance: $${balance.toFixed(2)}`;
-        modalBalance.className = balance < 0 ? "modal-balance negative" : "modal-balance";
-      }
+      this.renderModalBalance(date);
 
       modalTransactions.innerHTML = "";
       transactionType.innerHTML = `
@@ -1395,12 +1422,7 @@ class TransactionUI {
       if (modalDate) {
         modalDate.textContent = Utils.formatDisplayDate(date);
       }
-      const modalBalance = document.getElementById("modalBalance");
-      if (modalBalance && this.calculationService) {
-        const balance = this.calculationService.getRunningBalanceForDate(date);
-        modalBalance.textContent = `Balance: $${balance.toFixed(2)}`;
-        modalBalance.className = balance < 0 ? "modal-balance negative" : "modal-balance";
-      }
+      this.renderModalBalance(date);
       const transactionDate = document.getElementById("transactionDate");
       if (transactionDate) {
         transactionDate.value = date;
