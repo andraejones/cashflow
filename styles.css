@@ -2960,6 +2960,14 @@ body.app-locked #calendarOptions {
   color: #fff;
 }
 
+/* Two-button cell (date-drift rows: Move / Move series) stays one grid column */
+.bank-reconcile-row .br-actions {
+  display: flex;
+  gap: 0.35rem;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
 .bank-reconcile-row .br-note {
   font-size: 0.78rem;
   color: var(--muted-color);

@@ -541,6 +541,34 @@ class BankReconcileUI {
       }
     });
 
+    // Matched posted lines whose app entry sits on a different date. The pair
+    // reconciles, so it would otherwise vanish from the report — but the entry
+    // is dated off the day the money actually moved, which skews the daily
+    // balances between the two dates (a bill scheduled tomorrow that the bank
+    // drafted today inflates today's balance). Offer to re-date the entry.
+    // clearedUnsettled pairs are excluded (their Settle button already
+    // re-dates); pending lines are excluded (a hold's date isn't final — the
+    // display-only pendingMatched section covers those). No drift when the app
+    // date agrees with EITHER bank date: entries may be logged by transaction
+    // date or by posted date, and both are legitimate.
+    const recurringById = new Map(
+      (this.store.getRecurringTransactions() || [])
+        .filter((r) => r && r.id)
+        .map((r) => [r.id, r])
+    );
+    const dateDrifted = [];
+    bankRows.forEach((b) => {
+      if (!(b.matched && b._match && !b.pending)) return;
+      const a = b._match;
+      if (a.type === "expense" && a.settled === false) return; // clearedUnsettled
+      if (a.date === b.date || a.date === (b.postedDate || b.date)) return;
+      dateDrifted.push({
+        bank: b,
+        app: a,
+        seriesShiftable: this._seriesShiftable(a, recurringById),
+      });
+    });
+
     // Pending holds that exact-matched an entry already in the calendar. These
     // reconcile, so they'd otherwise vanish from the report — but surfacing them
     // (with the matched entry and its date) lets the user spot a scheduled item
@@ -573,6 +601,7 @@ class BankReconcileUI {
       appOnlyExpected,
       appOnlyUnmatched,
       clearedUnsettled,
+      dateDrifted,
       pendingMatched,
     };
     this._renderReport();
@@ -930,6 +959,13 @@ class BankReconcileUI {
     return Math.round(Math.abs(a - b) / 86400000);
   }
 
+  // Signed day difference from `fromIso` to `toIso` (positive = later).
+  _dayDelta(fromIso, toIso) {
+    return Math.round(
+      (Utils.parseDateString(toIso) - Utils.parseDateString(fromIso)) / 86400000
+    );
+  }
+
   _shiftIso(iso, days) {
     const d = Utils.parseDateString(iso);
     d.setDate(d.getDate() + days);
@@ -943,7 +979,10 @@ class BankReconcileUI {
     if (!container || !this.result) return;
     const r = this.result;
     const needsAttention =
-      r.missingFromApp.length + r.reviewPairs.length + r.appOnlyUnmatched.length;
+      r.missingFromApp.length +
+      r.reviewPairs.length +
+      r.appOnlyUnmatched.length +
+      r.dateDrifted.length;
 
     let html = `
       <div class="bank-reconcile-summary">
@@ -961,6 +1000,7 @@ class BankReconcileUI {
     html += this._sectionMissing(r.missingFromApp);
     html += this._sectionReview(r.reviewPairs);
     html += this._sectionClearedUnsettled(r.clearedUnsettled);
+    html += this._sectionDateDrifted(r.dateDrifted);
     html += this._sectionPending(r.missingPending);
     html += this._sectionPendingMatched(r.pendingMatched);
     html += this._sectionAppOnlyUnmatched(r.appOnlyUnmatched);
@@ -1055,6 +1095,41 @@ class BankReconcileUI {
       "cleared",
       `Cleared at bank — still unsettled (${pairs.length})`,
       "Matched a posted bank line but flagged unsettled. Settling moves the entry to the bank's settle date.",
+      items
+    );
+  }
+
+  // Matched posted lines whose app entry is dated off the bank's date. They
+  // reconcile, but daily balances between the two dates are skewed until the
+  // entry moves — the classic case is a scheduled bill the bank drafts a day
+  // early. "Move" re-dates this occurrence; "Move series" (offered only where
+  // it's safe — see _seriesShiftable) also shifts the recurring schedule so
+  // future occurrences draft on the right day.
+  _sectionDateDrifted(pairs) {
+    if (pairs.length === 0) return "";
+    const items = pairs
+      .map((p, i) => {
+        const name = this._normalizeMerchant(p.bank.description);
+        const recurTag = p.app.recurringId ? " (Recurring)" : "";
+        const seriesBtn = p.seriesShiftable
+          ? `<button type="button" class="br-action" data-act="shift-series" data-i="${i}">Move series</button>`
+          : "";
+        return `
+        <div class="bank-reconcile-row" data-open-date="${p.app.date}">
+          <span class="br-date">${this._shortDate(p.bank.date)}</span>
+          <span class="br-amount ${p.bank.signed < 0 ? "expense" : "income"}">${this._money(p.bank.signed)}</span>
+          <span class="br-desc" title="${this._attr(p.bank.description)}">${this._esc(name)} ↔ ${this._esc(p.app.description || "(no description)")}${recurTag} <em class="br-move">→ scheduled ${this._shortDate(p.app.date)}</em></span>
+          <span class="br-actions">
+            <button type="button" class="br-action" data-act="fix-date" data-i="${i}">Move to ${this._shortDate(p.bank.date)}</button>
+            ${seriesBtn}
+          </span>
+        </div>`;
+      })
+      .join("");
+    return this._section(
+      "drifted",
+      `Matched — dated differently (${pairs.length})`,
+      "Cleared at the bank on a different day than scheduled. Moving re-dates the entry to the day the money actually moved.",
       items
     );
   }
@@ -1193,6 +1268,8 @@ class BankReconcileUI {
         else if (act === "add-pending") this._addBankRow(this.result.missingPending[i], false);
         else if (act === "settle") this._settle(this.result.clearedUnsettled[i]);
         else if (act === "fix-amount") this._fixAmount(this.result.reviewPairs[i]);
+        else if (act === "fix-date") this._fixDate(this.result.dateDrifted[i]);
+        else if (act === "shift-series") this._shiftSeries(this.result.dateDrifted[i]);
       });
     });
 
@@ -1249,24 +1326,104 @@ class BankReconcileUI {
       return;
     }
 
+    this._relocateEntry(appItem, index, settleDate, true);
+    Utils.showNotification(`Settled and moved to ${this._shortDate(settleDate)}.`);
+    this._afterMutation();
+  }
+
+  // Re-date a matched-but-drifted entry to the bank's transaction date (how
+  // app entries are dated; for an ACH draft, the day the money left).
+  _fixDate(pair) {
+    if (!pair || !pair.app || !pair.bank) return;
+    const appItem = pair.app;
+    const index = this._currentIndex(appItem);
+    if (index === -1) {
+      Utils.showNotification("Could not locate that entry to move.", "error");
+      return;
+    }
+    if (pair.bank.date === appItem.date) return;
+    this._relocateEntry(appItem, index, pair.bank.date, false);
+    Utils.showNotification(`Moved to ${this._shortDate(pair.bank.date)}.`);
+    this._afterMutation();
+  }
+
+  // Shift a drifted recurring series so it draws on the day the bank actually
+  // drafts: startDate moves by the drift delta (endDate too, preserving the
+  // occurrence count). Offered only for first-occurrence drifts on
+  // startDate-anchored patterns (see _seriesShiftable), so no already-posted
+  // occurrence is rewritten; re-expansion then regenerates this month's
+  // instance on the new day, no skip/move bookkeeping needed.
+  _shiftSeries(pair) {
+    if (!pair || !pair.app || !pair.bank || !pair.app.recurringId) return;
+    const rec = (this.store.getRecurringTransactions() || []).find(
+      (r) => r && r.id === pair.app.recurringId
+    );
+    if (!rec) {
+      Utils.showNotification("Could not locate that recurring series.", "error");
+      return;
+    }
+    const delta = this._dayDelta(pair.app.date, pair.bank.date);
+    if (delta === 0) return;
+    const updates = { startDate: this._shiftIso(rec.startDate, delta) };
+    if (rec.endDate) {
+      updates.endDate = this._shiftIso(rec.endDate, delta);
+    }
+    this.store.updateRecurringTransaction(rec.id, updates);
+    Utils.showNotification(
+      `Series moved — now recurring from ${this._shortDate(updates.startDate)}.`
+    );
+    this._afterMutation();
+  }
+
+  // A drifted recurring instance can have its whole series shifted only when
+  // that is a safe, well-defined day change: the occurrence pattern must be
+  // anchored on startDate alone (not semi-monthly days, day-specific rules,
+  // last-day-of-month, or a business-day adjustment that would re-apply after
+  // the shift), and this instance must be the series' first occurrence —
+  // shifting the anchor under a series with earlier occurrences would rewrite
+  // history. Later-occurrence drifts still get the single-instance Move.
+  _seriesShiftable(appItem, recurringById) {
+    if (!appItem.recurringId) return false;
+    const rec = recurringById.get(appItem.recurringId);
+    if (!rec || !rec.recurrence || !rec.startDate) return false;
+    if (rec.recurrence === "once" || rec.recurrence === "semi-monthly") return false;
+    if (rec.daySpecific || rec.lastDayOfMonth) return false;
+    if (rec.businessDayAdjustment && rec.businessDayAdjustment !== "none") return false;
+    return rec.startDate >= appItem.date;
+  }
+
+  // Move an entry to `targetDate` (the day the bank says the money moved),
+  // preserving its fields; forceSettled additionally marks it settled (the
+  // _settle path). One-time entries move directly; recurring instances can't
+  // be moved as expansions, so we skip the original occurrence and re-add it
+  // as a one-time entry on the target date (same pattern as the
+  // carried-forward Settle button). Debt links (debtId/debtRole/debtName) are
+  // preserved so debt paid-so-far tracking still counts the moved payment; the
+  // copy carries no recurringId, so cleanupOrphanedDebtMinimums leaves it be.
+  _relocateEntry(appItem, index, targetDate, forceSettled) {
     // Snapshot the entry before removing it, preserving allocation fields, and
-    // re-add it on the settle date as a fresh object (new id; the delete is
+    // re-add it on the target date as a fresh object (new id; the delete is
     // tombstoned for merge).
     const tx = this.store.getTransactions()[appItem.date][index];
     const moved = {
       amount: tx.amount,
       type: tx.type,
       description: tx.description,
-      settled: true,
     };
+    if (tx.type === "expense") {
+      moved.settled = forceSettled ? true : tx.settled !== false;
+    }
+    if (tx.debtId) moved.debtId = tx.debtId;
+    if (tx.debtRole) moved.debtRole = tx.debtRole;
+    if (tx.debtName) moved.debtName = tx.debtName;
     if (tx.allocated === true) {
       moved.allocated = true;
       if (tx.autoCloseout === true) {
         moved.autoCloseout = true;
-        // Keep the close-out deadline, floored at the settle date so the
+        // Keep the close-out deadline, floored at the target date so the
         // relocated bucket isn't instantly forfeited by the expiry sweep.
         const carried = tx.closeoutDate || appItem.date;
-        moved.closeoutDate = carried < settleDate ? settleDate : carried;
+        moved.closeoutDate = carried < targetDate ? targetDate : carried;
       }
     }
     if (tx.drawsFromAllocationId) {
@@ -1281,17 +1438,14 @@ class BankReconcileUI {
       if (!this.recurringManager.isTransactionSkipped(appItem.date, recId)) {
         this.recurringManager.toggleSkipTransaction(appItem.date, recId);
       }
-      this.store.moveTransaction(recId, appItem.date, settleDate);
+      this.store.moveTransaction(recId, appItem.date, targetDate);
       moved.movedFrom = appItem.date;
       moved.originalRecurringId = recId;
-      this.store.addTransaction(settleDate, moved);
+      this.store.addTransaction(targetDate, moved);
     } else {
       this.store.deleteTransaction(appItem.date, index);
-      this.store.addTransaction(settleDate, moved);
+      this.store.addTransaction(targetDate, moved);
     }
-
-    Utils.showNotification(`Settled and moved to ${this._shortDate(settleDate)}.`);
-    this._afterMutation();
   }
 
   _fixAmount(pair) {
