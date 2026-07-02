@@ -64,6 +64,12 @@
     <span aria-hidden="true">+</span>
   </button>
 
+  <!-- Mobile-only: in agenda view, jump back to today's row when it's scrolled
+       out of view. Sits opposite the add button; JS toggles .is-visible. -->
+  <button id="todayJumpBtn" class="fab-today" type="button" aria-label="Scroll to today">
+    <span aria-hidden="true">⌖</span>
+  </button>
+
   <div id="transactionModal" class="modal" role="dialog" aria-labelledby="modalDate" aria-hidden="true">
     <div class="modal-content">
       <span class="close" aria-label="Close">&times;</span>
