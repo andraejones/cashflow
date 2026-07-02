@@ -1181,7 +1181,13 @@ class BankReconcileUI {
     };
     if (tx.allocated === true) {
       moved.allocated = true;
-      if (tx.autoCloseout === true) moved.autoCloseout = true;
+      if (tx.autoCloseout === true) {
+        moved.autoCloseout = true;
+        // Keep the close-out deadline, floored at the settle date so the
+        // relocated bucket isn't instantly forfeited by the expiry sweep.
+        const carried = tx.closeoutDate || appItem.date;
+        moved.closeoutDate = carried < settleDate ? settleDate : carried;
+      }
     }
     if (tx.drawsFromAllocationId) {
       moved.drawsFromAllocationId = tx.drawsFromAllocationId;

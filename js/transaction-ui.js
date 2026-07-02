@@ -82,9 +82,11 @@ class TransactionUI {
       this.syncDrawState();
     });
     // The drawable recurring bucket depends on the transaction's date (the
-    // soonest instance on/after it), so re-evaluate the dropdown when it changes.
+    // soonest instance on/after it), so re-evaluate the dropdown when it
+    // changes; the close-out date's floor/default track it too.
     document.getElementById("transactionDate").addEventListener("change", () => {
       this.updateDrawAllocationVisibility();
+      this.updateCloseoutDateVisibility();
     });
     // Cents-first entry on the add form: with the numeric-keypad inputmode there
     // is no "." key, so the user types raw digits and each keystroke fills in from
@@ -331,6 +333,41 @@ class TransactionUI {
       toggleGroup.style.display = isExpense ? "" : "none";
     }
     this.updateDrawAllocationVisibility();
+    this.updateCloseoutDateVisibility();
+  }
+
+
+  // Shows the close-out date picker for one-time auto-close-out allocations.
+  // The bucket stays drawable through this date and is forfeited the day
+  // after. Defaults to the transaction's own date (which reproduces the
+  // pre-picker "closes when its date passes" behavior) and can't be earlier
+  // than it. Recurring allocations never get the picker — each period's
+  // bucket keeps closing when its own date passes.
+  updateCloseoutDateVisibility() {
+    const field = document.getElementById("closeoutDateField");
+    const input = document.getElementById("transactionCloseoutDate");
+    if (!field || !input) return;
+    const type = document.getElementById("transactionType").value;
+    const recurrence = document.getElementById("transactionRecurrence").value;
+    const allocateCb = document.getElementById("transactionAllocate");
+    const autoCloseoutCb = document.getElementById("transactionAutoCloseout");
+    const applicable =
+      type === "expense" &&
+      recurrence === "once" &&
+      allocateCb && allocateCb.checked &&
+      autoCloseoutCb && autoCloseoutCb.checked;
+    if (!applicable) {
+      field.style.display = "none";
+      return;
+    }
+    const dateValue = document.getElementById("transactionDate").value;
+    if (dateValue) {
+      input.min = dateValue;
+      if (!input.value || input.value < dateValue) {
+        input.value = dateValue;
+      }
+    }
+    field.style.display = "";
   }
 
 
@@ -469,6 +506,7 @@ class TransactionUI {
     if (allocated) {
       this.closeDescriptionSuggestions();
     }
+    this.updateCloseoutDateVisibility();
   }
 
 
@@ -610,6 +648,8 @@ class TransactionUI {
     }
     const transactionAutoCloseout = document.getElementById("transactionAutoCloseout");
     if (transactionAutoCloseout) transactionAutoCloseout.checked = false;
+    const transactionCloseoutDate = document.getElementById("transactionCloseoutDate");
+    if (transactionCloseoutDate) transactionCloseoutDate.value = "";
     const allocateToggleLabel = document.getElementById("allocateToggleLabel");
     if (allocateToggleLabel) allocateToggleLabel.classList.remove("is-disabled");
     this.syncAllocateState();
@@ -816,7 +856,12 @@ class TransactionUI {
           } else if (isUnsettled) {
             statusLabel = " (Unsettled)";
           } else if (isAllocated) {
-            statusLabel = " (Allocated)";
+            // Surface an auto-close-out bucket's deadline when it outlives its
+            // own date, so the user can see how long it stays drawable.
+            statusLabel =
+              t.autoCloseout === true && t.closeoutDate && t.closeoutDate !== date
+                ? ` (Allocated, closes ${this.formatShortDisplayDate(t.closeoutDate)})`
+                : " (Allocated)";
           }
           amountSpan.textContent = `${sign}$${t.amount.toFixed(2)}${statusLabel}`;
           transactionDiv.appendChild(amountSpan);
@@ -1004,6 +1049,30 @@ class TransactionUI {
           dateInput.value = date;
           dateInput.setAttribute("aria-label", "Date");
           editForm.appendChild(dateInput);
+
+          // One-time auto-close-out buckets carry their own close-out
+          // deadline (drawable through it, forfeited the day after); expose
+          // it for editing. Missing closeoutDate on legacy entries means "the
+          // bucket's own date". The on/after-transaction-date constraint is
+          // re-checked on save since either date can change.
+          if (
+            normalizedType === "expense" &&
+            !isRecurring &&
+            isAllocated &&
+            t.autoCloseout === true
+          ) {
+            const closeoutLabel = document.createElement("label");
+            closeoutLabel.className = "edit-closeout-label";
+            closeoutLabel.appendChild(document.createTextNode("Close out on "));
+            const closeoutInput = document.createElement("input");
+            closeoutInput.type = "date";
+            closeoutInput.id = `edit-closeout-${date}-${index}`;
+            closeoutInput.value = t.closeoutDate || date;
+            closeoutInput.min = date;
+            closeoutInput.setAttribute("aria-label", "Close-out date");
+            closeoutLabel.appendChild(closeoutInput);
+            editForm.appendChild(closeoutLabel);
+          }
 
           // Regular one-time expenses can be billed against an allocation
           // bucket. Mirror the add-modal "Draw from allocation" control so the
@@ -1520,6 +1589,22 @@ class TransactionUI {
       return;
     }
 
+    // Close-out date field (one-time auto-close-out allocations only). An
+    // empty value falls back to the transaction's (possibly new) date; either
+    // way it must be on/after that date.
+    const closeoutEl = document.getElementById(`edit-closeout-${date}-${index}`);
+    let editedCloseout;
+    if (closeoutEl) {
+      editedCloseout = closeoutEl.value || newDate;
+      if (editedCloseout < newDate) {
+        Utils.showNotification(
+          "Close-out date must be on or after the transaction date.",
+          "error"
+        );
+        return;
+      }
+    }
+
     const transactions = this.store.getTransactions();
     let liveIndex =
       txnId && transactions[date]
@@ -1586,6 +1671,12 @@ class TransactionUI {
         if (drawEl) {
           updatedFields.drawsFromAllocationId =
             type === "expense" && drawEl.value ? drawEl.value : undefined;
+        }
+        // Apply the edited close-out date; drop it when the type moves away
+        // from expense (the bucket semantics no longer apply).
+        if (closeoutEl) {
+          updatedFields.closeoutDate =
+            type === "expense" ? editedCloseout : undefined;
         }
         this.recurringManager.editTransaction(
           date,
@@ -1661,6 +1752,12 @@ class TransactionUI {
             newTransaction.allocated = true;
             if (transaction.autoCloseout === true) {
               newTransaction.autoCloseout = true;
+              // Carry the close-out deadline, floored at the new date so the
+              // moved bucket keeps the closeout ≥ date invariant.
+              const carried =
+                editedCloseout || transaction.closeoutDate || newDate;
+              newTransaction.closeoutDate =
+                carried < newDate ? newDate : carried;
             }
           }
           // Carry the allocation draw across the move, honoring any change made
@@ -1864,9 +1961,21 @@ class TransactionUI {
             ? true
             : document.getElementById("transactionSettled").checked;
           if (allocated) {
-            // A pinned, use-it-or-lose-it bucket that closes out after its date.
+            // A pinned, use-it-or-lose-it bucket. It stays drawable through
+            // its close-out date (defaulting to its own date) and is
+            // forfeited the day after.
             if (document.getElementById("transactionAutoCloseout").checked) {
               newTransaction.autoCloseout = true;
+              const closeoutValue =
+                document.getElementById("transactionCloseoutDate").value;
+              if (closeoutValue && closeoutValue < date) {
+                Utils.showNotification(
+                  "Close-out date must be on or after the transaction date.",
+                  "error"
+                );
+                return false;
+              }
+              newTransaction.closeoutDate = closeoutValue || date;
             }
           } else {
             // A non-allocated one-time expense may draw from an allocation; the
@@ -1938,6 +2047,8 @@ class TransactionUI {
       document.getElementById("transactionAllocate").disabled = false;
       document.getElementById("transactionAutoCloseout").checked = false;
       document.getElementById("autoCloseoutToggleLabel").style.display = "none";
+      document.getElementById("transactionCloseoutDate").value = "";
+      document.getElementById("closeoutDateField").style.display = "none";
       document.getElementById("settledToggleLabel").classList.remove("is-disabled");
       document.getElementById("allocateToggleLabel").classList.remove("is-disabled");
       const drawSelect = document.getElementById("transactionDrawAllocation");
