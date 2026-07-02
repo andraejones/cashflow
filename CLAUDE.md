@@ -65,7 +65,7 @@ Settled/unsettled support: `setTransactionSettled(date, index, isSettled)` toggl
 
 **CalculationService** (`calculation-service.js`) - Computes daily running balances and monthly summaries with caching.
 
-**CalendarUI** (`calendar-ui.js`) - Renders monthly calendar grid with daily balances, month navigation, and highlighting (lowest balance, negative balance, minimum balance ranges). On the current day, displays a secondary "balance without unsettled" figure when unsettled expenses exist.
+**CalendarUI** (`calendar-ui.js`) - Renders monthly calendar grid with daily balances, month navigation, and highlighting (lowest balance, negative balance, minimum balance ranges). The per-day balance-variant figures ("balance without unsettled", "balance excluding allocations") live in the day-detail modal via `CalculationService.getDayBalanceBreakdown`, not in the calendar cells.
 
 **TransactionUI** (`transaction-ui.js`) - Add/edit transaction modals and recurrence form UI. Supports settle/unsettle toggling for one-time expenses and displays carried-forward unsettled transactions on today's date.
 
