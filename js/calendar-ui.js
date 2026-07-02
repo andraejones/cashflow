@@ -724,15 +724,19 @@ class CalendarUI {
     }
 
     // Show the button whenever today's row isn't intersecting the viewport. The
-    // negative top rootMargin (~sticky header height) keeps a row tucked behind
-    // the header counting as "not visible" so the button still offers a jump.
+    // negative top rootMargin (measured sticky header height) keeps a row tucked
+    // behind the header counting as "not visible" so the button still offers a
+    // jump. Batched entries deliver oldest-first; only the last reflects the
+    // current state.
+    const header = document.querySelector(".app-sticky-header");
+    const headerHeight = header ? header.offsetHeight : 64;
     this._todayObserver = new IntersectionObserver(
       (entries) => {
-        const entry = entries[0];
+        const entry = entries[entries.length - 1];
         if (!entry) return;
         btn.classList.toggle("is-visible", !entry.isIntersecting);
       },
-      { threshold: 0, rootMargin: "-64px 0px 0px 0px" }
+      { threshold: 0, rootMargin: `-${headerHeight}px 0px 0px 0px` }
     );
     this._todayObserver.observe(currentDayRow);
   }

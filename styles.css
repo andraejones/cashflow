@@ -2444,7 +2444,7 @@ body.app-locked #calendarOptions {
     box-shadow: 0 10px 24px rgba(12, 40, 34, 0.38);
     cursor: pointer;
     z-index: 800;
-    transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
   }
 
   .fab-today.is-visible {
