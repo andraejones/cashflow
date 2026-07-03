@@ -1468,4 +1468,125 @@ console.log("TEST 22: Skip Merge Applies Last-Write-Wins Events");
   console.log("✅ Unskips propagate; newer re-skips win back; legacy union preserved");
 }
 
+// TEST 23: Floor-based allocation right-sizing (suggest-only). Draws against a
+// recurring allocation are stamped with the series id + period date, and that
+// provenance is the ONLY durable demand record — forfeited bucket instances
+// are deleted outright by closeOutExpiredAllocations. The suggestion is
+// max(floor, round$5(min(median(demand) * 1.1, current * 1.5))), computed from
+// FULL expense amounts (overflow past the bucket must count), needs 3+
+// complete periods with activity, and never writes anything.
+console.log("TEST 23: Allocation floor suggestions from stamped demand history");
+const F_RealDate = Date;
+let F_FIXED = new F_RealDate(2026, 2, 10, 12, 0, 0); // 2026-03-10
+class F_FrozenDate extends F_RealDate {
+  constructor(...args) {
+    if (args.length === 0) { super(F_FIXED.getTime()); } else { super(...args); }
+  }
+  static now() { return F_FIXED.getTime(); }
+}
+global.Date = F_FrozenDate;
+try {
+  const s = new TransactionStore();
+  s.resetData();
+  const rm = new RecurringTransactionManager(s);
+  const rid = s.addRecurringTransaction({
+    startDate: "2026-03-01", amount: 200, type: "expense", description: "Groceries",
+    recurrence: "monthly", allocated: true, settled: true,
+  });
+
+  // Live one month at a time: expand, sweep close-outs (forfeits the previous
+  // period's drawn bucket), then draw against the live bucket.
+  const liveMonth = (monthIdx, spendDate, amounts) => {
+    F_FIXED = new F_RealDate(2026, monthIdx, 10, 12, 0, 0);
+    rm.invalidateCache();
+    rm.applyRecurringTransactions(2026, monthIdx);
+    if (s.closeOutExpiredAllocations()) rm.invalidateCache();
+    if (!amounts.length) return;
+    const bucket = s.getAllocations().find((b) => b.description === "Groceries");
+    if (!bucket) throw new Error(`No live Groceries bucket in month ${monthIdx + 1}`);
+    amounts.forEach((amt, i) => {
+      s.addTransaction(spendDate, {
+        amount: amt, type: "expense", description: `Spend ${monthIdx}-${i}`,
+        drawsFromAllocationId: bucket.id, settled: true,
+      });
+    });
+  };
+
+  liveMonth(2, "2026-03-12", [210]);      // Mar: 210 (overflows the 200 bucket)
+  liveMonth(3, "2026-04-12", [150, 110]); // Apr: 260 across two draws
+  liveMonth(4, "2026-05-12", [240]);      // May: 240
+  liveMonth(5, "2026-06-12", []);         // Jun: zero activity
+  liveMonth(6, "2026-07-14", []);         // Jul: in-progress period
+
+  // Stamps carry the series id + the bucket's period date, and survive the
+  // sweep that deleted their buckets.
+  const marSpend = (s.getTransactions()["2026-03-12"] || []).find(
+    (t) => t.description === "Spend 2-0"
+  );
+  if (!marSpend || marSpend.drawsFromRecurringId !== rid || marSpend.drawsFromPeriodDate !== "2026-03-01") {
+    throw new Error("Draws must be stamped with drawsFromRecurringId + drawsFromPeriodDate");
+  }
+  if ((s.getTransactions()["2026-03-01"] || []).some((t) => t.recurringId === rid)) {
+    throw new Error("Test setup expects the March bucket to be forfeited");
+  }
+
+  // Off by default; enabling captures the current amount as the floor.
+  if (s.getAllocationFloorSuggestion(rid) !== null) {
+    throw new Error("Suggestions must be off until the user opts in");
+  }
+  s.setAllocationAutoAdjust(rid, true);
+  const def = s.recurringTransactions.find((r) => r.id === rid);
+  if (def.autoAdjustFloor !== true || s._roundCents(def.floorAmount) !== 200) {
+    throw new Error("Enabling must capture the current amount as the floor");
+  }
+
+  // Complete periods with activity: Mar 210, Apr 260, May 240 — June (zero
+  // activity) and July (in-progress) excluded. median 240 * 1.1 = 264, cap
+  // min(264, 200*1.5=300), round $5 -> 265, floored at 200 -> 265. Note Mar's
+  // demand reads 210 even though the bucket only covered 200 (full amounts,
+  // not drawAmount).
+  const sug = s.getAllocationFloorSuggestion(rid);
+  if (!sug || s._roundCents(sug.suggested) !== 265) {
+    throw new Error(`Expected suggestion 265, got ${sug && sug.suggested}`);
+  }
+  if (sug.periods.length !== 3) {
+    throw new Error("Zero-activity and in-progress periods must be excluded");
+  }
+
+  // Relax-back: with the working amount raised past demand, the suggestion
+  // comes back down toward (never below) the floor.
+  s.updateRecurringTransaction(rid, { amount: 500 });
+  const relaxed = s.getAllocationFloorSuggestion(rid);
+  if (!relaxed || s._roundCents(relaxed.suggested) !== 265 || s._roundCents(relaxed.floor) !== 200) {
+    throw new Error("Suggestion must relax back toward the floor when demand subsides");
+  }
+
+  // Step cap: at current=100 the jump is clamped to 1.5x (150), and the
+  // effective floor follows a deliberately lowered amount (min(200,100)=100).
+  s.updateRecurringTransaction(rid, { amount: 100 });
+  const capped = s.getAllocationFloorSuggestion(rid);
+  if (!capped || s._roundCents(capped.suggested) !== 150 || s._roundCents(capped.floor) !== 100) {
+    throw new Error(`Step cap should clamp the suggestion to 150, got ${capped && capped.suggested}`);
+  }
+  s.updateRecurringTransaction(rid, { amount: 200 });
+
+  // Warm-up: dropping March leaves only 2 periods with activity -> null.
+  const marArr = s.getTransactions()["2026-03-12"] || [];
+  s.deleteTransaction("2026-03-12", marArr.findIndex((t) => t.description === "Spend 2-0"));
+  if (s.getAllocationFloorSuggestion(rid) !== null) {
+    throw new Error("Warm-up requires 3 complete periods with activity");
+  }
+
+  // Disabling clears both settings.
+  s.setAllocationAutoAdjust(rid, false);
+  const defAfter = s.recurringTransactions.find((r) => r.id === rid);
+  if (defAfter.autoAdjustFloor !== undefined || defAfter.floorAmount !== undefined) {
+    throw new Error("Disabling must clear autoAdjustFloor and floorAmount");
+  }
+  s.cancelPendingSave();
+  console.log("✅ Floor suggestions: stamped history, median+buffer, floor, step cap, warm-up, opt-out");
+} finally {
+  global.Date = F_RealDate;
+}
+
 console.log("ALL TESTS PASSED");

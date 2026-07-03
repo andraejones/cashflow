@@ -934,6 +934,13 @@ class TransactionStore {
   }
 
   _findAllocationById(id) {
+    const entry = this._findAllocationEntryById(id);
+    return entry ? entry.transaction : null;
+  }
+
+  // Like _findAllocationById but also returns the date the bucket lives on
+  // (its period anchor), for callers that need to stamp period provenance.
+  _findAllocationEntryById(id) {
     if (!id) return null;
     // Synthetic key for an un-materialized recurring allocation instance:
     // "ralloc:<recurringId>:<date>". The date never contains a colon, so the
@@ -953,7 +960,7 @@ class TransactionStore {
           t.allocated === true &&
           t.type === "expense"
         ) {
-          return t;
+          return { transaction: t, date };
         }
       }
       return null;
@@ -965,11 +972,114 @@ class TransactionStore {
         const t = arr[i];
         // Matches one-time allocations and materialized recurring instances.
         if (t.id === id && t.allocated === true && t.type === "expense") {
-          return t;
+          return { transaction: t, date: dates[d] };
         }
       }
     }
     return null;
+  }
+
+  // Toggle history-based floor suggestions for a recurring allocation series.
+  // Enabling captures the definition's current amount as the floor — the value
+  // suggestions can never go below. Re-enabling after a manual amount change is
+  // how the user raises the floor itself; disabling clears both fields.
+  setAllocationAutoAdjust(recurringId, enabled) {
+    const def = this.recurringTransactions.find((rt) => rt.id === recurringId);
+    if (!def || def.allocated !== true) return false;
+    if (enabled) {
+      return this.updateRecurringTransaction(recurringId, {
+        autoAdjustFloor: true,
+        floorAmount: this._roundCents(Number(def.amount) || 0),
+      });
+    }
+    return this.updateRecurringTransaction(recurringId, {
+      autoAdjustFloor: undefined,
+      floorAmount: undefined,
+    });
+  }
+
+  // Suggest-only floor right-sizing for a recurring allocation series. Builds
+  // per-period true demand (the FULL amount of every expense stamped with this
+  // series' drawsFromRecurringId — not drawAmount, which is capped at the
+  // bucket and hides overflow), then:
+  //   suggested = max(floor, round$5(min(median(last 6) * 1.10, current * 1.5)))
+  // Median over a trailing window relaxes back toward the floor as a spike
+  // ages out. Guardrails: needs 3+ complete periods with activity (zero-draw
+  // periods leave no stamped expenses, so they're naturally excluded — "no
+  // activity" isn't treated as $0 demand); the in-progress period (the live
+  // bucket's, and anything after) is excluded; a 1.5x-of-current step cap keeps
+  // one wild window from ballooning the number. The effective floor is
+  // min(floorAmount, current amount) so a user who deliberately lowers the
+  // series amount lowers the floor with it. Nothing here writes — returns
+  // { suggested, current, floor, periods } or null when there's no suggestion.
+  getAllocationFloorSuggestion(recurringId) {
+    const def = this.recurringTransactions.find((rt) => rt.id === recurringId);
+    if (!def || def.allocated !== true || def.autoAdjustFloor !== true) {
+      return null;
+    }
+    const current = this._roundCents(Number(def.amount) || 0);
+    const floorRaw =
+      def.floorAmount === undefined ? current : Number(def.floorAmount) || 0;
+    const floor = this._roundCents(Math.min(floorRaw, current));
+    const todayStr = this._todayString();
+
+    // Per-period demand from stamped expenses, and the live period's date
+    // (latest instance of the series on/before today) in one pass.
+    const demandByPeriod = new Map();
+    let livePeriodDate = null;
+    Object.keys(this.transactions).forEach((date) => {
+      this.transactions[date].forEach((t) => {
+        if (t.hidden === true) return;
+        if (
+          t.allocated === true &&
+          t.type === "expense" &&
+          t.recurringId === recurringId &&
+          date <= todayStr &&
+          (!livePeriodDate || date > livePeriodDate)
+        ) {
+          livePeriodDate = date;
+        }
+        if (
+          t.type === "expense" &&
+          t.allocated !== true &&
+          t.drawsFromRecurringId === recurringId &&
+          t.drawsFromPeriodDate
+        ) {
+          const p = t.drawsFromPeriodDate;
+          demandByPeriod.set(
+            p,
+            this._roundCents((demandByPeriod.get(p) || 0) + (Number(t.amount) || 0))
+          );
+        }
+      });
+    });
+
+    // Complete periods only: everything before the live bucket's period (or
+    // before today if the series has no live instance, e.g. it ended).
+    const cutoff = livePeriodDate || todayStr;
+    const complete = Array.from(demandByPeriod.entries())
+      .filter(([p]) => p < cutoff)
+      .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+      .slice(-6);
+    if (complete.length < 3) return null;
+
+    const demands = complete.map(([, v]) => v).sort((a, b) => a - b);
+    const mid = Math.floor(demands.length / 2);
+    const median =
+      demands.length % 2 === 1
+        ? demands[mid]
+        : (demands[mid - 1] + demands[mid]) / 2;
+    const capped = Math.min(median * 1.1, current * 1.5);
+    const suggested = this._roundCents(
+      Math.max(floor, Math.round(capped / 5) * 5)
+    );
+    if (suggested === current) return null;
+    return {
+      suggested,
+      current,
+      floor,
+      periods: complete.map(([date, demand]) => ({ date, demand })),
+    };
   }
 
   // Debit the linked allocation by as much of the expense as it can cover.
@@ -983,24 +1093,37 @@ class TransactionStore {
     ) {
       return;
     }
-    const allocation = this._findAllocationById(
+    const entry = this._findAllocationEntryById(
       transaction.drawsFromAllocationId
     );
-    if (!allocation) {
-      // Allocation no longer exists — drop the dangling link.
+    if (!entry) {
+      // Allocation no longer exists — drop the dangling link. Keep any
+      // drawsFromRecurringId/drawsFromPeriodDate provenance: the bucket is
+      // gone (forfeited periods are deleted), but the spend still belongs to
+      // that series' history for floor suggestions.
       delete transaction.drawsFromAllocationId;
       delete transaction.drawAmount;
       return;
     }
+    const allocation = entry.transaction;
     // Drawing from a recurring allocation instance: freeze that one instance as
     // a persisted modified instance (with a stable id) so the debit survives
     // re-expansion, and rewrite the link from the synthetic key to the real id.
+    // Stamp the series id + period date on the expense: forfeited bucket
+    // instances are deleted outright (see closeOutExpiredAllocations), so this
+    // provenance is the only durable record tying the spend to its period —
+    // getAllocationFloorSuggestion's demand history is built from it.
     if (allocation.recurringId) {
       if (!allocation.id) {
         allocation.id = Utils.generateUniqueId();
       }
       allocation.modifiedInstance = true;
       transaction.drawsFromAllocationId = allocation.id;
+      transaction.drawsFromRecurringId = allocation.recurringId;
+      transaction.drawsFromPeriodDate = entry.date;
+    } else {
+      delete transaction.drawsFromRecurringId;
+      delete transaction.drawsFromPeriodDate;
     }
     const remaining = Math.max(0, this._roundCents(allocation.amount));
     const draw = this._roundCents(
@@ -1085,8 +1208,13 @@ class TransactionStore {
         delete merged.drawAmount;
         this._applyAllocationDraw(merged);
       } else {
+        // Explicit unlink (or type change off expense): the user is saying
+        // this spend isn't bucket spending, so drop the period provenance too
+        // (unlike the dangling-bucket case, which keeps it as history).
         delete merged.drawsFromAllocationId;
         delete merged.drawAmount;
+        delete merged.drawsFromRecurringId;
+        delete merged.drawsFromPeriodDate;
       }
 
       this.transactions[date][index] = merged;

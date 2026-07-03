@@ -1695,6 +1695,20 @@ body.app-locked #calendarOptions {
   margin: 5px 5px 0 0;
 }
 
+/* Floor-suggestion controls on recurring allocation edit forms. */
+.floor-adjust-toggle-label {
+  display: block;
+  margin: 5px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.floor-suggestion-row {
+  margin: 5px;
+  font-size: 0.85rem;
+  color: var(--muted-color);
+}
+
 @media (max-width: 768px) {
   body {
     align-items: flex-start;

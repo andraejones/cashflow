@@ -1457,6 +1457,12 @@ class BankReconcileUI {
     if (tx.drawsFromAllocationId) {
       moved.drawsFromAllocationId = tx.drawsFromAllocationId;
     }
+    // Carry the series/period provenance so a relocated draw keeps feeding the
+    // allocation's demand history even after its bucket is forfeited.
+    if (tx.drawsFromRecurringId) {
+      moved.drawsFromRecurringId = tx.drawsFromRecurringId;
+      moved.drawsFromPeriodDate = tx.drawsFromPeriodDate;
+    }
 
     if (appItem.recurringId) {
       const recId = appItem.recurringId;

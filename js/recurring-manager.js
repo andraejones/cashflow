@@ -1757,6 +1757,15 @@ class RecurringTransactionManager {
         if (recurringTransaction.autoCloseout !== undefined) {
           newRecurringTransaction.autoCloseout = recurringTransaction.autoCloseout;
         }
+        // Carry floor-suggestion settings across the split. Demand history is
+        // stamped with the OLD series id, so the new series starts its warm-up
+        // over — but the user's opt-in and floor survive.
+        if (recurringTransaction.autoAdjustFloor === true) {
+          newRecurringTransaction.autoAdjustFloor = true;
+          if (recurringTransaction.floorAmount !== undefined) {
+            newRecurringTransaction.floorAmount = recurringTransaction.floorAmount;
+          }
+        }
       }
       if (recurringTransaction.debtId) {
         newRecurringTransaction.debtId = recurringTransaction.debtId;
@@ -1844,6 +1853,9 @@ class RecurringTransactionManager {
         if (clearAllocation) {
           recurringUpdates.allocated = undefined;
           recurringUpdates.autoCloseout = undefined;
+          // Floor-suggestion settings only make sense on an allocation series.
+          recurringUpdates.autoAdjustFloor = undefined;
+          recurringUpdates.floorAmount = undefined;
         }
         this.store.updateRecurringTransaction(recurringId, recurringUpdates);
         Object.keys(transactions).forEach((dateKey) => {

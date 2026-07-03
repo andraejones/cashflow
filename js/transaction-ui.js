@@ -70,6 +70,7 @@ class TransactionUI {
     document.getElementById("transactionRecurrence").addEventListener("change", () => {
       this.updateRecurrenceOptions();
       this.updateSettledToggleVisibility();
+      this.updateAutoAdjustVisibility();
     });
     document.getElementById("transactionAllocate").addEventListener("change", () => {
       this.syncAllocateState();
@@ -507,6 +508,27 @@ class TransactionUI {
       this.closeDescriptionSuggestions();
     }
     this.updateCloseoutDateVisibility();
+    this.updateAutoAdjustVisibility();
+  }
+
+  // The "Suggest amount from spending history" opt-in only applies to
+  // recurring allocations (floor suggestions are computed per series from
+  // period demand history), so it's shown only when Allocate is checked AND a
+  // recurrence is selected. Hiding also unchecks, so a form left in another
+  // state can't silently carry the flag onto a save.
+  updateAutoAdjustVisibility() {
+    const label = document.getElementById("autoAdjustToggleLabel");
+    const cb = document.getElementById("transactionAutoAdjust");
+    if (!label || !cb) return;
+    const allocateCb = document.getElementById("transactionAllocate");
+    const recurrence = document.getElementById("transactionRecurrence");
+    const applies =
+      allocateCb && allocateCb.checked &&
+      recurrence && recurrence.value !== "once";
+    label.style.display = applies ? "" : "none";
+    if (!applies) {
+      cb.checked = false;
+    }
   }
 
 
@@ -1116,6 +1138,86 @@ class TransactionUI {
             }
           }
 
+          // Recurring allocation series: opt-in, suggest-only floor
+          // right-sizing from spending history. The checkbox is series-level
+          // and persists immediately (not part of the scoped save); the
+          // suggestion line is computed fresh and never auto-writes — Apply
+          // just fills the amount field (scope preset to "all", which updates
+          // the definition in place; past buckets are already forfeited, so
+          // it's future-facing) and the user still hits Save.
+          if (normalizedType === "expense" && isRecurring && isAllocated) {
+            const seriesDef = this.recurringManager.getRecurringTransactionById(
+              t.recurringId
+            );
+            if (seriesDef && seriesDef.allocated === true) {
+              const adjustLabel = document.createElement("label");
+              adjustLabel.className = "floor-adjust-toggle-label";
+              const adjustCb = document.createElement("input");
+              adjustCb.type = "checkbox";
+              adjustCb.checked = seriesDef.autoAdjustFloor === true;
+              adjustCb.setAttribute(
+                "aria-label",
+                "Suggest amount adjustments from spending history"
+              );
+              adjustLabel.appendChild(adjustCb);
+              adjustLabel.appendChild(
+                document.createTextNode(" Suggest amount from spending history")
+              );
+              editForm.appendChild(adjustLabel);
+
+              const suggestionRow = document.createElement("div");
+              suggestionRow.className = "floor-suggestion-row";
+              editForm.appendChild(suggestionRow);
+
+              const renderSuggestion = () => {
+                suggestionRow.innerHTML = "";
+                const freshDef =
+                  this.recurringManager.getRecurringTransactionById(
+                    t.recurringId
+                  );
+                if (!freshDef || freshDef.autoAdjustFloor !== true) {
+                  suggestionRow.style.display = "none";
+                  return;
+                }
+                suggestionRow.style.display = "";
+                const s = this.store.getAllocationFloorSuggestion(
+                  t.recurringId
+                );
+                if (!s) {
+                  suggestionRow.textContent =
+                    "No suggestion yet — needs 3 completed periods with linked spending, or the current amount already fits.";
+                  return;
+                }
+                const text = document.createElement("span");
+                const recent = s.periods
+                  .map((p) => `$${p.demand.toFixed(2)}`)
+                  .join(", ");
+                text.textContent = `Suggested: $${s.suggested.toFixed(2)} — floor $${s.floor.toFixed(2)}, last ${s.periods.length} periods: ${recent} `;
+                suggestionRow.appendChild(text);
+                const applyBtn = document.createElement("button");
+                applyBtn.type = "button";
+                applyBtn.textContent = "Apply";
+                applyBtn.setAttribute("aria-label", "Apply suggested amount");
+                applyBtn.addEventListener("click", () => {
+                  amountInput.value = s.suggested;
+                  const scopeSelect = document.getElementById(
+                    `edit-recurrence-${date}-${index}`
+                  );
+                  if (scopeSelect) scopeSelect.value = "all";
+                });
+                suggestionRow.appendChild(applyBtn);
+              };
+              adjustCb.addEventListener("change", () => {
+                this.store.setAllocationAutoAdjust(
+                  t.recurringId,
+                  adjustCb.checked
+                );
+                renderSuggestion();
+              });
+              renderSuggestion();
+            }
+          }
+
           const saveButton = document.createElement("button");
           saveButton.setAttribute("aria-label", "Save changes");
           saveButton.textContent = "Save";
@@ -1338,6 +1440,13 @@ class TransactionUI {
                 if (u.transaction.drawsFromAllocationId) {
                   movedCopy.drawsFromAllocationId = u.transaction.drawsFromAllocationId;
                 }
+                // Carry the series/period provenance too — if the bucket has
+                // since been forfeited, the re-add's dangling-link cleanup
+                // keeps these as the spend's demand-history record.
+                if (u.transaction.drawsFromRecurringId) {
+                  movedCopy.drawsFromRecurringId = u.transaction.drawsFromRecurringId;
+                  movedCopy.drawsFromPeriodDate = u.transaction.drawsFromPeriodDate;
+                }
                 this.store.addTransaction(date, movedCopy);
               } else {
                 // One-time: delete from original date, create settled copy on viewed date
@@ -1358,6 +1467,11 @@ class TransactionUI {
                 // Carry the allocation link forward (see recurring branch).
                 if (u.transaction.drawsFromAllocationId) {
                   settledCopy.drawsFromAllocationId = u.transaction.drawsFromAllocationId;
+                }
+                // Carry the series/period provenance (see recurring branch).
+                if (u.transaction.drawsFromRecurringId) {
+                  settledCopy.drawsFromRecurringId = u.transaction.drawsFromRecurringId;
+                  settledCopy.drawsFromPeriodDate = u.transaction.drawsFromPeriodDate;
                 }
                 this.store.addTransaction(date, settledCopy);
               }
@@ -1802,6 +1916,16 @@ class TransactionUI {
               const reDrawId = reDrawEl ? reDrawEl.value : transaction.drawsFromAllocationId;
               if (reDrawId) {
                 reMovedTransaction.drawsFromAllocationId = reDrawId;
+                // Same target: carry the series/period provenance so demand
+                // history survives even if the bucket has been forfeited (a
+                // changed target gets freshly stamped by the re-add).
+                if (
+                  reDrawId === transaction.drawsFromAllocationId &&
+                  transaction.drawsFromRecurringId
+                ) {
+                  reMovedTransaction.drawsFromRecurringId = transaction.drawsFromRecurringId;
+                  reMovedTransaction.drawsFromPeriodDate = transaction.drawsFromPeriodDate;
+                }
               }
             }
             this.store.addTransaction(newDate, reMovedTransaction);
@@ -1836,6 +1960,14 @@ class TransactionUI {
             const drawId = drawEl ? drawEl.value : transaction.drawsFromAllocationId;
             if (drawId) {
               newTransaction.drawsFromAllocationId = drawId;
+              // Same target: carry the series/period provenance (see above).
+              if (
+                drawId === transaction.drawsFromAllocationId &&
+                transaction.drawsFromRecurringId
+              ) {
+                newTransaction.drawsFromRecurringId = transaction.drawsFromRecurringId;
+                newTransaction.drawsFromPeriodDate = transaction.drawsFromPeriodDate;
+              }
             }
           }
           this.store.addTransaction(newDate, newTransaction);
@@ -2083,6 +2215,12 @@ class TransactionUI {
           if (allocated && document.getElementById("transactionAutoCloseout").checked) {
             newRecurringTransaction.autoCloseout = true;
           }
+          // Opt in to history-based floor suggestions from day one: the
+          // entered amount is the floor (see getAllocationFloorSuggestion).
+          if (allocated && document.getElementById("transactionAutoAdjust").checked) {
+            newRecurringTransaction.autoAdjustFloor = true;
+            newRecurringTransaction.floorAmount = amount;
+          }
         }
         this.addAdvancedRecurringOptions(newRecurringTransaction);
 
@@ -2115,6 +2253,8 @@ class TransactionUI {
       document.getElementById("transactionAllocate").disabled = false;
       document.getElementById("transactionAutoCloseout").checked = false;
       document.getElementById("autoCloseoutToggleLabel").style.display = "none";
+      document.getElementById("transactionAutoAdjust").checked = false;
+      document.getElementById("autoAdjustToggleLabel").style.display = "none";
       document.getElementById("transactionCloseoutDate").value = "";
       document.getElementById("closeoutDateField").style.display = "none";
       document.getElementById("settledToggleLabel").classList.remove("is-disabled");
