@@ -1589,4 +1589,234 @@ try {
   global.Date = F_RealDate;
 }
 
+// TEST 24: cleanupOrphanedDebtMinimums dedupes the same occurrence ACROSS
+// dates. A schedule change (business-day adjustment edit) relocates an
+// occurrence's landing date: the stranded modifiedInstance copy at the old
+// date and the re-expanded fresh copy at the new date share one occurrence
+// (originalDate) but sit on different days, so the old per-date dedupe never
+// saw them together and the payment double-counted forever. The non-modified
+// copy must win and the stranded copy must be tombstoned for sync.
+console.log("TEST 24: Cross-Date Duplicate Debt Minimums Elect One Keeper");
+{
+  const s = new TransactionStore();
+  s.resetData();
+  const rm = new RecurringTransactionManager(s);
+  const ui = Object.create(DebtSnowballUI.prototype);
+  ui.store = s;
+  ui.recurringManager = rm;
+  ui.daySpecificOptions = [];
+
+  const rid = s.addRecurringTransaction({
+    startDate: "2026-01-10", amount: 50, type: "expense",
+    description: "Debt Payment: X", recurrence: "monthly",
+    debtId: "debtX", debtRole: "minimum",
+  });
+  // Stranded adjusted copy at the old landing date.
+  s.addTransaction("2026-04-09", {
+    id: "dup-old", amount: 25, type: "expense", description: "Debt Payment: X",
+    recurringId: rid, debtId: "debtX", debtRole: "minimum",
+    originalDate: "2026-04-10", modifiedInstance: true,
+  });
+  // Fresh re-expanded copy of the SAME occurrence at the schedule's current
+  // date (pure expansion: no id).
+  s.getTransactions()["2026-04-10"] = [{
+    amount: 50, type: "expense", description: "Debt Payment: X",
+    recurringId: rid, debtId: "debtX", debtRole: "minimum",
+  }];
+
+  if (!ui.cleanupOrphanedDebtMinimums()) {
+    throw new Error("Cleanup must report a change");
+  }
+  const t24txns = s.getTransactions();
+  if (t24txns["2026-04-09"]) {
+    throw new Error("Stranded modified copy at the old date must be removed");
+  }
+  if (
+    !(t24txns["2026-04-10"] || []).some(
+      (t) => t.recurringId === rid && Number(t.amount) === 50
+    )
+  ) {
+    throw new Error("The fresh copy at the current date must be kept");
+  }
+  if (!s._deletedItems.transactions.some((x) => x.id === "dup-old")) {
+    throw new Error("The removed stranded copy must be tombstoned");
+  }
+  s.cancelPendingSave();
+  console.log("✅ One keeper per occurrence across dates; stranded copy tombstoned");
+}
+
+// TEST 25: adjustMinimumPaymentTransactions reconciles only the projection's
+// window (today+1 forward). (a) A minimum already paid earlier in the current
+// month is a historical fact baked into every balance — it must never be
+// zeroed against the walk's future-only target. (b) Within the window, the
+// target is allocated chronologically (the walk pays in date order until the
+// payoff and suppresses everything after), not from the end.
+console.log("TEST 25: Minimum Reconcile Respects The Projection-Start Boundary");
+const T25_RealDate = Date;
+const T25_FIXED_TODAY = new T25_RealDate(2026, 5, 10, 12, 0, 0); // 2026-06-10
+class T25_FrozenDate extends T25_RealDate {
+  constructor(...args) {
+    if (args.length === 0) { super(T25_FIXED_TODAY.getTime()); } else { super(...args); }
+  }
+  static now() { return T25_FIXED_TODAY.getTime(); }
+}
+global.Date = T25_FrozenDate;
+try {
+  // (a) Semi-monthly debt straddling today: day-5 minimum already paid (past),
+  // payoff lands 2026-06-12, so only the future day-20 minimum is suppressed.
+  {
+    const s = new TransactionStore();
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    const calc = new CalculationService(s, rm);
+    const ui = Object.create(DebtSnowballUI.prototype);
+    ui.store = s;
+    ui.recurringManager = rm;
+    ui.calculationService = calc;
+    ui.daySpecificOptions = [];
+
+    s.addRecurringTransaction({
+      startDate: "2026-06-12", amount: 3000, type: "income",
+      description: "Salary", recurrence: "monthly",
+    });
+    const debtId = s.addDebt({
+      name: "Semi", balance: 1500, minPayment: 50,
+      recurrence: "semi-monthly", semiMonthlyDays: [5, 20],
+      dueStartDate: "2026-01-05", interestRate: 0,
+    });
+    ui.ensureMinimumPaymentRecurring(s.getDebts().find((d) => d.id === debtId));
+    s.setDebtSnowballSettings({ dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: true });
+    rm.applyRecurringTransactions(2026, 5);
+    ui.ensureSnowballPaymentsForHorizon(2026, 5);
+
+    const txns = s.getTransactions();
+    const past = (txns["2026-06-05"] || []).find(
+      (t) => t.debtRole === "minimum" && t.debtId === debtId
+    );
+    if (!past || Number(past.amount) !== 50 || past.hidden === true) {
+      throw new Error(
+        `Past pre-projection-start minimum must stay intact, got amount=${past && past.amount} hidden=${past && past.hidden}`
+      );
+    }
+    const future = (txns["2026-06-20"] || []).find(
+      (t) => t.debtRole === "minimum" && t.debtId === debtId
+    );
+    if (!future || Number(future.amount) !== 0 || future.hidden !== true) {
+      throw new Error("Future minimum after the payoff must be suppressed");
+    }
+    if (!(txns["2026-06-12"] || []).some((t) => t.snowballGenerated === true)) {
+      throw new Error("Expected the payoff on 2026-06-12");
+    }
+    s.cancelPendingSave();
+  }
+  console.log("✅ Pre-projection-start minimums are never re-amounted");
+
+  // (b) Chronological allocation within the window: target 50 across two
+  // future 50s keeps the EARLIEST and zeroes the later one.
+  {
+    const s2 = new TransactionStore();
+    s2.resetData();
+    const ui2 = Object.create(DebtSnowballUI.prototype);
+    ui2.store = s2;
+    ui2.daySpecificOptions = [];
+    ["2026-06-15", "2026-06-25"].forEach((date) => {
+      s2.addTransaction(date, {
+        amount: 50, type: "expense", description: "Debt Payment: Y",
+        recurringId: "ridY", debtId: "debtY", debtRole: "minimum",
+      });
+    });
+    if (!ui2.adjustMinimumPaymentTransactions(2026, 5, { debtY: 50 })) {
+      throw new Error("Adjust must report a change");
+    }
+    const t15 = s2.getTransactions()["2026-06-15"][0];
+    const t25 = s2.getTransactions()["2026-06-25"][0];
+    if (Number(t15.amount) !== 50 || t15.hidden === true) {
+      throw new Error("Earliest future occurrence must keep the paid amount");
+    }
+    if (Number(t25.amount) !== 0 || t25.hidden !== true) {
+      throw new Error("Occurrence after the payoff must be zeroed, not the earlier one");
+    }
+    s2.cancelPendingSave();
+  }
+  console.log("✅ Target allocates chronologically (earliest kept, later zeroed)");
+} finally {
+  global.Date = T25_RealDate;
+}
+
+// TEST 26: A snowball row created by "Generate for Current Month" with
+// auto-generate OFF (snowballForced) must survive the very next render's
+// horizon sweep — previously the includeExtra=false sweep silently deleted
+// what the button had just created. Ordinary non-forced leftovers must still
+// be swept and tombstoned.
+console.log("TEST 26: Forced Snowball Rows Survive The Auto-Generate-Off Sweep");
+const T26_RealDate = Date;
+const T26_FIXED_TODAY = new T26_RealDate(2026, 5, 15, 12, 0, 0); // 2026-06-15
+class T26_FrozenDate extends T26_RealDate {
+  constructor(...args) {
+    if (args.length === 0) { super(T26_FIXED_TODAY.getTime()); } else { super(...args); }
+  }
+  static now() { return T26_FIXED_TODAY.getTime(); }
+}
+global.Date = T26_FrozenDate;
+try {
+  const s = new TransactionStore();
+  s.resetData();
+  const rm = new RecurringTransactionManager(s);
+  const calc = new CalculationService(s, rm);
+  const ui = Object.create(DebtSnowballUI.prototype);
+  ui.store = s;
+  ui.recurringManager = rm;
+  ui.calculationService = calc;
+  ui.daySpecificOptions = [];
+  ui.onUpdate = () => {};
+
+  s.addRecurringTransaction({
+    startDate: "2026-06-01", amount: 2000, type: "income",
+    description: "Salary", recurrence: "monthly",
+  });
+  const debtId = s.addDebt({
+    name: "Card F", balance: 1500, minPayment: 0, dueDay: 28,
+    recurrence: "monthly", dueStartDate: "2026-06-28", interestRate: 0,
+  });
+  ui.ensureMinimumPaymentRecurring(s.getDebts().find((d) => d.id === debtId));
+  s.setDebtSnowballSettings({ dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false });
+  rm.applyRecurringTransactions(2026, 5);
+
+  ui.generateSnowballForCurrentMonth(true);
+  const forced = (s.getTransactions()["2026-06-16"] || []).find(
+    (t) => t.snowballGenerated === true
+  );
+  if (!forced || forced.snowballForced !== true) {
+    throw new Error("Forced generate must create a snowballForced row on the availability day");
+  }
+
+  // A stale non-forced leftover (e.g. from an auto-generate-on era on another
+  // device) appears before the next render's sweep.
+  s.addTransaction("2026-06-03", {
+    id: "stale-snow", amount: 10, type: "expense",
+    description: "Snowball Payoff: Card F", debtId, debtRole: "snowball",
+    debtName: "Card F", snowballMonth: "2026-06", snowballGenerated: true,
+  });
+
+  // The next calendar render sweeps the horizon with auto-generate still off.
+  ui.ensureSnowballPaymentsForHorizon(2026, 5);
+  if (
+    !(s.getTransactions()["2026-06-16"] || []).some(
+      (t) => t.snowballGenerated === true && t.snowballForced === true
+    )
+  ) {
+    throw new Error("Auto-off sweep must keep the force-generated row");
+  }
+  if ((s.getTransactions()["2026-06-03"] || []).some((t) => t.id === "stale-snow")) {
+    throw new Error("Stale non-forced snowball row must still be swept");
+  }
+  if (!s._deletedItems.transactions.some((x) => x.id === "stale-snow")) {
+    throw new Error("Swept stale row must be tombstoned");
+  }
+  s.cancelPendingSave();
+  console.log("✅ Forced rows survive the off-sweep; stale rows swept + tombstoned");
+} finally {
+  global.Date = T26_RealDate;
+}
+
 console.log("ALL TESTS PASSED");

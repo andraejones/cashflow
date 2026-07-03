@@ -2142,12 +2142,54 @@ class DebtSnowballUI {
     );
     let changed = false;
 
+    // Elect one keeper per occurrence ACROSS all dates, not just within one
+    // date: a schedule change (due-day edit, business-day adjustment change)
+    // relocates an occurrence's landing date, so a previously adjusted
+    // (modifiedInstance) copy strands at the old date while re-expansion places
+    // a fresh copy at the new one — two rows for the same occurrence on
+    // different days, double-counting the payment. Prefer keeping a
+    // non-modified copy (it sits at the schedule's current date; the adjust
+    // pass re-applies any reduction there); among equals keep the earliest.
+    const keeperByOccurrence = new Map();
+    Object.keys(transactions)
+      .sort()
+      .forEach((dateKey) => {
+        const list = transactions[dateKey];
+        if (!Array.isArray(list)) {
+          return;
+        }
+        list.forEach((t) => {
+          if (t.debtRole !== "minimum" || !t.debtId || !t.recurringId) {
+            return;
+          }
+          const rt = recurringById.get(t.recurringId);
+          if (!rt) {
+            return;
+          }
+          const occurrence = t.originalDate || dateKey;
+          if (
+            (rt.startDate && occurrence < rt.startDate) ||
+            (rt.endDate && occurrence > rt.endDate)
+          ) {
+            // Deleted by the sweep below — never a keeper candidate.
+            return;
+          }
+          const key = `${t.recurringId}|${occurrence}`;
+          const current = keeperByOccurrence.get(key);
+          if (
+            !current ||
+            (current.modifiedInstance === true && t.modifiedInstance !== true)
+          ) {
+            keeperByOccurrence.set(key, t);
+          }
+        });
+      });
+
     Object.keys(transactions).forEach((dateKey) => {
       const list = transactions[dateKey];
       if (!Array.isArray(list)) {
         return;
       }
-      const seenOccurrences = new Set();
       const filtered = list.filter((t) => {
         if (t.debtRole !== "minimum" || !t.debtId || !t.recurringId) {
           return true;
@@ -2173,12 +2215,14 @@ class DebtSnowballUI {
           return false;
         }
         const occurrenceKey = `${t.recurringId}|${occurrence}`;
-        if (seenOccurrences.has(occurrenceKey)) {
+        // Keep only the keeper elected across all dates above; every other copy
+        // of the same occurrence (a stranded modifiedInstance at an old date, a
+        // re-expanded duplicate) is a double-count and gets tombstoned.
+        if (keeperByOccurrence.get(occurrenceKey) !== t) {
           this.store.trackDeletedTransaction(t.id);
           changed = true;
           return false;
         }
-        seenOccurrences.add(occurrenceKey);
         return true;
       });
       if (filtered.length !== list.length) {
@@ -2201,8 +2245,22 @@ class DebtSnowballUI {
     const monthPrefix = `${year}-${String(month + 1).padStart(2, "0")}-`;
     const minOccurrencesByDebtId = {};
 
+    // The projection walk only schedules and pays occurrences from its start
+    // date (tomorrow) forward — anything dated earlier has already happened and
+    // is baked into the starting balances/checking. So reconcile only the
+    // walk's window: instances dated before the projection start are historical
+    // facts (real payments already reflected in every balance) and must never
+    // be zeroed or re-amounted against a future-only target. Without this
+    // boundary, a multi-occurrence month (semi-monthly, weekly) straddling
+    // today gets its already-made early payment trimmed away to match a target
+    // that never included it.
+    const now = new Date();
+    const projectionStartString = Utils.formatDateString(
+      new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+    );
+
     Object.keys(transactions).forEach((dateKey) => {
-      if (!dateKey.startsWith(monthPrefix)) {
+      if (!dateKey.startsWith(monthPrefix) || dateKey < projectionStartString) {
         return;
       }
       transactions[dateKey].forEach((t) => {
@@ -2263,8 +2321,14 @@ class DebtSnowballUI {
         }
         return;
       }
+      // Allocate the target chronologically: the walk pays minimums in date
+      // order until the payoff day and suppresses everything after it, so the
+      // earliest occurrences are the ones that were (or will be) actually paid.
+      // Allocating from the end instead would keep a minimum dated AFTER the
+      // payoff and zero the pre-payoff one — payments shown on days the walk
+      // never paid them.
       let remaining = targetTotal;
-      for (let i = occurrences.length - 1; i >= 0; i--) {
+      for (let i = 0; i < occurrences.length; i++) {
         const { transaction } = occurrences[i];
         const amount = Number(transaction.amount) || 0;
         if (remaining <= epsilon) {
@@ -2309,7 +2373,8 @@ class DebtSnowballUI {
     month,
     monthKey,
     expectedPayments,
-    includeExtra
+    includeExtra,
+    forced = false
   ) {
     const transactions = this.store.getTransactions();
     const expectedByDebtId = new Map();
@@ -2333,6 +2398,14 @@ class DebtSnowballUI {
           return true;
         }
         if (!includeExtra) {
+          // A row the user force-generated ("Generate for Current Month" with
+          // auto-generate off) is a deliberate one-shot materialization — keep
+          // it, or the very next calendar render's horizon sweep silently
+          // deletes what the button just created. It reconciles normally once
+          // auto-generate is turned on.
+          if (t.snowballForced === true) {
+            return true;
+          }
           // Tombstone persisted snowball rows so a sync-merge doesn't
           // resurrect them (they'd double-count until the next maintenance
           // pass on every device).
@@ -2390,6 +2463,11 @@ class DebtSnowballUI {
           snowballMonth: monthKey,
           snowballGenerated: true,
         };
+        if (forced) {
+          // Mark rows created by the Generate button so the auto-generate-off
+          // maintenance sweep keeps them (see the !includeExtra branch above).
+          transaction.snowballForced = true;
+        }
         this.store.addTransaction(expected.dateString, transaction);
         snowballAdded = true;
       });
@@ -3371,7 +3449,8 @@ class DebtSnowballUI {
         month,
         monthKey,
         expectedSnowballPayments,
-        includeExtra
+        includeExtra,
+        force === true
       );
       if (syncResult.changed) {
         changed = true;
