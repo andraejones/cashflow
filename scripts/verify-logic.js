@@ -2057,6 +2057,70 @@ console.log("TEST 31: updateMonthlyBalances pre-expands the forward horizon (cal
   console.log("✅ updateMonthlyBalances pre-expands the horizon; walk matches Minimum without self-expanding");
 }
 
+// TEST 33: getDayBalanceBreakdown shares the running-balance walk with
+// getRunningBalanceForDate (both are balance-walk paths — see [[balance-walk-paths]]),
+// so their `.balance` figures must agree byte-for-byte on every date. Also guards
+// the reserve add-back invariant: on a day carrying allocation reserves,
+// balanceExcludingAllocations === balance + getReservedTotalOnOrBefore(date)
+// (the "excluding allocations" figure releases exactly the live reserves).
+console.log("TEST 33: getDayBalanceBreakdown Shares The Walk And Releases Reserves Correctly");
+{
+  const DB_RealDate = Date;
+  const DB_FIXED_TODAY = new DB_RealDate(2026, 5, 30, 12, 0, 0); // 2026-06-30
+  class DB_FrozenDate extends DB_RealDate {
+    constructor(...args) {
+      if (args.length === 0) { super(DB_FIXED_TODAY.getTime()); } else { super(...args); }
+    }
+    static now() { return DB_FIXED_TODAY.getTime(); }
+  }
+  global.Date = DB_FrozenDate;
+  try {
+    const s = new TransactionStore();
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    const calc = new CalculationService(s, rm);
+
+    // $1000 reserved June 1, a normal $200 expense June 5, $3000 income June 10.
+    s.addTransaction("2026-06-01", {
+      amount: 1000, type: "expense", description: "Reserve", allocated: true, settled: true,
+    });
+    s.addTransaction("2026-06-05", {
+      amount: 200, type: "expense", description: "Groceries", settled: true,
+    });
+    s.addTransaction("2026-06-10", {
+      amount: 3000, type: "income", description: "Paycheck",
+    });
+
+    // The two balance-walk paths must produce identical running balances.
+    for (const ds of ["2026-06-01", "2026-06-05", "2026-06-10", "2026-06-20"]) {
+      const walk = calc.getRunningBalanceForDate(ds);
+      const bd = calc.getDayBalanceBreakdown(ds).balance;
+      if (Math.abs(walk - bd) > 0.001) {
+        throw new Error(`getDayBalanceBreakdown(${ds}).balance=${bd} must equal getRunningBalanceForDate=${walk}`);
+      }
+    }
+
+    // On June 10 the running balance is -1000 -200 +3000 = 1800, with $1000 still
+    // reserved. "Excluding allocations" releases exactly that reserve.
+    const bd10 = calc.getDayBalanceBreakdown("2026-06-10");
+    if (Math.abs(bd10.balance - 1800) > 0.001) {
+      throw new Error(`June 10 balance should be 1800, got ${bd10.balance}`);
+    }
+    const reserved10 = calc.getReservedTotalOnOrBefore("2026-06-10");
+    if (Math.abs(bd10.balanceExcludingAllocations - (bd10.balance + reserved10)) > 0.001) {
+      throw new Error(
+        `balanceExcludingAllocations=${bd10.balanceExcludingAllocations} must equal balance+reserved=${bd10.balance + reserved10}`
+      );
+    }
+    if (Math.abs(bd10.balanceExcludingAllocations - 2800) > 0.001) {
+      throw new Error(`balanceExcludingAllocations should be 2800 (1800+1000 reserve), got ${bd10.balanceExcludingAllocations}`);
+    }
+    console.log("✅ getDayBalanceBreakdown matches getRunningBalanceForDate and releases reserves exactly");
+  } finally {
+    global.Date = DB_RealDate;
+  }
+}
+
 // TEST 32: An explicit replaceRemote push (import restore) SKIPS the fetch-and-
 // merge step and PATCHes local data as the authoritative copy. Session 6 removed
 // the _lastKnownETag gate so every ordinary push now merges (TEST 30); that
