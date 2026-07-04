@@ -1104,8 +1104,15 @@ class CloudSync {
         autoSyncEnabled: this.autoSyncEnabled,
       };
 
-      if (this._lastKnownETag) {
-        // Fetch with If-None-Match header to check for changes
+      // Always fetch-and-merge before pushing, even with no stored ETag. A null
+      // ETag means this device has never synced this gist (e.g. a fresh device
+      // pointed at an existing gist, credentials just entered above): the GET
+      // simply carries no If-None-Match and returns 200 with the remote data, so
+      // we MERGE instead of blind-overwriting a populated remote gist. Gating
+      // this on _lastKnownETag was a data-loss hole — the first push clobbered
+      // another device's data.
+      {
+        // Fetch (If-None-Match only when a stored ETag exists) to check for changes
         const { response: checkResponse, etag: newETag, notModified } =
           await this._fetchGist(token, gistId, this._lastKnownETag);
 

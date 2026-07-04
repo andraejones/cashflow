@@ -1984,4 +1984,93 @@ console.log("TEST 29: Bank CSV Pending Classification Requires Deposit Column");
   console.log("✅ Pending requires Balance $0 AND Deposit column; zero-balance debits stay posted");
 }
 
-console.log("ALL TESTS PASSED");
+// TEST 30: saveToCloud merges with an existing remote gist even when this
+// device has never synced it (no stored ETag). Gating the fetch-and-merge on
+// _lastKnownETag meant a fresh device pointed at a populated gist blind-
+// overwrote it on its first push, destroying the other device's data. The push
+// path is the documented merge-and-protect path; a null ETag just means the GET
+// carries no If-None-Match and returns 200 with the remote data to merge.
+console.log("TEST 30: First Push With No ETag Merges, Not Overwrites");
+{
+  const s = new TransactionStore();
+  s.resetData();
+  // Local-only debt that has never reached the cloud.
+  s.debts = [{ id: "L", name: "Local Card", balance: 100, _lastModified: new Date().toISOString() }];
+
+  const sync = new CloudSync(s, () => {});
+  // Never synced this gist on this device.
+  sync._lastKnownETag = null;
+  // Skip real credential/crypto plumbing.
+  sync.getCloudCredentialsAsync = async () => ({ token: "tok", gistId: "gid" });
+
+  // Remote gist already holds a DIFFERENT debt from another device.
+  const remoteData = {
+    transactions: {}, monthlyBalances: {}, recurringTransactions: [],
+    skippedTransactions: {}, movedTransactions: {},
+    debts: [{ id: "R", name: "Remote Card", balance: 200, _lastModified: new Date().toISOString() }],
+    cashInfusions: [], monthlyNotes: {},
+    debtSnowballSettings: { dailyFloor: 0, autoGenerate: false },
+    _deletedItems: {}, lastUpdated: new Date().toISOString(),
+  };
+
+  // Minimal DOM + fetch mocks for the network path.
+  const prevFetch = global.fetch;
+  const prevDoc = global.document;
+  const prevHide = Utils.hideLoading, prevShow = Utils.showLoading;
+  Utils.hideLoading = () => {};
+  Utils.showLoading = () => {};
+  global.document = {
+    addEventListener: () => {},
+    querySelector: () => null,
+    getElementById: () => null,
+  };
+
+  let patchBody = null;
+  const etagHeaders = { get: () => '"etag-x"' };
+  global.fetch = async (url, opts) => {
+    if (opts && opts.method === "PATCH") {
+      patchBody = JSON.parse(opts.body);
+      return { ok: true, status: 200, headers: etagHeaders };
+    }
+    // GET (ETag check + _refreshStoredETag): return the populated remote gist.
+    return {
+      ok: true,
+      status: 200,
+      headers: etagHeaders,
+      json: async () => ({
+        files: { "cashflow_data.json": { content: JSON.stringify(remoteData), truncated: false } },
+      }),
+    };
+  };
+
+  const restore = () => {
+    global.fetch = prevFetch;
+    global.document = prevDoc;
+    Utils.hideLoading = prevHide;
+    Utils.showLoading = prevShow;
+    s.cancelPendingSave();
+  };
+
+  // saveToCloud is async; this is the last test, so print the final banner from
+  // inside the resolution so ordering stays correct in a CommonJS script (no
+  // top-level await available).
+  sync.saveToCloud(true).then(() => {
+    restore();
+    if (!patchBody) throw new Error("saveToCloud did not issue a PATCH");
+    // patchBody is the PATCH request body {description, files:{...}}; the merged
+    // app data lives inside files["cashflow_data.json"].content.
+    const savedData = JSON.parse(patchBody.files["cashflow_data.json"].content);
+    const ids = (savedData.debts || []).map((d) => d.id).sort();
+    if (ids.join(",") !== "L,R") {
+      throw new Error(
+        "First push with no ETag must MERGE (keep both L and R), got: " + ids.join(",")
+      );
+    }
+    console.log("✅ First push with no stored ETag merges remote data instead of overwriting");
+    console.log("ALL TESTS PASSED");
+  }).catch((err) => {
+    restore();
+    console.error(err);
+    process.exit(1);
+  });
+}
