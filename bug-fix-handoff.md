@@ -44,7 +44,30 @@ One file reviewed per session, in the fixed order below. Sessions share NO conte
     `updateTransaction`→`_applyAllocationDraw` (transaction-store.js:1186-1190) and
     clears it when the draw is unset (1278-1281). The delete+re-add MOVE branches
     carry provenance manually because they bypass that path; both routes are correct.
-- [ ] /Users/andraejones/Documents/CashFlow/js/transaction-store.js (1979)
+- [x] /Users/andraejones/Documents/CashFlow/js/transaction-store.js (1979) — 2026-07-04, 0 fixed / 3 log-only
+
+  Reviewed in full. Single source of truth for all persisted data; heavily
+  hardened by prior feature sessions (tombstones on every id-bearing delete,
+  load-integrity `_loadFailed` gate, allocation draw/reverse cycle). All 34
+  `scripts/verify-logic.js` tests pass. Verified the allocation draw/reverse/
+  re-apply money math with a standalone harness (`/tmp/alloc_test.js`): overflow
+  draw, edit-down, edit-up past bucket, and delete-refund all reconcile
+  byte-exact (bucket 50→0→20→0→50). No confirmable HIGH/MEDIUM bugs.
+  - LOW (log-only) `transaction-store.js:1403-1412` — `deleteRecurringTransaction`
+    removes the series' entries from `skippedTransactions` but does NOT emit an
+    unskip event into `_deletedItems.skips`. A stale skip on another device could
+    survive the union merge, but it would reference an already-tombstoned
+    recurring id, so it's inert. Not fixed (harmless).
+  - LOW (log-only) `transaction-store.js:1000-1044`, `:966-998` —
+    `_findAllocationEntryById` / `getAllocationInfoById` do not filter
+    `hidden === true`, whereas `getAllocations` (draw offering) does. A draw could
+    resolve display info against a hidden bucket. Unreachable in practice —
+    allocation buckets are never hidden. Left as-is.
+  - LOW (log-only) `transaction-store.js:64-70,530-534` — the `_saveInProgress` /
+    `_queuedSave` re-entrancy guard is effectively dead: `saveData` is fully
+    synchronous (localStorage is sync), so the debounce timer callback can never
+    fire mid-save. Defensive, not a bug. Note `saveData` itself has no top-level
+    re-entrancy guard, but no save callback calls it synchronously. Left as-is.
 - [ ] /Users/andraejones/Documents/CashFlow/js/recurring-manager.js (1961)
 - [ ] /Users/andraejones/Documents/CashFlow/js/bank-reconcile.js (1616)
 - [ ] /Users/andraejones/Documents/CashFlow/js/cloud-sync.js (1547)
