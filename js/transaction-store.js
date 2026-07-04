@@ -558,6 +558,11 @@ class TransactionStore {
       cashInfusions: [],
       skips: []
     };
+    // Reset replaces in-memory state with a known-good empty state, so any
+    // prior load-integrity failure no longer applies — clear it (as importData
+    // does) or saveData refuses to persist and the corrupt on-disk data that
+    // prompted the reset silently returns on the next reload.
+    this._loadFailed = false;
     this.saveData();
     return true;
   }

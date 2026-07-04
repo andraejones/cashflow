@@ -1897,4 +1897,44 @@ console.log("TEST 27: Expansion Clear Pass Tombstones Cleared-Flag Instances");
   console.log("✅ Cleared-flag instances tombstoned; id-less expansions untouched");
 }
 
+// TEST 28: resetData clears the load-integrity block so the wipe actually
+// persists. A decrypt/parse failure sets _loadFailed to protect the intact
+// on-disk ciphertext — but resetData is the user's recovery action ("wipe
+// everything"), replacing in-memory state with a known-good empty state. If it
+// leaves _loadFailed set, saveData refuses to persist and the corrupt data that
+// prompted the reset silently returns on reload.
+console.log("TEST 28: resetData Clears The Load-Integrity Block");
+{
+  const s = new TransactionStore();
+  s.resetData();
+  // Seed persisted state so we can prove the reset overwrites it.
+  s.addTransaction("2026-06-01", { amount: 99, type: "expense", description: "Old" });
+  s.flushPendingSave();
+  if (!localStorageData["transactions"] || localStorageData["transactions"] === "{}") {
+    throw new Error("Setup: seeded transaction should be persisted");
+  }
+
+  // Simulate a failed load (what loadData does on a decrypt/parse failure).
+  s._loadFailed = true;
+  // A save must be a no-op while the block is set (guards the on-disk copy).
+  s.transactions = {};
+  if (s.saveData(true) === false) {
+    // saveData returns false when blocked; the stored copy stays untouched.
+  }
+  if (localStorageData["transactions"] === "{}") {
+    throw new Error("Blocked save must not overwrite the intact on-disk copy");
+  }
+
+  // resetData must clear the block and persist the empty state.
+  s.resetData();
+  if (s._loadFailed !== false) {
+    throw new Error("resetData must clear _loadFailed");
+  }
+  s.flushPendingSave();
+  if (localStorageData["transactions"] !== "{}") {
+    throw new Error("resetData must persist the empty state (corrupt data must not return)");
+  }
+  console.log("✅ resetData clears _loadFailed and persists the wipe");
+}
+
 console.log("ALL TESTS PASSED");
