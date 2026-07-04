@@ -112,7 +112,32 @@ One file reviewed per session, in the fixed order below. Sessions share NO conte
   - LOG-ONLY (INFO) `clearSearch`/`updateActionButtons` (~504-543) access the advanced-filter elements without the null guards `performSearch` uses; would throw if index.html omitted them. All present in the shipped index; robustness-only asymmetry.
   - LOG-ONLY (INFO) a recurring def whose every in-range expanded instance is skipped still appears as a def entry (skipped instances never populate `foundRecurringIds`). Minor semantic — the def legitimately still exists and can recur unskipped later. No fix.
   - LOG-ONLY (INFO) recurring def result entries use `date: rt.startDate`, which can fall outside the searched [dateFrom,dateTo] window, so an overlapping def may display/sort with a date outside the requested range. Cosmetic; the def is correctly included by the overlap test. No fix.
-- [ ] js/build.js (4)
+- [x] js/build.js — 2026-07-04, 0 fixed / 0 log-only. Full read (4 lines). Single build-controlled string constant `window.APP_BUILD`, consumed only at calendar-ui.js:656 with a `|| "unknown"` fallback. Value is never user input → the innerHTML interpolation is not an XSS vector. No logic, date math, state, or sync surface. Nothing to fix. **This is the last file — loop complete; final scorecard below.**
+
+## Final scorecard (loop complete — all 14 files reviewed, 2026-07-03 → 2026-07-04)
+
+**Fixes shipped: 9 total (across sessions 1–10).**
+
+By commit / session:
+- `js/debt-snowball.js` — 4 fixed (incl. 1 shipped predecessor WIP): keeper-election dedupe (TEST 24), adjust-min projection-start exclusion (TEST 25a), adjust-min chronological allocation (TEST 25b), snowballForced off-sweep survival (TEST 26).
+- `js/recurring-manager.js` — 1 fixed: `_clearRecurringExpansions` tombstones id-bearing cleared-modifiedInstance rows (TEST 27).
+- `js/transaction-store.js` — 1 fixed: `resetData` clears `_loadFailed` so recovery wipe persists (TEST 28).
+- `js/bank-reconcile.js` — 1 fixed: `_parseSuncoastCsv` pending misclassification of posted withdrawal-to-zero (TEST 29).
+- `js/cloud-sync.js` — 1 fixed: `saveToCloud` always fetch-and-merges before push (removed null-ETag blind-overwrite hole) (TEST 30).
+- `js/app.js` — 1 fixed (shipped predecessor WIP): import-restore `replaceRemote` one-shot latch restores replace semantics session 6 broke (TEST 32).
+
+By severity:
+- MEDIUM: 7 (debt-snowball ×4, transaction-store ×1, cloud-sync ×1 data-loss, app.js ×1 feature-regression).
+- LOW (sync-correctness / misclassification): 2 (recurring-manager, bank-reconcile).
+
+Regression tests added: TESTs 24–33 (24–30, 32 are fix guards; 31/33 are positive contract guards for calendar-ui / calculation-service). Suite green (`node scripts/verify-logic.js`, exit 0).
+
+Files reviewed clean (0 fixed): transaction-ui, verify-logic, calendar-ui, pin-protection, utils, calculation-service, search-ui, build.
+
+Open items for a future pass (all log-only, none blocking):
+- Monthly-note deletion does not sync (needs a store-side tombstone honored in `_mergeMonthlyNotes`) — see Cross-file leads.
+- `getDayBalanceBreakdown` "Balance without unsettled" adds back allocations too (label/semantics product call) — calculation-service entry.
+- Snowball `alreadyPaid`/`computeMinimumPaymentEndDate` current-month payoff oscillation (same family as documented payoff-creep quirk; unresolved product call) — debt-snowball entry.
 
 ## Cross-file leads
 
