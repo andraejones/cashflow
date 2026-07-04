@@ -19,7 +19,7 @@ PROMPT_FILE="bug-fix-session-prompt.md"
 HANDOFF_FILE="bug-fix-handoff.md"
 LOG_DIR="scripts/bug-fix-logs"
 BATCH_SIZE="${BATCH_SIZE:-3}"
-BATCH_SLEEP="${BATCH_SLEEP:-7200}"
+BATCH_SLEEP="${BATCH_SLEEP:-3600}"
 INTRA_SLEEP="${INTRA_SLEEP:-240}"
 mkdir -p "$LOG_DIR"
 
