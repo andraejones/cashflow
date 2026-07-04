@@ -2057,14 +2057,114 @@ console.log("TEST 31: updateMonthlyBalances pre-expands the forward horizon (cal
   console.log("✅ updateMonthlyBalances pre-expands the horizon; walk matches Minimum without self-expanding");
 }
 
+// TEST 32: An explicit replaceRemote push (import restore) SKIPS the fetch-and-
+// merge step and PATCHes local data as the authoritative copy. Session 6 removed
+// the _lastKnownETag gate so every ordinary push now merges (TEST 30); that
+// silently broke the import-restore path, which had relied on nulling the ETag to
+// force a blind overwrite. saveToCloud(quiet, replaceRemote=true) restores the
+// replace intent via a one-shot _replaceRemoteOnce latch. A merge here would
+// resurrect remote items the import intentionally dropped, leaving a partial
+// restore.
+console.log("TEST 32: replaceRemote Push Skips Merge (Import Restore Overwrites Cloud)");
+function runReplaceRemoteTest() {
+  const s = new TransactionStore();
+  s.resetData();
+  // Imported (local) data — the restore the user just loaded.
+  s.debts = [{ id: "L", name: "Imported Card", balance: 100, _lastModified: new Date().toISOString() }];
+
+  const sync = new CloudSync(s, () => {});
+  // A device that HAS synced before (stored ETag), to prove replace ignores merge
+  // regardless of ETag state — not merely the null-ETag case.
+  sync._lastKnownETag = '"etag-old"';
+  sync.getCloudCredentialsAsync = async () => ({ token: "tok", gistId: "gid" });
+
+  // Remote holds a debt NOT in the import (added on another device after the
+  // backup, or an item deleted before exporting). A merge resurrects it; a
+  // replace must drop it.
+  const remoteData = {
+    transactions: {}, monthlyBalances: {}, recurringTransactions: [],
+    skippedTransactions: {}, movedTransactions: {},
+    debts: [{ id: "R", name: "Stale Remote Card", balance: 200, _lastModified: new Date().toISOString() }],
+    cashInfusions: [], monthlyNotes: {},
+    debtSnowballSettings: { dailyFloor: 0, autoGenerate: false },
+    _deletedItems: {}, lastUpdated: new Date().toISOString(),
+  };
+
+  const prevFetch = global.fetch;
+  const prevDoc = global.document;
+  const prevHide = Utils.hideLoading, prevShow = Utils.showLoading;
+  Utils.hideLoading = () => {};
+  Utils.showLoading = () => {};
+  global.document = {
+    addEventListener: () => {},
+    querySelector: () => null,
+    getElementById: () => null,
+  };
+
+  let patchBody = null;
+  // Count GETs that land BEFORE the PATCH — a replace push must issue none (the
+  // only legitimate GET is _refreshStoredETag, which runs AFTER the PATCH).
+  let preGetCount = 0;
+  const etagHeaders = { get: () => '"etag-x"' };
+  global.fetch = async (url, opts) => {
+    if (opts && opts.method === "PATCH") {
+      patchBody = JSON.parse(opts.body);
+      return { ok: true, status: 200, headers: etagHeaders };
+    }
+    if (!patchBody) preGetCount++;
+    return {
+      ok: true,
+      status: 200,
+      headers: etagHeaders,
+      json: async () => ({
+        files: { "cashflow_data.json": { content: JSON.stringify(remoteData), truncated: false } },
+      }),
+    };
+  };
+
+  const restore = () => {
+    global.fetch = prevFetch;
+    global.document = prevDoc;
+    Utils.hideLoading = prevHide;
+    Utils.showLoading = prevShow;
+    s.cancelPendingSave();
+  };
+
+  return sync.saveToCloud(false, true).then(() => {
+    restore();
+    if (!patchBody) throw new Error("replaceRemote saveToCloud did not issue a PATCH");
+    const savedData = JSON.parse(patchBody.files["cashflow_data.json"].content);
+    const ids = (savedData.debts || []).map((d) => d.id).sort();
+    if (ids.join(",") !== "L") {
+      throw new Error(
+        "replaceRemote push must REPLACE (local L only, no remote R), got: " + ids.join(",")
+      );
+    }
+    if (preGetCount !== 0) {
+      throw new Error(
+        "replaceRemote push must skip the pre-PATCH merge GET, saw " + preGetCount + " GET(s) before PATCH"
+      );
+    }
+    if (sync._replaceRemoteOnce !== false) {
+      throw new Error("replaceRemote latch must be consumed after the push");
+    }
+    console.log("✅ replaceRemote push skips merge and overwrites cloud with local import");
+  });
+}
+
 // TEST 30: saveToCloud merges with an existing remote gist even when this
 // device has never synced it (no stored ETag). Gating the fetch-and-merge on
 // _lastKnownETag meant a fresh device pointed at a populated gist blind-
 // overwrote it on its first push, destroying the other device's data. The push
 // path is the documented merge-and-protect path; a null ETag just means the GET
 // carries no If-None-Match and returns 200 with the remote data to merge.
-console.log("TEST 30: First Push With No ETag Merges, Not Overwrites");
-{
+//
+// Terminal test: both TEST 32 and TEST 30 drive saveToCloud through the shared
+// global.fetch mock, so they must run SEQUENTIALLY (never concurrent chains that
+// clobber each other's mocks). TEST 32 runs first and chains into this one, which
+// prints the final banner. Any new async network test must join this chain.
+function runTest30Final() {
+  console.log("TEST 30: First Push With No ETag Merges, Not Overwrites");
   const s = new TransactionStore();
   s.resetData();
   // Local-only debt that has never reached the cloud.
@@ -2147,3 +2247,12 @@ console.log("TEST 30: First Push With No ETag Merges, Not Overwrites");
     process.exit(1);
   });
 }
+
+// Run the async network tests sequentially (shared global.fetch mock): TEST 32
+// first, then TEST 30, which prints the final banner.
+runReplaceRemoteTest()
+  .then(runTest30Final)
+  .catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });

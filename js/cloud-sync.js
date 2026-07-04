@@ -25,6 +25,11 @@ class CloudSync {
     // work still waiting to reach the cloud.
     this._pendingCloudSave = false;
     this._pendingSaveAfterSync = false;
+    // One-shot latch set by saveToCloud(..., replaceRemote=true): the next save
+    // attempt skips the fetch-and-merge step and pushes local data as the
+    // authoritative copy (import restore). Latched on the instance so a replace
+    // push queued behind an in-flight sync keeps its semantics.
+    this._replaceRemoteOnce = false;
 
     if (typeof this.store.registerSaveCallback === 'function') {
       this.store.registerSaveCallback((isDataModified) => {
@@ -1018,7 +1023,10 @@ class CloudSync {
     }
   }
 
-  async saveToCloud(quiet = false) {
+  async saveToCloud(quiet = false, replaceRemote = false) {
+    // Latch before the in-progress check so an authoritative push that lands
+    // mid-sync survives into the queued follow-up save.
+    if (replaceRemote) this._replaceRemoteOnce = true;
     if (this._isSyncing) {
       console.log("Sync already in progress, skipping saveToCloud");
       // Queue a follow-up push so a trigger that lands mid-sync (manual
@@ -1032,6 +1040,11 @@ class CloudSync {
     this._isSyncing = true;
     // We are committing to a save now, so any queued debounce is subsumed.
     this._pendingCloudSave = false;
+    // Consume the one-shot replace latch on this attempt. If the attempt fails
+    // (cancelled credentials prompt, network error), the next ordinary save
+    // falls back to the safe merge path rather than replaying a stale replace.
+    const skipMergeThisSave = this._replaceRemoteOnce;
+    this._replaceRemoteOnce = false;
 
     // In quiet mode (background/resume syncs) suppress the loading overlay so
     // routine syncs don't flash a spinner; merge/conflict and error
@@ -1111,7 +1124,13 @@ class CloudSync {
       // we MERGE instead of blind-overwriting a populated remote gist. Gating
       // this on _lastKnownETag was a data-loss hole — the first push clobbered
       // another device's data.
-      {
+      //
+      // The ONE exception is an explicit replaceRemote push (import restore):
+      // there the user's intent is that local data REPLACE the cloud copy, so
+      // merging would defeat the restore (newer remote rows win, items deleted
+      // after the backup resurrect). The PATCH error path below still handles
+      // 401/404 for this mode.
+      if (!skipMergeThisSave) {
         // Fetch (If-None-Match only when a stored ETag exists) to check for changes
         const { response: checkResponse, etag: newETag, notModified } =
           await this._fetchGist(token, gistId, this._lastKnownETag);

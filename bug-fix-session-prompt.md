@@ -19,6 +19,13 @@ You are ONE session in a multi-session bug-fix loop. Sessions run 30 minutes apa
 13. `js/search-ui.js` (544)
 14. `js/build.js` (4)
 
+## Step 0 — Check for interrupted work
+
+- Run `git status --porcelain` FIRST. A dirty working tree means a previous session was interrupted (usage limit, kill, crash) before it could verify and commit.
+- Treat WIP in **checklist files** as untrusted: read the diff in full (`git diff`). If it clearly belongs to the file you are about to review and you can validate it line-by-line (and it passes Step 4 verification), incorporate it into your session and record in the handoff that you shipped a predecessor's WIP. Otherwise revert it (`git checkout -- <file>` or `git stash push -m "orphaned bug-fix WIP"`) and record that instead.
+- WIP in **non-checklist files** (loop tooling, the handoff/prompt themselves, docs) was likely left deliberately by the loop operator — leave it in place; Step 6 commits it along with your work.
+- Never build on unreviewed WIP, and never leave the tree dirty at session end — Step 6 commits everything.
+
 ## Step 1 — Load the handoff
 
 - Read `bug-fix-handoff.md` at the repo root.

@@ -647,13 +647,13 @@ class CashflowApp {
               // authoritatively so it replaces the cloud copy instead of being
               // merged into it (a merge lets newer remote items win and leaves
               // the restore partial, or resurrects items deleted after the
-              // backup). Dropping the known ETag makes saveToCloud skip its
-              // GET-merge and PATCH local data straight up.
+              // backup). replaceRemote makes saveToCloud skip its GET-merge and
+              // PATCH local data straight up. (Nulling _lastKnownETag no longer
+              // does this — saveToCloud merges even without a stored ETag.)
               if (this.cloudSync && this.cloudSync.autoSyncEnabled) {
                 this.cloudSync.cancelPendingCloudSave();
-                this.cloudSync._lastKnownETag = null;
                 this.cloudSync
-                  .saveToCloud()
+                  .saveToCloud(false, true)
                   .catch((err) => console.error("Post-import cloud push failed:", err));
                 Utils.showNotification(
                   "Data imported — replacing your cloud copy with the import."
