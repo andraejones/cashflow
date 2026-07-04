@@ -1937,4 +1937,51 @@ console.log("TEST 28: resetData Clears The Load-Integrity Block");
   console.log("✅ resetData clears _loadFailed and persists the wipe");
 }
 
+// TEST 29: Bank-CSV pending classification. A pending hold is Balance $0.00 with
+// the amount in the Deposit column. A real posted debit that happens to empty
+// the account (Balance $0.00 WITH a Withdrawal amount) must NOT be misread as a
+// pending hold — that would suppress its Settle / date-drift actions and widen
+// its match window. Sign is unchanged either way.
+console.log("TEST 29: Bank CSV Pending Classification Requires Deposit Column");
+{
+  const s = new TransactionStore();
+  s.resetData();
+  const rm = new RecurringTransactionManager(s);
+  const ui = new BankReconcileUI(s, rm, () => {}, () => {});
+
+  const csv =
+    "Posted Date,Transaction Date,Description,Deposit,Withdrawal,Balance\n" +
+    // Real posted debit that zeroes the account — Balance 0.00, amount in Withdrawal.
+    "7/2/2026,7/2/2026,ACH LANDLORD RENT,,(825.00),0.00\n" +
+    // Genuine pending hold — Balance 0.00, amount in Deposit column.
+    "7/3/2026,7/3/2026,VISIBLE PENDING,46.61,,0.00\n" +
+    // Ordinary posted debit with a running balance.
+    "7/4/2026,7/4/2026,PUBLIX,,(20.00),1500.00\n";
+
+  const parsed = ui._parseSuncoastCsv(csv);
+  if (parsed.error) throw new Error("Parse error: " + parsed.error);
+  const byDesc = {};
+  parsed.rows.forEach((r) => { byDesc[r.description] = r; });
+
+  const rent = byDesc["ACH LANDLORD RENT"];
+  if (!rent || rent.pending !== false) {
+    throw new Error("Zero-balance WITHDRAWAL must be posted, not pending");
+  }
+  if (Math.abs(rent.signed - -825.0) > 0.005) {
+    throw new Error(`Zero-balance withdrawal sign must stay negative, got ${rent.signed}`);
+  }
+  const hold = byDesc["VISIBLE PENDING"];
+  if (!hold || hold.pending !== true) {
+    throw new Error("Zero-balance DEPOSIT-column hold must remain pending");
+  }
+  if (Math.abs(hold.signed - -46.61) > 0.005) {
+    throw new Error(`Pending hold must be treated as an outflow, got ${hold.signed}`);
+  }
+  const publix = byDesc["PUBLIX"];
+  if (!publix || publix.pending !== false) {
+    throw new Error("Ordinary posted debit must not be pending");
+  }
+  console.log("✅ Pending requires Balance $0 AND Deposit column; zero-balance debits stay posted");
+}
+
 console.log("ALL TESTS PASSED");

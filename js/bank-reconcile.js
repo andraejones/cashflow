@@ -206,7 +206,14 @@ class BankReconcileUI {
       const withdrawal = this._parseMoney(cells[idx.withdrawal]);
       const balance = idx.balance !== -1 ? this._parseMoney(cells[idx.balance]) : null;
       const description = (cells[idx.desc] || "").trim();
-      const pending = balance !== null && Math.abs(balance) < 0.005;
+      // A pending hold shows Balance $0.00 AND carries its amount in the Deposit
+      // column (never Withdrawal) — see the format note above. Gating on
+      // `withdrawal === null` keeps a real posted debit that happens to zero the
+      // account (Balance $0.00 with a Withdrawal amount) from being misread as a
+      // hold, which would suppress its Settle / date-drift actions and give it
+      // the wider unsettled match window.
+      const pending =
+        withdrawal === null && balance !== null && Math.abs(balance) < 0.005;
 
       let signed = null;
       if (withdrawal !== null) {
