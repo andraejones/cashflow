@@ -1819,4 +1819,82 @@ try {
   global.Date = T26_RealDate;
 }
 
+// TEST 27: The expansion clear pass tombstones id-bearing rows it drops. A
+// persisted recurring instance whose modifiedInstance flag was cleared elsewhere
+// (e.g. the snowball un-hide branch) keeps its synced id but is no longer a
+// hand-edit, so re-expansion drops it. Without a tombstone, CloudSync._mergeById
+// resurrects the remote copy — a sync ping-pong. Pure (id-less) expansions must
+// NOT be tombstoned.
+console.log("TEST 27: Expansion Clear Pass Tombstones Cleared-Flag Instances");
+{
+  const tombstoneIds = (s) => s._deletedItems.transactions.map((x) => x.id);
+
+  // (a) An id-bearing, non-modified recurring row is tombstoned + dropped by a
+  // full re-expansion, and stays gone through a cloud merge with the remote copy.
+  {
+    const s = new TransactionStore();
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    const rtId = s.addRecurringTransaction({
+      startDate: "2026-06-01", amount: 40, type: "expense",
+      description: "Min", recurrence: "monthly", debtId: "d1", debtRole: "minimum",
+    });
+    rm.applyRecurringTransactions(2026, 5);
+    const idx = s.getTransactions()["2026-06-01"].findIndex((t) => t.recurringId === rtId);
+    // Promote to a hand-edit (assigns id), then clear the flag but keep the id —
+    // exactly what the snowball un-hide branch leaves behind.
+    s.setTransactionSettled("2026-06-01", idx, false);
+    const anomalyId = s.getTransactions()["2026-06-01"][idx].id;
+    if (!anomalyId) throw new Error("Setup: promoted instance must carry an id");
+    s.getTransactions()["2026-06-01"][idx].modifiedInstance = false;
+
+    rm.invalidateCache();
+    rm.applyRecurringTransactions(2026, 5); // full re-expansion clear pass
+
+    if (!tombstoneIds(s).includes(anomalyId)) {
+      throw new Error("Cleared-flag id-bearing instance must be tombstoned when dropped");
+    }
+    // A fresh id-less pure expansion replaces it.
+    const regenerated = s.getTransactions()["2026-06-01"].filter((t) => t.recurringId === rtId);
+    if (regenerated.length !== 1 || regenerated[0].id) {
+      throw new Error("Dropped instance must be replaced by exactly one id-less expansion");
+    }
+    // The remote still holds the anomaly; the tombstone must suppress resurrection.
+    const sync = new CloudSync(s, () => {});
+    const local = s.exportData();
+    const remote = s.exportData();
+    remote.transactions["2026-06-01"] = [
+      { amount: 0, type: "expense", description: "Min", recurringId: rtId,
+        id: anomalyId, hidden: true, _lastModified: new Date().toISOString() },
+    ];
+    const merged = sync._mergeData(local, remote);
+    const survived = (merged.transactions["2026-06-01"] || []).some((t) => t.id === anomalyId);
+    if (survived) {
+      throw new Error("Tombstoned anomaly must not survive a cloud merge");
+    }
+    // Kill the debounced save from setTransactionSettled so its deferred
+    // CloudSync callback doesn't hit the DOM-less mock after the suite ends.
+    s.cancelPendingSave();
+  }
+
+  // (b) Pure (id-less) expansions are dropped WITHOUT polluting the tombstone list.
+  {
+    const s = new TransactionStore();
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    s.addRecurringTransaction({
+      startDate: "2026-06-01", amount: 12, type: "expense",
+      description: "Plain", recurrence: "monthly",
+    });
+    rm.applyRecurringTransactions(2026, 5);
+    const before = tombstoneIds(s).length;
+    rm.invalidateCache();
+    rm.applyRecurringTransactions(2026, 5);
+    if (tombstoneIds(s).length !== before) {
+      throw new Error("Dropping id-less expansions must not create tombstones");
+    }
+  }
+  console.log("✅ Cleared-flag instances tombstoned; id-less expansions untouched");
+}
+
 console.log("ALL TESTS PASSED");

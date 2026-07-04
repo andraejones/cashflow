@@ -48,6 +48,31 @@ class RecurringTransactionManager {
     return true;
   }
 
+  // Drop a date's pure recurring expansions (regenerated on every render) while
+  // preserving hand-edited modified instances. A row that carries a recurringId
+  // but is NOT a modifiedInstance yet still has a persisted `id` is an anomaly:
+  // its hand-edit flag was cleared elsewhere (e.g. the snowball un-hide branch)
+  // while the synced id lingered. Dropping it silently lets a cloud sync-merge
+  // resurrect the remote copy (deletion-tombstones rule), so tombstone its id.
+  // Pure expansions are id-less and never persisted, so they need no tombstone.
+  _clearRecurringExpansions(transactions, dateString) {
+    if (!transactions[dateString]) {
+      return;
+    }
+    transactions[dateString] = transactions[dateString].filter((t) => {
+      if (!t.recurringId || t.modifiedInstance) {
+        return true;
+      }
+      if (t.id) {
+        this.store.trackDeletedTransaction(t.id);
+      }
+      return false;
+    });
+    if (transactions[dateString].length === 0) {
+      delete transactions[dateString];
+    }
+  }
+
   // Get cache key for a specific month
   _getCacheKey(year, month) {
     const monthStr = `${year}-${String(month + 1).padStart(2, '0')}`;
@@ -318,15 +343,7 @@ class RecurringTransactionManager {
       const dateObj = new Date(year, month, day);
       const dateString = Utils.formatDateString(dateObj);
 
-      if (transactions[dateString]) {
-        transactions[dateString] = transactions[dateString].filter(t =>
-          !t.recurringId || t.modifiedInstance
-        );
-
-        if (transactions[dateString].length === 0) {
-          delete transactions[dateString];
-        }
-      }
+      this._clearRecurringExpansions(transactions, dateString);
     }
 
     this.store.getRecurringTransactions().forEach((rt) => {
@@ -546,15 +563,7 @@ class RecurringTransactionManager {
       const dateObj = new Date(year, month, day);
       const dateString = Utils.formatDateString(dateObj);
 
-      if (transactions[dateString]) {
-        transactions[dateString] = transactions[dateString].filter(t =>
-          !t.recurringId || t.modifiedInstance
-        );
-
-        if (transactions[dateString].length === 0) {
-          delete transactions[dateString];
-        }
-      }
+      this._clearRecurringExpansions(transactions, dateString);
     }
 
     // Apply cached transactions (but skip if modified instance exists)
