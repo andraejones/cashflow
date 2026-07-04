@@ -1984,6 +1984,79 @@ console.log("TEST 29: Bank CSV Pending Classification Requires Deposit Column");
   console.log("✅ Pending requires Balance $0 AND Deposit column; zero-balance debits stay posted");
 }
 
+// TEST 31: The calendar's 30-day highlight walk relies on updateMonthlyBalances
+// having pre-materialized the forward horizon before it runs. Guards that
+// contract: updateMonthlyBalances(viewedDate) ALWAYS expands viewedMonth..+6
+// (even on an empty transactions map, because viewedDate seeds earliestDate), so
+// the today-anchored 30-day window is materialized and the walk agrees with
+// CalculationService.calculateMinimum without needing to expand it itself.
+console.log("TEST 31: updateMonthlyBalances pre-expands the forward horizon (calendar walk contract)");
+{
+  const s = new TransactionStore();
+  s.resetData();
+  const rm = new RecurringTransactionManager(s);
+  const calc = new CalculationService(s, rm);
+
+  const today = new Date();
+  // A recurring expense whose first occurrence lands 10 days out — inside the
+  // 30-day window. Nothing else exists, so the materialized map is empty until
+  // updateMonthlyBalances expands it.
+  const occ = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 10);
+  s.addRecurringTransaction({
+    amount: 500,
+    type: 'expense',
+    description: 'Future Bill',
+    recurrence: 'monthly',
+    startDate: Utils.formatDateString(occ),
+  });
+
+  if (Object.keys(s.getTransactions()).length !== 0) {
+    throw new Error("TEST 31 setup invalid: map should be empty before expansion");
+  }
+
+  // generateCalendar always calls this with the viewed date before its walk.
+  calc.updateMonthlyBalances(today);
+
+  // The occurrence's month must now be materialized purely by that call.
+  const occStr = Utils.formatDateString(occ);
+  if (!s.getTransactions()[occStr]) {
+    throw new Error("updateMonthlyBalances must pre-expand the 30-day window's recurring occurrence");
+  }
+
+  // Faithful replica of calendar-ui's 30-day walk WITHOUT any expansion of its
+  // own — it must still match the Minimum thanks to the pre-expansion above.
+  const walk = () => {
+    const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+    const mb = s.getMonthlyBalances();
+    let bal = (mb[todayKey] && mb[todayKey].startingBalance) || 0;
+    for (let d = 1; d <= today.getDate(); d++) {
+      const ds = Utils.formatDateString(new Date(today.getFullYear(), today.getMonth(), d));
+      const dt = calc.calculateDailyTotals(ds);
+      bal = dt.balance !== null
+        ? calc.roundToCents(dt.balance - calc.getReservedTotalOnOrBefore(ds))
+        : calc.roundToCents(bal + dt.income - dt.expense);
+    }
+    let lowest = bal;
+    for (let d = 1; d <= 30; d++) {
+      const cd = new Date(today.getFullYear(), today.getMonth(), today.getDate() + d);
+      const ds = Utils.formatDateString(cd);
+      const dt = calc.calculateDailyTotals(ds);
+      bal = dt.balance !== null
+        ? calc.roundToCents(dt.balance - calc.getReservedTotalOnOrBefore(ds))
+        : calc.roundToCents(bal + dt.income - dt.expense);
+      if (bal < lowest) lowest = bal;
+    }
+    return lowest;
+  };
+
+  const minimum = calc.calculateMinimum();
+  const walkMin = walk();
+  if (walkMin !== minimum) {
+    throw new Error(`Calendar 30-day walk must match calculateMinimum given the pre-expanded horizon (walk=${walkMin}, minimum=${minimum})`);
+  }
+  console.log("✅ updateMonthlyBalances pre-expands the horizon; walk matches Minimum without self-expanding");
+}
+
 // TEST 30: saveToCloud merges with an existing remote gist even when this
 // device has never synced it (no stored ETag). Gating the fetch-and-merge on
 // _lastKnownETag meant a fresh device pointed at a populated gist blind-
