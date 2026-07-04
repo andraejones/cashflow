@@ -293,6 +293,14 @@ class CalendarUI {
       }
     }
 
+    // Free-funds mode: when a recurring allocation series is designated as the
+    // family's "free funds" bucket, the current day shows that bucket's
+    // remaining amount instead of its running balance and past days hide
+    // theirs; future days keep the normal balance so the forward plan stays
+    // visible.
+    const freeFundsMode = this.store.getFreeFundsRecurringId() !== null;
+    const freeFundsBucket = freeFundsMode ? this.store.getFreeFundsAllocation() : null;
+
     // Calculate the end date of the 30-day minimum range (DST-safe)
     const minimumEndDate = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 30);
     const minimumEndYear = minimumEndDate.getFullYear();
@@ -474,6 +482,8 @@ class CalendarUI {
           hasAllocated, isPayoffDay, hasMoveAnomaly,
           dailyTotals, cellExpense, runningBalance,
           transactionCount, dayTransactions, carriedUnsettled,
+          freeFundsMode, freeFundsBucket,
+          isFutureDay: dateString > todayStr,
         });
         calendarAgenda.appendChild(agendaRow);
         if (isCurrentDay) currentDayRow = agendaRow;
@@ -495,7 +505,16 @@ class CalendarUI {
           ? `<div class="expense">-${cellExpense.toFixed(2)}</div>`
           : ""
         }
-        <div class="balance">${runningBalance.toFixed(2)}</div>
+        ${freeFundsMode
+          ? (isCurrentDay
+            ? (freeFundsBucket
+              ? `<div class="balance free-funds" title="Free funds available">${freeFundsBucket.remaining.toFixed(2)}</div>`
+              : "")
+            : dateString > todayStr
+              ? `<div class="balance">${runningBalance.toFixed(2)}</div>`
+              : "")
+          : `<div class="balance">${runningBalance.toFixed(2)}</div>`
+        }
         ${transactionCount > 0
           ? `<div class="transaction-count">(${transactionCount})</div>`
           : ""
@@ -798,7 +817,16 @@ class CalendarUI {
             ? `<span class="expense">-${d.cellExpense.toFixed(2)}</span>`
             : ""
           }
-          <span class="balance">${d.runningBalance.toFixed(2)}</span>
+          ${d.freeFundsMode
+            ? (d.isCurrentDay
+              ? (d.freeFundsBucket
+                ? `<span class="balance free-funds" title="Free funds available">${d.freeFundsBucket.remaining.toFixed(2)}</span>`
+                : "")
+              : d.isFutureDay
+                ? `<span class="balance">${d.runningBalance.toFixed(2)}</span>`
+                : "")
+            : `<span class="balance">${d.runningBalance.toFixed(2)}</span>`
+          }
         </div>
         ${itemsHtml}
         ${carriedHtml}

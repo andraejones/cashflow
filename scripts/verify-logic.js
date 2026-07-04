@@ -2312,6 +2312,83 @@ function runTest30Final() {
   });
 }
 
+// TEST 34: Free-funds designation. Exactly one recurring allocation series can
+// hold the `freeFunds` flag (designating another clears the first), and the
+// display helper resolves the series' live bucket — the latest instance dated
+// on/before today — ignoring future instances. A designated series with no
+// live bucket yet yields null (calendar shows nothing, balances stay hidden).
+console.log("TEST 34: Free-Funds Designation Is Exclusive And Resolves The Live Bucket");
+{
+  const s = new TransactionStore();
+  s.resetData();
+
+  const t33 = new Date();
+  const day = (offset) =>
+    Utils.formatDateString(
+      new Date(t33.getFullYear(), t33.getMonth(), t33.getDate() + offset)
+    );
+
+  const groceriesId = s.addRecurringTransaction({
+    startDate: day(-1), amount: 400, type: "expense", description: "Groceries",
+    recurrence: "monthly", allocated: true, settled: true,
+  });
+  const funId = s.addRecurringTransaction({
+    startDate: day(7), amount: 150, type: "expense", description: "Fun money",
+    recurrence: "monthly", allocated: true, settled: true,
+  });
+
+  // Live groceries bucket (yesterday, partially drawn down to 250), plus a
+  // future instance that must NOT be the one displayed.
+  s.addTransaction(day(-1), {
+    amount: 250, type: "expense", description: "Groceries",
+    recurringId: groceriesId, allocated: true, settled: true,
+  });
+  s.addTransaction(day(30), {
+    amount: 400, type: "expense", description: "Groceries",
+    recurringId: groceriesId, allocated: true, settled: true,
+  });
+  // Fun money's first instance is still upcoming — no live bucket.
+  s.addTransaction(day(7), {
+    amount: 150, type: "expense", description: "Fun money",
+    recurringId: funId, allocated: true, settled: true,
+  });
+
+  s.setFreeFundsAllocation(groceriesId);
+  if (s.getFreeFundsRecurringId() !== groceriesId) {
+    throw new Error("Designating groceries should set it as the free-funds series");
+  }
+  const bucket = s.getFreeFundsAllocation();
+  if (!bucket || bucket.remaining !== 250 || bucket.date !== day(-1)) {
+    throw new Error(
+      "Free-funds bucket should be the live (latest on/before today) instance at 250, got: " +
+        JSON.stringify(bucket)
+    );
+  }
+
+  // Redesignating moves the flag — the store enforces the one-holder rule.
+  s.setFreeFundsAllocation(funId);
+  if (s.getFreeFundsRecurringId() !== funId) {
+    throw new Error("Redesignating should hand the flag to the fun-money series");
+  }
+  const flagged = s.recurringTransactions.filter((rt) => rt.freeFunds === true);
+  if (flagged.length !== 1 || flagged[0].id !== funId) {
+    throw new Error("Exactly one series may hold the freeFunds flag");
+  }
+  if (s.getFreeFundsAllocation() !== null) {
+    throw new Error(
+      "A designated series with no live bucket yet should resolve to null"
+    );
+  }
+
+  // Clearing removes the designation entirely.
+  s.setFreeFundsAllocation(null);
+  if (s.getFreeFundsRecurringId() !== null) {
+    throw new Error("Passing null should clear the free-funds designation");
+  }
+  s.cancelPendingSave();
+  console.log("✅ Free-funds designation is exclusive and resolves the live bucket");
+}
+
 // Run the async network tests sequentially (shared global.fetch mock): TEST 32
 // first, then TEST 30, which prints the final banner.
 runReplaceRemoteTest()

@@ -889,6 +889,7 @@ class TransactionStore {
           description,
           remaining: this._roundCents(t.amount),
           recurring: true,
+          recurringId: t.recurringId,
         };
         if (!existing || date > existing.date) {
           recurringBySeries.set(t.recurringId, candidate);
@@ -899,6 +900,64 @@ class TransactionStore {
     result.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     return result;
   }
+
+  // One recurring allocation series can be designated as the family's "free
+  // funds" bucket. While designated, the calendar hides every day's running
+  // balance and shows only that bucket's remaining amount on the current day,
+  // so the family sees what's spendable without exposing the whole budget.
+  // The flag lives on the recurring definition (`freeFunds: true`) so it syncs
+  // with the series and disappears with it on delete. If a cloud merge ever
+  // leaves two series flagged, the most recently modified one wins.
+  getFreeFundsRecurringId() {
+    let winner = null;
+    this.recurringTransactions.forEach((rt) => {
+      if (rt.freeFunds !== true || rt.allocated !== true) return;
+      if (!winner || (rt._lastModified || "") > (winner._lastModified || "")) {
+        winner = rt;
+      }
+    });
+    return winner ? winner.id : null;
+  }
+
+
+  // Designates `recurringId` as the free-funds series, clearing the flag from
+  // any other series (only one may hold it). Pass null to clear entirely.
+  setFreeFundsAllocation(recurringId) {
+    let changed = false;
+    this.recurringTransactions.forEach((rt) => {
+      const shouldHold = recurringId != null && rt.id === recurringId;
+      if (shouldHold && rt.freeFunds !== true) {
+        rt.freeFunds = true;
+        rt._lastModified = new Date().toISOString();
+        changed = true;
+      } else if (!shouldHold && rt.freeFunds === true) {
+        delete rt.freeFunds;
+        rt._lastModified = new Date().toISOString();
+        changed = true;
+      }
+    });
+    if (changed) {
+      this.debouncedSave();
+    }
+    return changed;
+  }
+
+
+  // The live bucket for the designated free-funds series: its latest instance
+  // dated on/before today — the same bucket getAllocations offers for draws,
+  // so the displayed figure always matches what's actually drawable. Returns
+  // { remaining, description, date, ... } or null when nothing is designated
+  // or the series has no live bucket yet (e.g. its first period is upcoming).
+  getFreeFundsAllocation() {
+    const id = this.getFreeFundsRecurringId();
+    if (!id) return null;
+    return (
+      this.getAllocations().find(
+        (a) => a.recurring === true && a.recurringId === id
+      ) || null
+    );
+  }
+
 
   // Resolves a transaction's `drawsFromAllocationId` to the allocation it draws
   // from, returning its `{ description, date }` for display. Handles both real

@@ -774,6 +774,60 @@ body.app-locked .fab-today {
   margin: 6px 0;
 }
 
+/* Free-funds mode: the designated bucket's remaining amount stands in for the
+   current day's balance — allocation purple (a reserve held), not ink black. */
+.balance.free-funds {
+  color: #7c5cd6;
+}
+
+.balance.free-funds::before {
+  content: "\1F4B5 ";
+  /* Dollar-bill emoji (spendable, not locked away) — also overrides the
+     negative-balance ⚠ prefix, which would mislabel the free-funds figure on
+     a negative current day. */
+  font-size: 0.85em;
+}
+
+/* Allocated Transactions modal: recurring rows pair the row button with the
+   free-funds star toggle side by side (buttons can't nest). */
+.allocated-row-wrap {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.allocated-row-wrap .recent-transaction-row {
+  flex: 1;
+  min-width: 0;
+}
+
+.free-funds-toggle {
+  flex: 0 0 auto;
+  width: 44px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background-color: var(--surface-muted);
+  cursor: pointer;
+  font-size: 1.1rem;
+  filter: grayscale(1);
+  opacity: 0.55;
+  transition: filter 0.2s, opacity 0.2s, border-color 0.2s, background-color 0.2s;
+}
+
+.free-funds-toggle:hover,
+.free-funds-toggle:focus {
+  border-color: var(--accent-color);
+  opacity: 0.85;
+  outline: none;
+}
+
+.free-funds-toggle.is-active {
+  filter: none;
+  opacity: 1;
+  border-color: #7c5cd6;
+  background-color: rgba(167, 139, 250, 0.22);
+}
+
 .recent-transaction-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

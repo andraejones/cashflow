@@ -71,6 +71,7 @@ class TransactionUI {
       this.updateRecurrenceOptions();
       this.updateSettledToggleVisibility();
       this.updateAutoAdjustVisibility();
+      this.updateFreeFundsVisibility();
     });
     document.getElementById("transactionAllocate").addEventListener("change", () => {
       this.syncAllocateState();
@@ -509,6 +510,7 @@ class TransactionUI {
     }
     this.updateCloseoutDateVisibility();
     this.updateAutoAdjustVisibility();
+    this.updateFreeFundsVisibility();
   }
 
   // The "Suggest amount from spending history" opt-in only applies to
@@ -519,6 +521,26 @@ class TransactionUI {
   updateAutoAdjustVisibility() {
     const label = document.getElementById("autoAdjustToggleLabel");
     const cb = document.getElementById("transactionAutoAdjust");
+    if (!label || !cb) return;
+    const allocateCb = document.getElementById("transactionAllocate");
+    const recurrence = document.getElementById("transactionRecurrence");
+    const applies =
+      allocateCb && allocateCb.checked &&
+      recurrence && recurrence.value !== "once";
+    label.style.display = applies ? "" : "none";
+    if (!applies) {
+      cb.checked = false;
+    }
+  }
+
+  // The "free funds" designation only applies to recurring allocations (the
+  // series' live bucket stands in for calendar balances), so the toggle
+  // follows the same visibility rule as auto-adjust: Allocate checked AND a
+  // recurrence selected. Hiding also unchecks so a stale state can't carry
+  // the flag onto a save.
+  updateFreeFundsVisibility() {
+    const label = document.getElementById("freeFundsToggleLabel");
+    const cb = document.getElementById("transactionFreeFunds");
     if (!label || !cb) return;
     const allocateCb = document.getElementById("transactionAllocate");
     const recurrence = document.getElementById("transactionRecurrence");
@@ -2221,12 +2243,20 @@ class TransactionUI {
             newRecurringTransaction.autoAdjustFloor = true;
             newRecurringTransaction.floorAmount = amount;
           }
+          if (allocated && document.getElementById("transactionFreeFunds").checked) {
+            newRecurringTransaction.freeFunds = true;
+          }
         }
         this.addAdvancedRecurringOptions(newRecurringTransaction);
 
         const recurringId = this.store.addRecurringTransaction(
           newRecurringTransaction
         );
+        // Only one series may hold the free-funds designation — clear it from
+        // any previous holder now that this one carries the flag.
+        if (newRecurringTransaction.freeFunds === true) {
+          this.store.setFreeFundsAllocation(recurringId);
+        }
         this.recurringManager.invalidateCache();
         const firstInstance = {
           amount: amount,
@@ -2255,6 +2285,8 @@ class TransactionUI {
       document.getElementById("autoCloseoutToggleLabel").style.display = "none";
       document.getElementById("transactionAutoAdjust").checked = false;
       document.getElementById("autoAdjustToggleLabel").style.display = "none";
+      document.getElementById("transactionFreeFunds").checked = false;
+      document.getElementById("freeFundsToggleLabel").style.display = "none";
       document.getElementById("transactionCloseoutDate").value = "";
       document.getElementById("closeoutDateField").style.display = "none";
       document.getElementById("settledToggleLabel").classList.remove("is-disabled");

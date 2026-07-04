@@ -427,6 +427,7 @@ class CashflowApp {
     } else {
       let dividerPlaced = false;
       let inWindowCount = 0;
+      const freeFundsId = this.store.getFreeFundsRecurringId();
       items.forEach(({ date, transaction }) => {
         // Drop a separator between items inside the 30-day window and those
         // beyond it. Only once, and only when both sides are non-empty.
@@ -472,7 +473,42 @@ class CashflowApp {
           this.openDayFromRecent(date);
         });
 
-        list.appendChild(row);
+        // Recurring series can be designated as the family's "free funds"
+        // bucket (exactly one at a time): the calendar then hides running
+        // balances and shows this bucket's remaining amount on the current
+        // day. The star toggles the designation; rows are <button>s, so the
+        // toggle sits beside the row in a wrapper rather than nested inside.
+        if (transaction.recurringId) {
+          const isFreeFunds = transaction.recurringId === freeFundsId;
+          const wrap = document.createElement("div");
+          wrap.className = "allocated-row-wrap";
+          wrap.setAttribute("role", "listitem");
+          row.removeAttribute("role");
+
+          const toggle = document.createElement("button");
+          toggle.type = "button";
+          toggle.className = "free-funds-toggle" + (isFreeFunds ? " is-active" : "");
+          toggle.textContent = "⭐";
+          toggle.setAttribute("aria-pressed", String(isFreeFunds));
+          toggle.title = isFreeFunds
+            ? "Free funds — shown on the calendar instead of balances. Click to remove."
+            : "Show as free funds on the calendar (replaces daily balances)";
+          toggle.addEventListener("click", () => {
+            this.store.setFreeFundsAllocation(
+              isFreeFunds ? null : transaction.recurringId
+            );
+            this.updateUI();
+            // Re-render the open modal so the star state refreshes
+            // (ModalManager.openModal de-dupes, so this is safe in place).
+            this.showAllocatedTransactions();
+          });
+
+          wrap.appendChild(row);
+          wrap.appendChild(toggle);
+          list.appendChild(wrap);
+        } else {
+          list.appendChild(row);
+        }
       });
     }
 
