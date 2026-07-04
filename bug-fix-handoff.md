@@ -21,7 +21,29 @@ One file reviewed per session, in the fixed order below. Sessions share NO conte
     infusion redistribution (line ~1846) and `calculateInfusionAllocations` auto
     branch (line ~3283) sort by balance only (no name tiebreak). Only diverges when
     two debts share an identical cent balance — rare once interest accrues. Left as-is.
-- [ ] /Users/andraejones/Documents/CashFlow/js/transaction-ui.js (2423)
+- [x] /Users/andraejones/Documents/CashFlow/js/transaction-ui.js (2423) — 2026-07-04, 0 fixed / 2 log-only
+
+  Reviewed in full. Heavily hardened by prior feature sessions (stale-index
+  re-resolution by id in saveEdit/deleteTransaction/toggleSettled, tombstone-safe
+  delete+re-add, allocation-draw provenance carried across moves). All 34
+  `scripts/verify-logic.js` tests pass. No confirmable HIGH/MEDIUM bugs.
+  - LOW (log-only) `transaction-ui.js:136` — `setupFocusTrap` Tab handler does
+    `firstElement.focus()` / `lastElement.focus()` without a null guard; if a modal
+    ever had zero focusable elements these would throw. Unreachable in practice —
+    both trapped modals (transactionModal, searchModal) always contain a `.close`
+    button. Not fixed.
+  - LOW (log-only) `transaction-ui.js:1353`, `:1554`, `:2018` — settle-toggle,
+    carried-forward one-time delete, and deleteTransaction's `liveIndexOf` fall back
+    to the captured positional `index` when `t.id` is missing. New transactions all
+    get ids via `Utils.generateUniqueId`/`addTransaction`, so a stale index would
+    only bite pre-id legacy rows that were reordered between render and click —
+    effectively unreachable. Left as-is.
+  - Verified NOT a bug: edit-in-place (newDate===date) passes only
+    `drawsFromAllocationId` to `editTransaction`, not the `drawsFromRecurringId`/
+    `drawsFromPeriodDate` provenance stamps. The store re-stamps provenance in
+    `updateTransaction`→`_applyAllocationDraw` (transaction-store.js:1186-1190) and
+    clears it when the draw is unset (1278-1281). The delete+re-add MOVE branches
+    carry provenance manually because they bypass that path; both routes are correct.
 - [ ] /Users/andraejones/Documents/CashFlow/js/transaction-store.js (1979)
 - [ ] /Users/andraejones/Documents/CashFlow/js/recurring-manager.js (1961)
 - [ ] /Users/andraejones/Documents/CashFlow/js/bank-reconcile.js (1616)
