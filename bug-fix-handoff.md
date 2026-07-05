@@ -242,7 +242,40 @@ One file reviewed per session, in the fixed order below. Sessions share NO conte
     loss, just the biometric convenience miss for that one legacy blob). Boundary is
     correct for the modern format (1-char PIN → exactly 45 → treated as modern).
     Legacy biometric format is pre-migration only. Not fixed.
-- [ ] /Users/andraejones/Documents/CashFlow/js/app.js (812)
+- [x] /Users/andraejones/Documents/CashFlow/js/app.js (812) — 2026-07-04, 0 fixed / 3 log-only
+
+  Reviewed in full. Orchestrator: wires all components, owns the shared
+  `_syncPendingOrLoad` push-if-pending/pull sync entry point (startup init,
+  PIN-unlock callback, foreground-resume), the operation-locked `safeCloudLoad`,
+  the Recent/Allocated transaction list modals (DOM built via textContent — no
+  XSS; user descriptions never innerHTML'd), free-funds star toggle, day-navigation
+  from Recent/Reconcile, import/export/reset, and the visibilitychange/pagehide/
+  pageshow/online/beforeunload lifecycle handlers. Verified `isLocked` exists and
+  is maintained (pin-protection.js:6,781); `lockApp` does NOT wipe the in-memory
+  store (just overlay + stopHeartbeat), so a hide-time push while locked pushes
+  real data, not empty. `flushPendingSave` runs `saveData` → fires the callback
+  that sets `_pendingCloudSave`, so `_syncPendingOrLoad` correctly detects a
+  just-flushed edit and pushes (matches sync-lifecycle memory). All 34
+  `scripts/verify-logic.js` tests pass. No confirmable HIGH/MEDIUM bugs.
+  - LOW (info) `app.js:768` `flushAppOnHide` does NOT gate on
+    `pinProtection.isLocked` (whereas `syncOnResume` at :135 does). Verified
+    data-safe: lock leaves the in-memory store intact, and the handler returns
+    early when `window.app` is undefined (locked-at-startup, app not yet created),
+    so a locked hide-push always pushes real data. Asymmetry is intentional
+    (hide must still flush pending local work). Not a bug.
+  - LOW (info) `app.js:121` `_syncPendingOrLoad`'s `saveToCloud(quiet)` branch does
+    not take `_operationLock` (only `safeCloudLoad` does). `saveToCloud` has its own
+    `_isSyncing` mutex so concurrent pushes are guarded, but a store-mutating
+    `updateUI` (autoSettle/closeOut/rollForward, triggered by a save callback) could
+    in principle run during the async GET-merge-PATCH window. Pre-existing pattern,
+    not shown reachable/harmful (updateUI is deferred under the lock elsewhere).
+    Left as-is.
+  - LOW (info) `app.js:636` `importData` calls `cancelPendingCloudSave()` up-front,
+    before the async file-picker; if the user cancels the picker a queued cloud push
+    is cancelled. Verified NOT data-loss: localStorage already holds the change, and
+    `hasPendingCloudSave()` falls back to `_hasLocalChangesSinceSync` (cloud-sync.js:477),
+    so resume/next-edit re-detects and re-pushes. `exportData` deliberately does NOT
+    cancel (comment :600); import's upfront cancel is benign given the fallback. Left.
 - [ ] /Users/andraejones/Documents/CashFlow/js/utils.js (756)
 - [ ] /Users/andraejones/Documents/CashFlow/js/calculation-service.js (597)
 - [ ] /Users/andraejones/Documents/CashFlow/js/search-ui.js (544)
