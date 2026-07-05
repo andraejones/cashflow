@@ -210,7 +210,38 @@ One file reviewed per session, in the fixed order below. Sessions share NO conte
     resets (line 429) + the prior-month carry seed (287-294, gated by
     `getReconciliationAnchor(monthStart, {inclusive:false})`) together floor the
     accumulator at the same anchor `reconAnchor(today, {inclusive:true})` uses.
-- [ ] /Users/andraejones/Documents/CashFlow/js/pin-protection.js (870)
+- [x] /Users/andraejones/Documents/CashFlow/js/pin-protection.js (870) — 2026-07-04, 0 fixed / 2 log-only
+
+  Reviewed in full. PIN lifecycle (SHA-256+salt secure hash + legacy-format
+  detection/migration, constant-time compare), byte-level XOR encrypt/decrypt of
+  the store payload (xor2: / legacy xor: / prefixless), WebAuthn register/auth,
+  device-bound AES-GCM biometric-PIN storage (+ legacy-size migration), the
+  same-method-re-unlock `promptUnlock` state machine, reset-with-DELETE, and the
+  120s inactivity monitor (lock overlay, modal teardown). Verified the hash
+  salt-roundtrip (stored `saltB64:hashB64`; verify re-derives salt via
+  base64ToArrayBuffer → identical saltB64 → hash matches only on correct PIN), the
+  XOR byte math (Uint8Array.map keeps 0-255, latin1 btoa/atob, TextEncoder pin
+  bytes), and the decrypt→"" failure path is caught upstream by transaction-store's
+  `_loadFailed` structured-empty gate (store.js:164-172). Cross-checked callers:
+  encrypt/decrypt only via store load/save (gated on getCurrentPin), callbacks via
+  app.js:94/106, promptUnlock via app.js:756. Duplicate startInactivityMonitoring
+  calls are idempotent (same `boundResetTimer` ref → addEventListener dedup). All
+  34 `scripts/verify-logic.js` tests pass. No confirmable HIGH/MEDIUM bugs.
+  - LOW (log-only) `pin-protection.js:536-540` — after a biometric-originated
+    unlock (`lastUnlockMethod==="biometric"`), an inactivity re-lock sets
+    `requireBiometric` and, on every biometric failure/cancel, recurses
+    `return this.promptUnlock()` with NO PIN fallback and NO reset button, so a user
+    whose biometric hardware fails is stuck in a biometric-only prompt loop.
+    Documented intentional (comment 536-537) AND self-escaping: `lastUnlockMethod`
+    is in-memory only, so a page reload resets it to null → first-time
+    "biometric-then-PIN" behavior. Session-scoped, not a permanent lockout. Not fixed.
+  - LOW (log-only) `pin-protection.js:390` — `retrievePinForBiometrics` legacy
+    detection uses a byte-length heuristic (`< SALT+IV+17 == 45`). A long-enough
+    LEGACY biometric blob could exceed 45 bytes and be misread as modern AES-GCM →
+    decrypt throws → returns null → graceful fall-through to the PIN dialog (no data
+    loss, just the biometric convenience miss for that one legacy blob). Boundary is
+    correct for the modern format (1-char PIN → exactly 45 → treated as modern).
+    Legacy biometric format is pre-migration only. Not fixed.
 - [ ] /Users/andraejones/Documents/CashFlow/js/app.js (812)
 - [ ] /Users/andraejones/Documents/CashFlow/js/utils.js (756)
 - [ ] /Users/andraejones/Documents/CashFlow/js/calculation-service.js (597)
