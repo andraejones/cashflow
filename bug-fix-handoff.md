@@ -136,7 +136,37 @@ One file reviewed per session, in the fixed order below. Sessions share NO conte
     appPendingAtBank split therefore silently exclude near/name pairs — those
     surface only under "Needs review", which is correct because the amount
     differs (user fixes amount → re-run promotes to exact → then settleable).
-- [ ] /Users/andraejones/Documents/CashFlow/js/cloud-sync.js (1547)
+- [x] /Users/andraejones/Documents/CashFlow/js/cloud-sync.js (1547) — 2026-07-04, 0 fixed / 3 log-only
+
+  Reviewed in full. GitHub-Gist cloud sync: AES-GCM token encryption (+ legacy
+  migration), credential prompt modal, debounced/lifecycle save scheduling,
+  ETag-based heartbeat change detection, and the fetch-and-merge push / one-way
+  load paths with the full `_mergeData` conflict-resolution suite (id merge,
+  per-date + cross-date transaction dedup, skip-event LWW, moved-txn, monthly-note
+  conflict markers, snowball-settings recency). Verified the concurrency model
+  against memory (`_isSyncing` sync mutex, `_heartbeatGen` guard, `_replaceRemoteOnce`
+  latch, `_pendingSaveAfterSync` re-queue), the null-ETag first-push merge (TEST 30),
+  replaceRemote import overwrite (TEST 32), and that tombstone lists (incl. `skips`)
+  are pruned to 30 days by `transaction-store._pruneDeletedItems` (no unbounded
+  growth). All 34 `scripts/verify-logic.js` tests pass. No confirmable HIGH/MEDIUM bugs.
+  - LOW (log-only) `cloud-sync.js:586-588` — `_mergeById` silently drops any item
+    lacking an `id` from BOTH local and remote (remote add gated on `item.id`; local
+    `if (!item.id) return`). Applies to recurringTransactions/debts/cashInfusions and
+    per-date transactions via `_mergeTransactions`. By design (id-keyed merge), but an
+    id-less legacy row would vanish on the first merge sync. Unreachable in practice:
+    add* paths all assign ids via `Utils.generateUniqueId`. Same "pre-id legacy" class
+    as prior sessions' findings. Not fixed.
+  - LOW (log-only) `cloud-sync.js:1073-1090` — the new-gist creation branch (empty
+    gistId after credential prompt) calls `store.exportData()` BEFORE the
+    `flushPendingSave()` at line 1106, so a still-queued debounced local edit could be
+    omitted from the initial gist snapshot. Self-heals on the next debounced save +
+    subsequent merge. Not fixed.
+  - LOW (info) `cloud-sync.js:1135` — `newETag` destructured from the step-1 merge
+    fetch is never read (the ETag is refreshed via a fresh GET after the PATCH at
+    line 1271). Dead variable, harmless. Not fixed.
+  - Verified NOT a bug: `_hasLocalChangesSinceSync` returns false when never synced
+    (`_lastSyncTime` null) → Load does a one-way pull that discards local-only data.
+    Documented intentional (Load = "take cloud"; merge-and-protect is Save's job).
 - [ ] /Users/andraejones/Documents/CashFlow/js/calendar-ui.js (987)
 - [ ] /Users/andraejones/Documents/CashFlow/js/pin-protection.js (870)
 - [ ] /Users/andraejones/Documents/CashFlow/js/app.js (812)
