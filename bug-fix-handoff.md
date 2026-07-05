@@ -167,7 +167,49 @@ One file reviewed per session, in the fixed order below. Sessions share NO conte
   - Verified NOT a bug: `_hasLocalChangesSinceSync` returns false when never synced
     (`_lastSyncTime` null) → Load does a one-way pull that discards local-only data.
     Documented intentional (Load = "take cloud"; merge-and-protect is Save's job).
-- [ ] /Users/andraejones/Documents/CashFlow/js/calendar-ui.js (987)
+- [x] /Users/andraejones/Documents/CashFlow/js/calendar-ui.js (987) — 2026-07-04, 0 fixed / 2 log-only
+
+  Reviewed in full. Calendar rendering (grid + agenda views), the app menu,
+  notes modal, biometrics toggle, and TWO independent balance walks: the 30-day
+  minimum/lowest-balance HIGHLIGHT walk (lines 318-386) and the per-day RENDER
+  walk (lines 392-529). Verified both mirror the authoritative CalculationService
+  walks: the highlight walk is byte-parity with `calculateMinimum` (same seed —
+  `monthlyBalances[todayMonthKey].startingBalance` == `summary.startingBalance`;
+  same anchor reset + `getReservedTotalOnOrBefore` subtraction; today seeded as a
+  candidate per the 342-352 comment), and this exact "walk matches Minimum without
+  self-expanding" contract is locked by TEST 31 (updateMonthlyBalances at line 252
+  pre-expands 6 months ahead, so the highlight walk's future-month
+  calculateDailyTotals see expanded recurring). Render walk's reconciliation-anchor
+  carry (lines 284-294, 429-432) + carriedForwardUnsettled (448-460) match
+  CalculationService's getDayBalanceBreakdown (TEST 33). Agenda descriptions/
+  carried-forward labels go through `Utils.escapeHtml`; grid template interpolates
+  only numerics + internal labels (no XSS). Event delegation attached once in the
+  constructor (no per-render leak); IntersectionObserver disconnected+recreated
+  each render. Free-funds display gated correctly (TEST 34). Grid trailing-fill
+  `42 - (firstDay+daysInMonth)` is always >=5 (max 6+31=37), no negative loop. All
+  34 `scripts/verify-logic.js` tests pass. No confirmable HIGH/MEDIUM bugs.
+  - LOW (log-only) `calendar-ui.js:508-512` (grid) / `:820-824` (agenda) —
+    free-funds mode, current day: when `getFreeFundsAllocation()` returns null
+    (bucket not yet materialized on/before today), the current day renders NO
+    balance figure at all (empty string), rather than falling back to the running
+    balance. Cosmetic gap in an edge case (free-funds designated but its recurring
+    instance hasn't landed yet); documented design leans to showing the bucket
+    remaining. Not fixed.
+  - LOW (log-only) `calendar-ui.js:843-854` `_getDayIndicatorHtml` — indicator
+    priority collapses ending-balance / move-anomaly / skipped to a single star
+    (first match wins). A day that is an Ending Balance anchor AND also has a move
+    anomaly or a skipped recurring shows only the ending-balance star, so the
+    concurrent move/skip cue is hidden. All three use the same star glyph (differ by
+    class/title), so it's a purely cosmetic tooltip/label loss. Intentional-looking
+    priority; not fixed.
+  - Verified NOT a bug: the agenda's `carriedUnsettled` LIST (direct filter of
+    allUnsettled by `date < today && date > reconAnchor(today, inclusive)`, lines
+    473-477) and the render walk's `carriedForwardUnsettled` AMOUNT (from the
+    `runningUnsettledExpense` accumulator, 448-453) are two computations of the same
+    carried-forward set; they reconcile because the accumulator's in-month anchor
+    resets (line 429) + the prior-month carry seed (287-294, gated by
+    `getReconciliationAnchor(monthStart, {inclusive:false})`) together floor the
+    accumulator at the same anchor `reconAnchor(today, {inclusive:true})` uses.
 - [ ] /Users/andraejones/Documents/CashFlow/js/pin-protection.js (870)
 - [ ] /Users/andraejones/Documents/CashFlow/js/app.js (812)
 - [ ] /Users/andraejones/Documents/CashFlow/js/utils.js (756)
