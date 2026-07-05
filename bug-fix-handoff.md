@@ -46,7 +46,49 @@ One file reviewed per session, in the fixed order below. Sessions share NO conte
     never reconciled once the debt is gone → stray "Snowball Payoff: X" expense
     persists. Only reachable via Generate-button + delete-debt with
     auto-generate off. Left.
-- [ ] /Users/andraejones/Documents/CashFlow/js/transaction-ui.js (2423)
+- [x] /Users/andraejones/Documents/CashFlow/js/transaction-ui.js (2423) — 2026-07-05, 2 fixed / 3 log-only
+
+  Round-2 full re-read (round-1 entry: 0 fixed / 2 log-only, its LOWs still
+  stand). Verified the manual `firstInstance` placed at the form date is NOT a
+  duplication hazard when the pattern would fire elsewhere — the next
+  `applyRecurringTransactions` sweeps any non-modifiedInstance recurring row
+  (tombstoning ids) before re-expanding. All 36 `scripts/verify-logic.js`
+  tests pass (suite was 35; this session added TEST 36).
+  - MEDIUM (FIXED) `transaction-ui.js:~2180` (addTransaction) — the
+    advanced-recurrence number fields persisted unvalidated: (a) custom
+    interval 0/empty (`parseInt` NaN) → `applyCustomRecurrence` skips the
+    series, so the just-added entry is swept on the next render and silently
+    VANISHES while its invisible definition persists forever; (b) variable
+    percentage cleared → NaN → every expanded amount = `base + base*(NaN/100)*n`
+    = NaN → "$NaN" rows and NaN running balances for the session (JSON turns it
+    to null on reload, silently disabling the feature). Only this form could
+    write either (debt-snowball + store migration guard with `|| 0`). Fix:
+    validate both before persisting (interval must be an integer ≥ 1;
+    percentage must parse finite) with error notifications, mirroring the
+    form's other validations. TEST 36 locks it (rejects both, nothing
+    persisted; valid custom series still saves + expands finite amounts).
+  - LOW (FIXED) `transaction-ui.js:52` — the transactionType change handler
+    cleared the description on EVERY non-balance change, so toggling
+    expense↔income wiped a description the user had already typed. Now clears
+    only the auto-filled "Ending Balance" label.
+  - LOW (log-only) `transaction-ui.js:1483` — carried-forward Settle of a
+    one-time that was itself previously moved from a recurring
+    (movedFrom/originalRecurringId set) drops the move linkage: the settled
+    copy loses the fields and the move record still points at the old toDate.
+    Consequence is metadata-only (move records only drive the "(Authorized)"
+    label + skip-star suppression via toDate > dateString, still correct; the
+    "move back restores recurring" affordance is lost for that row). Left.
+  - LOW (log-only) `transaction-ui.js:1326` — Close Out's fallback when
+    `findTransactionById(txnId)` misses deletes whatever now sits at the
+    captured positional index without verifying identity; reachable only if
+    the row was removed by another path between render and click with no
+    re-render. Same stale-fallback class as round-1's :1353 finding. Left.
+  - LOW (log-only) `transaction-ui.js:~2415` — "End after N occurrences" with
+    the count left empty stores `maxOccurrences: NaN` (→ null after
+    save/reload), which the expansion treats as "no limit" — the series never
+    ends despite the user picking a limit. Also: a date-change edit of a
+    recurring occurrence ignores the Edit-scope select (always moves just that
+    occurrence). Both judgment calls; left.
 - [ ] /Users/andraejones/Documents/CashFlow/js/transaction-store.js (1979)
 - [ ] /Users/andraejones/Documents/CashFlow/js/recurring-manager.js (1961)
 - [ ] /Users/andraejones/Documents/CashFlow/js/bank-reconcile.js (1616)
@@ -65,9 +107,28 @@ One file reviewed per session, in the fixed order below. Sessions share NO conte
   `bug-fix-handoff.md.archived-20260705-070447` — read your file's entry there
   before re-litigating; its "Verified not bugs" list still applies.
 - scripts/verify-logic.js: session 1 (round 2) added TEST 35 (already-paid debt
-  keeps its current-month clearing payment). Suite is now 35 tests.
+  keeps its current-month clearing payment). Session 2 (round 2) added TEST 36
+  (add-form advanced-recurrence validation), which loads `transaction-ui.js`
+  into the harness for the first time behind a per-id DOM element stub — reuse
+  that pattern if a later session needs to drive UI methods. Suite is now 36
+  tests.
+- utils.js `buildEndConditionOptions`: the maxOccurrences input can be left
+  empty → transaction-ui stores NaN (treated as no-limit). If utils.js's
+  session wants to fix it at the source (e.g. default value), coordinate with
+  the log-only note under transaction-ui.js.
 
 ## Verified not bugs
+
+- transaction-ui.js addTransaction's manual `firstInstance` at the form date is
+  not a double-count even when the recurrence pattern/business-day adjustment
+  would place the first occurrence elsewhere: `_clearRecurringExpansions`
+  removes every non-modifiedInstance recurring row (tombstoning id-bearing
+  ones) before each month's re-expansion, so the placeholder self-heals on the
+  next render.
+- transaction-ui.js carried-forward filter (`u.date < date`, `u.date >
+  reconAnchor` with inclusive anchor) matches the reconciliation-anchor model:
+  an Ending Balance on/before the viewed date absorbs everything dated
+  on/before it.
 
 - debt-snowball.js targeted-infusion excess above the target debt's balance is
   DROPPED, not redistributed — but identically in all 3 sites that must stay

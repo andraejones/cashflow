@@ -49,7 +49,11 @@ class TransactionUI {
       } else {
         recurrenceSelect.style.display = "";
         if (descriptionField) descriptionField.style.display = "";
-        transactionDescription.value = "";
+        // Only clear the auto-filled balance label — an expense↔income toggle
+        // must not wipe a description the user already typed.
+        if (transactionDescription.value === "Ending Balance") {
+          transactionDescription.value = "";
+        }
         transactionDescription.placeholder = "Description";
       }
       this.updateSettledToggleVisibility();
@@ -2164,6 +2168,36 @@ class TransactionUI {
           document.getElementById("transactionRecurrence").value = "once";
           Utils.showNotification(
             'Balance transactions cannot be recurring. Please select "One-time" for balance transactions.',
+            "error"
+          );
+          return false;
+        }
+      }
+      // The advanced-recurrence number fields are free-form inputs; reject
+      // values the expansion engine can't honor before persisting them. An
+      // interval below 1 makes applyCustomRecurrence skip the series entirely,
+      // so the entry vanishes from the calendar on the next render while its
+      // definition lingers invisibly; a non-numeric variable percentage
+      // expands every occurrence — and the running balances — to NaN.
+      if (recurrence === "custom") {
+        const intervalEl = document.getElementById("customIntervalValue");
+        if (intervalEl) {
+          const intervalVal = parseInt(intervalEl.value, 10);
+          if (!Number.isFinite(intervalVal) || intervalVal < 1) {
+            Utils.showNotification(
+              "Custom repeat interval must be a whole number of 1 or more",
+              "error"
+            );
+            return false;
+          }
+        }
+      }
+      const variableCheckEl = document.getElementById("variableAmountCheck");
+      if (variableCheckEl && variableCheckEl.checked) {
+        const pctEl = document.getElementById("variablePercentage");
+        if (pctEl && !Number.isFinite(parseFloat(pctEl.value))) {
+          Utils.showNotification(
+            "Variable amount percentage must be a number",
             "error"
           );
           return false;

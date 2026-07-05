@@ -17,7 +17,7 @@ You are ONE session in a multi-session bug-fix loop. Sessions run with no shared
 ## Step 2 — Review the target file
 
 - First read the handoff's **Cross-file leads** and **Verified not bugs** sections — earlier sessions may have flagged something in your file, and you must not re-litigate cleared items.
-- Read the project's `CLAUDE.md` / contributor docs (and project memory, if any) so documented intentional behavior isn't "fixed".
+- The project's `CLAUDE.md` and memory index are already auto-loaded into your context — honor them, but do NOT re-read those files. Read other contributor docs (and the specific memory files the index points at, when relevant to your target) so documented intentional behavior isn't "fixed".
 - Read the target file **in full** — no sampling.
 - Hunt for: logic errors, date/timezone math, off-by-one, state corruption, stale index/reference hazards, data-merge/sync hazards (tombstones! union resurrection!), silent double-counting, infinite loops, injection / unsafe HTML, resource leaks.
 - For suspicious spots, **verify with tools** (grep the callee, write a targeted standalone test) rather than judging by eye — especially in money/date math and sync code.

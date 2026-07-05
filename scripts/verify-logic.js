@@ -2475,6 +2475,137 @@ console.log("TEST 35: Already-Paid Debt Keeps Its Current-Month Clearing Payment
   }
 }
 
+// TEST 36: The add form rejects advanced-recurrence values the expansion
+// engine can't honor. A custom interval < 1 makes applyCustomRecurrence skip
+// the series (the freshly-added entry is swept by _clearRecurringExpansions on
+// the next render and never re-expanded — it silently vanishes while the
+// definition lingers invisibly), and a NaN variable percentage expands every
+// occurrence amount — and the running balances — to NaN. Both were persisted
+// unvalidated by TransactionUI.addTransaction.
+console.log("TEST 36: Add Form Rejects Unexpandable Custom Interval / NaN Variable Percentage");
+{
+  // Minimal DOM stub: getElementById returns one persistent element per id so
+  // test-set values survive; everything else is inert.
+  const T36_elements = new Map();
+  const T36_makeElement = (id) => ({
+    id,
+    value: "",
+    checked: false,
+    disabled: false,
+    innerHTML: "",
+    placeholder: "",
+    style: {},
+    classList: { add: () => {}, remove: () => {}, toggle: () => {} },
+    addEventListener: () => {},
+    setAttribute: () => {},
+    removeAttribute: () => {},
+    appendChild: () => {},
+    remove: () => {},
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    contains: () => false,
+  });
+  const T36_getEl = (id) => {
+    if (!T36_elements.has(id)) T36_elements.set(id, T36_makeElement(id));
+    return T36_elements.get(id);
+  };
+  const prevDoc = global.document;
+  global.document = {
+    addEventListener: () => {},
+    getElementById: T36_getEl,
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    createElement: () => T36_makeElement(null),
+    activeElement: null,
+  };
+  try {
+    vm.runInThisContext(
+      fs.readFileSync(path.join(jsDir, "transaction-ui.js"), "utf8")
+    );
+    const s = new TransactionStore();
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    const tui = new TransactionUI(s, rm, () => {}, null, null);
+
+    const setForm = (fields) => {
+      Object.entries(fields).forEach(([id, props]) => {
+        Object.assign(T36_getEl(id), props);
+      });
+    };
+    const baseForm = {
+      transactionDate: { value: "2026-07-10" },
+      transactionAmount: { value: "50" },
+      transactionType: { value: "expense" },
+      transactionDescription: { value: "Sub" },
+      transactionSettled: { checked: true },
+      transactionAllocate: { checked: false },
+      variableAmountCheck: { checked: false },
+    };
+
+    // Case 1: custom recurrence with interval 0 must be rejected, nothing saved.
+    setForm({
+      ...baseForm,
+      transactionRecurrence: { value: "custom" },
+      customIntervalValue: { value: "0" },
+      customIntervalUnit: { value: "days" },
+    });
+    if (tui.addTransaction() !== false) {
+      throw new Error("Custom interval 0 was accepted");
+    }
+    if (s.getRecurringTransactions().length !== 0) {
+      throw new Error("Custom interval 0 persisted a recurring definition");
+    }
+
+    // Case 2: variable amount with a cleared (NaN) percentage must be rejected.
+    setForm({
+      ...baseForm,
+      transactionRecurrence: { value: "monthly" },
+      variableAmountCheck: { checked: true },
+      variablePercentage: { value: "" },
+    });
+    if (tui.addTransaction() !== false) {
+      throw new Error("NaN variable percentage was accepted");
+    }
+    if (s.getRecurringTransactions().length !== 0) {
+      throw new Error("NaN variable percentage persisted a recurring definition");
+    }
+
+    // Case 3: a valid custom series still saves, expands, and keeps a finite amount.
+    setForm({
+      ...baseForm,
+      transactionRecurrence: { value: "custom" },
+      customIntervalValue: { value: "2" },
+      customIntervalUnit: { value: "weeks" },
+      variableAmountCheck: { checked: false },
+    });
+    if (tui.addTransaction() !== true) {
+      throw new Error("Valid custom recurrence was rejected");
+    }
+    const defs = s.getRecurringTransactions();
+    if (defs.length !== 1 || defs[0].customInterval.value !== 2) {
+      throw new Error(
+        `Valid custom recurrence saved wrong definition: ${JSON.stringify(defs)}`
+      );
+    }
+    rm.applyRecurringTransactions(2026, 6); // July 2026
+    const t36July = s.getTransactions();
+    const t36Instances = Object.keys(t36July)
+      .filter((d) => d.startsWith("2026-07"))
+      .flatMap((d) => t36July[d])
+      .filter((t) => t.recurringId === defs[0].id);
+    if (t36Instances.length === 0) {
+      throw new Error("Valid custom series produced no July instances");
+    }
+    if (t36Instances.some((t) => !Number.isFinite(t.amount))) {
+      throw new Error("Valid custom series expanded a non-finite amount");
+    }
+    s.cancelPendingSave();
+    console.log("✅ Add form rejects unexpandable recurrence inputs; valid series still expands");
+  } finally {
+    global.document = prevDoc;
+  }
+}
+
 // Run the async network tests sequentially (shared global.fetch mock): TEST 32
 // first, then TEST 30, which prints the final banner.
 runReplaceRemoteTest()

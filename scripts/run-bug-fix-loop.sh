@@ -10,8 +10,17 @@
 # REACTIVE LIMIT PAUSE below is the governor — the limiter itself says when
 # to stop and exactly when to resume, so preemptive throttling only wastes
 # quota-available wall-clock time. Consecutive sessions also share a prompt-
-# cache prefix (system prompt + project context + the session prompt); any
-# gap <= ~270s keeps that cache warm, larger gaps pay full price again.
+# cache prefix; any gap <= ~270s keeps it warm, larger gaps pay full price
+# again. (The win is partial: each session's commit changes the git-status
+# context injected after the static system prompt, so only the prefix ahead
+# of that divergence re-uses the cache — still the bulk of the fixed cost.)
+#
+# Model selection: sessions targeting small files run on Sonnet automatically.
+# Before each session, the next unchecked file's LIVE line count is measured
+# (falling back to the count recorded in the checklist); at or below
+# SONNET_MAX_LINES (default 1000; 0 disables) the session gets
+# `--model sonnet`, otherwise the CLI default applies. Passing an explicit
+# --model after `--` disables auto-selection entirely.
 # Preemptive batch pacing is still available but OFF by default: set
 # BATCH_SLEEP > 0 (with BATCH_SIZE) only if you deliberately want to spread
 # work out — e.g. overnight runs, or to lower the odds of a session being
@@ -60,6 +69,10 @@ Run control:
                     seconds after every BATCH_SIZE sessions to deliberately
                     spread work out (overnight runs, mid-run-cutoff hedging).
   --batch-size N    Sessions per batch when --batch-sleep is on (default 3).
+  --sonnet-max-lines N
+                    Auto-model threshold: a session whose target file is <= N
+                    lines runs with `--model sonnet` (default 1000; 0 disables).
+                    Ignored when an explicit --model is passed after `--`.
   --handoff FILE    Handoff path relative to target (default bug-fix-handoff.md).
   --log-dir DIR     Log dir relative to target (default scripts/bug-fix-logs).
   --resume          Explicitly resume (default behavior; kept for clarity).
@@ -92,6 +105,7 @@ FRESH=false
 BATCH_SIZE="${BATCH_SIZE:-3}"
 BATCH_SLEEP="${BATCH_SLEEP:-0}"   # 0 = no preemptive pacing (reactive limit pause governs)
 INTRA_SLEEP="${INTRA_SLEEP:-30}"
+SONNET_MAX_LINES="${SONNET_MAX_LINES:-1000}"        # auto --model sonnet at/below this; 0 disables
 LIMIT_BUFFER="${LIMIT_BUFFER:-120}"                  # seconds past the advertised reset
 LIMIT_FALLBACK_SLEEP="${LIMIT_FALLBACK_SLEEP:-3600}" # wait when reset time is unparseable
 
@@ -109,6 +123,7 @@ while (( $# > 0 )); do
     --batch-size)  BATCH_SIZE="${2:?--batch-size requires a value}"; shift 2 ;;
     --batch-sleep) BATCH_SLEEP="${2:?--batch-sleep requires a value}"; shift 2 ;;
     --intra-sleep) INTRA_SLEEP="${2:?--intra-sleep requires a value}"; shift 2 ;;
+    --sonnet-max-lines) SONNET_MAX_LINES="${2:?--sonnet-max-lines requires a value}"; shift 2 ;;
     --resume)      shift ;;  # resuming is the default; flag kept for clarity
     --fresh)       FRESH=true; shift ;;
     --dry-run)     DRY_RUN=true; shift ;;
@@ -117,6 +132,17 @@ while (( $# > 0 )); do
     *)             echo "Unknown argument: $1"; echo; usage; exit 1 ;;
   esac
 done
+
+# Auto-model policy: an explicit --model in the passthrough args wins outright.
+AUTO_MODEL=false
+if (( ${CLAUDE_ARGS[(Ie)--model]} )) || [[ -n "${(M)CLAUDE_ARGS:#--model=*}" ]]; then
+  model_policy="explicit --model passed after -- (auto-selection off)"
+elif (( SONNET_MAX_LINES > 0 )); then
+  AUTO_MODEL=true
+  model_policy="target file <= ${SONNET_MAX_LINES} lines -> --model sonnet, else CLI default"
+else
+  model_policy="auto-selection disabled (--sonnet-max-lines 0); CLI default model"
+fi
 
 # Resolve caller-relative paths to absolute BEFORE cd'ing into the target.
 [[ -n "$LIST_FILE"  ]] && LIST_FILE="${LIST_FILE:A}"
@@ -225,6 +251,7 @@ if $DRY_RUN; then
     echo "  notes file:  ${NOTES_FILE:-(none)}"
   }
   echo "Log dir:       $LOG_DIR"
+  echo "Model:         $model_policy"
   if $handoff_live; then
     remaining=$(grep -c '^\- \[ \]' "$HANDOFF_FILE")
   else
@@ -338,10 +365,27 @@ while (( i <= END )); do
   fi
   remaining_before=$(grep -c '^\- \[ \]' "$HANDOFF_FILE")
 
+  # Pick this session's model from the next unchecked file's size. Recomputed
+  # every iteration so limit retries and no-progress retries stay correct.
+  typeset -a session_args
+  session_args=("${CLAUDE_ARGS[@]}")
+  if $AUTO_MODEL; then
+    next_entry=$(grep -m1 '^\- \[ \]' "$HANDOFF_FILE")
+    next_file=$(print -r -- "$next_entry" | sed -E 's/^- \[ \] //; s/ \([0-9]+\)[[:space:]]*$//')
+    next_lines=$(print -r -- "$next_entry" | sed -nE 's/^.*\(([0-9]+)\)[[:space:]]*$/\1/p')
+    [[ -f "$next_file" ]] && next_lines=$(wc -l < "$next_file" | tr -d ' ')
+    if [[ -n "$next_lines" ]] && (( next_lines <= SONNET_MAX_LINES )); then
+      session_args+=(--model sonnet)
+      echo "Auto-model: $next_file ($next_lines lines <= $SONNET_MAX_LINES) -> --model sonnet"
+    else
+      echo "Auto-model: ${next_file:-?} (${next_lines:-unknown} lines > $SONNET_MAX_LINES) -> CLI default model"
+    fi
+  fi
+
   echo "=== Session $i starting at $(date) ==="
   claude -p "$(cat "$PROMPT_FILE")" \
     --dangerously-skip-permissions \
-    "${CLAUDE_ARGS[@]}" \
+    "${session_args[@]}" \
     | tee "$LOG_DIR/session-$i.log"
 
   # A limit hit means the session did no work: park until the advertised
