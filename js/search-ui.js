@@ -159,9 +159,15 @@ class SearchUI {
       const amount = transaction.amount.toFixed(2);
       const descriptionText =
         typeof transaction.description === "string" ? transaction.description : "";
-      const description = descriptionText
-        .replace(/"/g, '""')
-        .replace(/[\r\n]+/g, " ");
+      // Neutralize spreadsheet formula injection: a cell whose text begins with
+      // = + - @ (or a leading tab/CR) is evaluated as a formula by Excel/Sheets
+      // even when quoted. Descriptions can originate from imported bank-statement
+      // payee names, so prefix a single quote to force text interpretation.
+      let sanitizedDescription = descriptionText.replace(/[\r\n]+/g, " ");
+      if (/^[=+\-@\t\r]/.test(sanitizedDescription)) {
+        sanitizedDescription = `'${sanitizedDescription}`;
+      }
+      const description = sanitizedDescription.replace(/"/g, '""');
       const type = transaction.type;
       const recurring = (transaction.recurringId || isRecurringDef) ? "Yes" : "No";
 

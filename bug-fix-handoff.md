@@ -339,7 +339,36 @@ One file reviewed per session, in the fixed order below. Sessions share NO conte
   - Verified NOT a bug: `calculateMonthlySummary` for a month BEFORE the earliest
     transaction hits the defensive fallback (497-507) → startingBalance 0,
     endingBalance 0 — correct (no prior data), not a zero-init bug.
-- [ ] /Users/andraejones/Documents/CashFlow/js/search-ui.js (544)
+- [x] /Users/andraejones/Documents/CashFlow/js/search-ui.js (544) — 2026-07-05, 1 fixed / 1 log-only
+
+  Reviewed in full. Search modal: filter/paginate/sort of one-time + persisted
+  recurring instances, a separate window-overlap search over recurring
+  definitions (dedup via `foundRecurringIds`), CSV export, and the
+  action-button enable/disable wiring. Verified contracts: `getTransactions()`
+  returns the live store map but search-ui only READS it (no corruption);
+  `isTransactionSkipped`/`getRecurringTransactions`/`showTransactionDetails`
+  signatures match; all 9 element IDs exist in index.html; variable-amount
+  recurring defs still carry `rt.amount` (base) so no `.toFixed(2)` crash; the
+  recurring-def date filter is a correct [start,end]↔[from,to] overlap test.
+  Render/export build DOM via textContent (no XSS); the one `innerHTML`
+  (`headerDiv`, line 431) interpolates only the numeric `totalResults`. All 34
+  `scripts/verify-logic.js` tests pass.
+  - MEDIUM (FIXED) `search-ui.js:159-169` — CSV formula injection: a description
+    beginning with `= + - @` (or leading tab/CR) is evaluated as a formula by
+    Excel/Sheets even inside a quoted field. Descriptions can originate from
+    imported bank-statement payee names (bank-reconcile.js is the only other
+    `.csv` site — import-only), making this export sink reachable with
+    third-party-influenced text. Fixed with the standard OWASP mitigation:
+    prefix a single quote (`'`) to any description whose (newline-collapsed)
+    text starts with a formula-trigger char, before CSV-quote escaping. One-way
+    export (never re-imported into the app), so the prefix is non-destructive.
+    Interior `=`/`-` and normal text are untouched; verified 8 cases standalone.
+  - LOW (log-only) `search-ui.js:353-373` — recurring-def search adds one result
+    at `rt.startDate` when no materialized instance matched, without simulating
+    whether the recurrence actually has an occurrence inside [dateFrom,dateTo]
+    (e.g. a count-capped `maxOccurrences` series with no `endDate` that already
+    exhausted before the window still shows). Best-effort definition search;
+    clicking navigates to startDate. Rare + cosmetic. Not fixed.
 - [ ] /Users/andraejones/Documents/CashFlow/js/build.js (4)
 
 ## Cross-file leads
