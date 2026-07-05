@@ -369,7 +369,28 @@ One file reviewed per session, in the fixed order below. Sessions share NO conte
     (e.g. a count-capped `maxOccurrences` series with no `endDate` that already
     exhausted before the window still shows). Best-effort definition search;
     clicking navigates to startDate. Rare + cosmetic. Not fixed.
-- [ ] /Users/andraejones/Documents/CashFlow/js/build.js (4)
+- [x] /Users/andraejones/Documents/CashFlow/js/build.js (4) — 2026-07-05, 0 fixed / 0 log-only
+
+  Reviewed in full. Single-line build-stamp file: `window.APP_BUILD` = a
+  `"YYYY-MM-DD HH:MM TZ"` timestamp string (plus 3 comment lines pointing to
+  CLAUDE.md's Build Number workflow). No logic, no branches, no data flow —
+  nothing to review beyond well-formedness, which holds. All 34
+  `scripts/verify-logic.js` tests pass. No bugs.
+
+## Final scorecard (all files reviewed — loop complete, 2026-07-05)
+
+Every file in the checklist has been reviewed. Fixes by commit:
+- Session 12 (search-ui.js): 1 fixed — MEDIUM CSV formula injection in export.
+- Sessions 1–11 + 13: 0 fixed (all reviewed clean / log-only only).
+
+Findings by severity across the whole loop:
+- MEDIUM: 1 (fixed) — CSV formula injection, search-ui.js export.
+- LOW/INFO (log-only): 27 total across the 13 files. Dominant recurring theme
+  is the "pre-id legacy row" class (id-less transactions vanishing/mismatching in
+  merge, stale-index fallbacks) — all unreachable because every add* path assigns
+  ids via `Utils.generateUniqueId`. Other themes: tolerant date parsing (accepts
+  overflow dates), dead/defensive code, and cosmetic display-priority gaps. None
+  reachable via the UI; see each file's entry above for specifics.
 
 ## Cross-file leads
 
