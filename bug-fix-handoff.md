@@ -276,7 +276,33 @@ One file reviewed per session, in the fixed order below. Sessions share NO conte
     `hasPendingCloudSave()` falls back to `_hasLocalChangesSinceSync` (cloud-sync.js:477),
     so resume/next-edit re-detects and re-pushes. `exportData` deliberately does NOT
     cancel (comment :600); import's upfront cancel is benign given the fallback. Left.
-- [ ] /Users/andraejones/Documents/CashFlow/js/utils.js (756)
+- [x] /Users/andraejones/Documents/CashFlow/js/utils.js (756) — 2026-07-04, 0 fixed / 2 log-only
+
+  Reviewed in full. Utility layer: ModalManager z-index stack, `generateUniqueId`
+  (timestamp+counter+random), `escapeHtml`, the date helpers (`parseDateString`
+  noon-anchored, `formatDateString`, `isLastCalendarDayOfMonth`, `formatDisplayDate`),
+  the shared `#appModal` dialog engine (`showModalDialog` + alert/confirm/prompt
+  wrappers, the `_activeModalClose` preempt/forceCancel machinery that fixed the
+  pin-leak), loading overlay, ARIA announcer, and the DOM-building recurrence-form
+  helpers (semi-monthly / custom-interval / business-day / variable-amount /
+  end-condition). Verified date roundtrips + escape idempotence with a standalone
+  harness (`/tmp/utils_test.js`): valid dates roundtrip byte-exact, `isLastCalendar
+  DayOfMonth` correct for Jan31/Feb28/Feb29-leap/Apr30, null/garbage → null,
+  escapeHtml covers &<>"'. Verified the modal preempt latch: the preempting
+  dialog's closeModal clears `_activeModalClose` only if it's still === its own
+  forceCancel (line 263), so the new dialog's later assignment at 327 isn't
+  clobbered. All form-builder helpers use createElement + textContent (no innerHTML
+  → no XSS). All 34 `scripts/verify-logic.js` tests pass. No confirmable HIGH/MEDIUM
+  bugs.
+  - LOW (log-only) `utils.js:94-107` — `parseDateString` is overflow-tolerant:
+    `2026-02-29` (non-leap) → Date rolls to Mar 1; `2026-13-05` → next year. Same
+    tolerant-date class as bank-reconcile `_toIsoDate` (:306). By design (accepts
+    non-padded / ISO-datetime inputs); all callers feed already-validated date
+    strings. Not fixed.
+  - LOW (log-only) `utils.js:475-478` `_buildId` — `baseName[0].toUpperCase()`
+    throws if `baseName` is "" (undefined[0]). Unreachable: every call site passes
+    a non-empty string literal (e.g. "semiMonthlyFirstDay"). Dead-defensive. Not
+    fixed.
 - [ ] /Users/andraejones/Documents/CashFlow/js/calculation-service.js (597)
 - [ ] /Users/andraejones/Documents/CashFlow/js/search-ui.js (544)
 - [ ] /Users/andraejones/Documents/CashFlow/js/build.js (4)
