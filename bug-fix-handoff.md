@@ -303,7 +303,42 @@ One file reviewed per session, in the fixed order below. Sessions share NO conte
     throws if `baseName` is "" (undefined[0]). Unreachable: every call site passes
     a non-empty string literal (e.g. "semiMonthlyFirstDay"). Dead-defensive. Not
     fixed.
-- [ ] /Users/andraejones/Documents/CashFlow/js/calculation-service.js (597)
+- [x] /Users/andraejones/Documents/CashFlow/js/calculation-service.js (597) — 2026-07-05, 0 fixed / 2 log-only
+
+  Reviewed in full. One of the 4 authoritative balance-walk paths (see
+  [[balance-walk-paths]]): getReservedTotalOnOrBefore, getReconciliationAnchor,
+  updateMonthlyBalances (monthly starting/ending + 6-month forward pre-expansion),
+  calculateDailyTotals, getRunningBalanceForDate, getDayBalanceBreakdown (the
+  day-detail modal's unsettled/allocated display variants), calculateMonthlySummary
+  (+ defensive prev-month carry fallback), and calculateMinimum (30-day walk).
+  All 34 `scripts/verify-logic.js` tests pass (TEST 31 locks the walk↔Minimum
+  contract, TEST 33 the breakdown↔getRunningBalanceForDate parity + reserve
+  release). Additionally verified with a standalone harness (`/tmp/calc_test.js`)
+  a CROSS-MONTH scenario the in-suite tests don't cover: a June mid-month Ending
+  Balance anchor + post-anchor unsettled (200+100) + allocated reserve (300)
+  carrying into July's getDayBalanceBreakdown. Confirmed byte-exact: balance=4400,
+  balanceWithoutUnsettled=5000 (pre-anchor unsettled 999 correctly EXCLUDED via
+  getReconciliationAnchor{inclusive:false}), balanceExcludingAllocations=4700, and
+  .balance parity with getRunningBalanceForDate. Verified no reentrancy
+  (updateMonthlyBalances never calls calculateMonthlySummary; the loop-internal
+  calls are calculateDailyTotals only, so the cache wipe inside a lazy
+  calculateMonthlySummary→updateMonthlyBalances can't corrupt an in-flight walk —
+  summary is always resolved before any walk loop). No confirmable HIGH/MEDIUM bugs.
+  - LOW (info) `calculation-service.js:184,228,231` — `updateMonthlyBalances`
+    accumulates `monthIncome`/`monthExpense` locals that are never read (the stored
+    result at 242-251 only carries startingBalance/endingBalance;
+    calculateMonthlySummary computes its own income/expense). Dead code, harmless.
+    Not fixed.
+  - LOW (info) `calculation-service.js:486-490` — a lazy `calculateMonthlySummary`
+    for a not-yet-computed month calls `updateMonthlyBalances`, which
+    `invalidateCache()`s ALL caches (summaries + dailyTotals + reservedTotals),
+    forcing a full recompute + re-expansion of the whole month range just because
+    one month was missing. Correctness-safe (captured monthIncome/monthExpense are
+    locals, and callers resolve summary before their walk loop), purely a
+    performance smell. Not fixed.
+  - Verified NOT a bug: `calculateMonthlySummary` for a month BEFORE the earliest
+    transaction hits the defensive fallback (497-507) → startingBalance 0,
+    endingBalance 0 — correct (no prior data), not a zero-init bug.
 - [ ] /Users/andraejones/Documents/CashFlow/js/search-ui.js (544)
 - [ ] /Users/andraejones/Documents/CashFlow/js/build.js (4)
 
