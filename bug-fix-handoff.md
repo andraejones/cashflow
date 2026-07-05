@@ -99,7 +99,43 @@ One file reviewed per session, in the fixed order below. Sessions share NO conte
     `monthsSinceStart` (calendar months) not actual materialized occurrences, so a
     rule like "5th Friday" that skips months without a 5th weekday would end one or
     more occurrences early/late. Rare (5th-weekday rules) + monthly cadence. Left.
-- [ ] /Users/andraejones/Documents/CashFlow/js/bank-reconcile.js (1616)
+- [x] /Users/andraejones/Documents/CashFlow/js/bank-reconcile.js (1616) — 2026-07-04, 0 fixed / 3 log-only
+
+  Reviewed in full. Suncoast-CSV bank reconciliation: parse → 3-pass matcher
+  (exact / near-amount / name-assisted) → 9 mutually-exclusive report buckets →
+  Add/Settle/Move/Fix actions. Heavily hardened by prior feature sessions
+  (name-coherence ranking, cross-attested payee-conflict block, share-transfer
+  guard, provenance-preserving relocate, tombstone-safe delete+re-add). All 34
+  `scripts/verify-logic.js` tests pass (TEST 29 pending-classification + the
+  move-series test cover core paths). Additionally verified with a standalone
+  harness (`/tmp/br_test.js`, `/tmp/br_run.js`, `/tmp/br_run2.js`):
+  money/date/token parsing, and that the 9 report buckets classify without
+  double-listing (clearedUnsettled vs dateDrifted vs reviewPairs vs
+  appPendingAtBank are mutually exclusive; out-of-window app entries excluded;
+  a pass-2/3 match sets `matched` but not `_match`, so it stays out of the
+  `_match`-gated buckets — confirmed intentional & consistent). No confirmable
+  HIGH/MEDIUM bugs.
+  - LOW (log-only) `bank-reconcile.js:306-315` — `_toIsoDate` accepts any day
+    1–31 regardless of month (e.g. "2/30/2026" → "2026-02-30"), which
+    `Utils.parseDateString` then rolls forward to Mar 2, skewing the statement
+    window / day-gaps. Unreachable in practice — bank CSV exports carry only
+    valid calendar dates. Not fixed.
+  - LOW (log-only) `bank-reconcile.js:1526-1540` — `_currentIndex` id-less
+    fallback matches the FIRST entry by type+amount+description+recurringId; two
+    identical one-time entries on the same date (same amount & description) could
+    resolve a Settle/Move/Fix action to the wrong one. Effectively unreachable:
+    `addTransaction` always assigns ids so the id path wins; only pre-id legacy
+    or hand-crafted rows lack one. Same class as transaction-ui:1353 finding.
+    Left as-is.
+  - LOW (info) `bank-reconcile.js:240-244` — `_parseSuncoastCsv` returns a
+    `window` field that `_run` never reads (it recomputes via `_statementWindow`
+    from posted+txn ranges). Dead/duplicate output, harmless. Not fixed.
+  - Verified NOT a bug: pass-2/3 near/name matches deliberately do NOT set
+    `b._match`/`a._matchedBank` (only pass-1 exact does). All `_match`-gated
+    buckets (clearedUnsettled, dateDrifted, pendingMatched) and the
+    appPendingAtBank split therefore silently exclude near/name pairs — those
+    surface only under "Needs review", which is correct because the amount
+    differs (user fixes amount → re-run promotes to exact → then settleable).
 - [ ] /Users/andraejones/Documents/CashFlow/js/cloud-sync.js (1547)
 - [ ] /Users/andraejones/Documents/CashFlow/js/calendar-ui.js (987)
 - [ ] /Users/andraejones/Documents/CashFlow/js/pin-protection.js (870)
