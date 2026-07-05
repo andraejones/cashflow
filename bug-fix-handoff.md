@@ -68,7 +68,37 @@ One file reviewed per session, in the fixed order below. Sessions share NO conte
     synchronous (localStorage is sync), so the debounce timer callback can never
     fire mid-save. Defensive, not a bug. Note `saveData` itself has no top-level
     re-entrancy guard, but no save callback calls it synchronously. Left as-is.
-- [ ] /Users/andraejones/Documents/CashFlow/js/recurring-manager.js (1961)
+- [x] /Users/andraejones/Documents/CashFlow/js/recurring-manager.js (1961) — 2026-07-04, 0 fixed / 3 log-only
+
+  Reviewed in full. Recurrence-expansion engine (once/daily/weekly/bi-weekly/
+  monthly + day-specific/semi-monthly/quarterly/semi-annual/yearly/custom),
+  business-day adjustment, US-banking-holiday table, variable amounts, the
+  month-expansion cache, rolling-allocation supersede/collapse, and the
+  edit/delete recurring paths. Verified DST-safe date stepping (noon anchors),
+  maxOccurrences catch-up boundaries (0-based index → N materialized), custom-
+  interval month clamping, tombstone-on-delete (_clearRecurringExpansions,
+  deleteFuture), and the split-at-scheduled-date future-edit logic. All 34
+  `scripts/verify-logic.js` tests pass. No confirmable HIGH/MEDIUM bugs.
+  - LOW (log-only) `recurring-manager.js:1073-1103` vs `:1616-1618` — semi-monthly
+    clamp asymmetry: `applySemiMonthlyRecurrence` uses raw `secondDate` in
+    `new Date(year, month, secondDate)` (no month-length clamp except the
+    `secondDate===31`/`semiMonthlyLastDay` special), so a second day of 29/30
+    overflows Feb → the month-match filter (`getMonth()===filterMonth`) drops it →
+    February silently loses its second-half occurrence AND the variable-amount
+    index (via `countOccurrencesBefore`, which DOES clamp `Math.min(secondDay,
+    lastDayThisMonth)`) diverges. Unreachable via UI: `buildSemiMonthlyOptions`
+    (utils.js:497) only offers days 1–28 or "last day"; debt/store paths feed the
+    same select and `transaction-store.js:111-114` maps `Number(day)||1`. Only
+    imported JSON with `semiMonthlyDays[1]∈{29,30}` could hit it. Not fixed.
+  - LOW (log-only) `recurring-manager.js:1804-1807` — future-scope edit: if
+    `countOccurrencesBefore(scheduledStart) >= maxOccurrences`, the new series is
+    created with NO `maxOccurrences` (→ unlimited). Unreachable: an occurrence
+    already past the series' max wouldn't have been rendered/clickable. Not fixed.
+  - LOW (log-only) `recurring-manager.js:944-948` (and the same pattern in the
+    other month-stepped applies) — day-specific-monthly maxOccurrences gates on
+    `monthsSinceStart` (calendar months) not actual materialized occurrences, so a
+    rule like "5th Friday" that skips months without a 5th weekday would end one or
+    more occurrences early/late. Rare (5th-weekday rules) + monthly cadence. Left.
 - [ ] /Users/andraejones/Documents/CashFlow/js/bank-reconcile.js (1616)
 - [ ] /Users/andraejones/Documents/CashFlow/js/cloud-sync.js (1547)
 - [ ] /Users/andraejones/Documents/CashFlow/js/calendar-ui.js (987)
@@ -83,6 +113,14 @@ One file reviewed per session, in the fixed order below. Sessions share NO conte
 
 ## Verified not bugs
 
+- recurring-manager.js semi-monthly second-day never overflows a month: UI
+  (`Utils.buildSemiMonthlyOptions`) constrains the day picker to 1–28 or a "last
+  day" flag; all producer paths (transaction-ui, debt-snowball, transaction-store
+  migration) feed that select, so the unclamped `secondDate` in
+  `applySemiMonthlyRecurrence` never exceeds 28 in practice.
+- recurring-manager.js custom-recurrence catch-up loop cannot hang: `intervalStep`
+  is validated `Number.isFinite && >= 1` (line 1272-1276) before any loop, and
+  `getCustomIntervalDate` always advances by ≥1 step.
 - debt-snowball.js projection minimums ignore user skips: `getRecurringOccurrencesForMonth`
   builds occurrences via a dummy store whose `isTransactionSkipped: () => false`, so a
   future skipped debt-minimum instance is still simulated as paid. BY DESIGN — the
