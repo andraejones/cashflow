@@ -880,6 +880,12 @@ class TransactionStore {
         // drawn before its own date. So for both flavors the active instance is
         // the latest one dated on/before refStr.
         if (date > refStr) return;
+        // A skipped occurrence is a non-event in the balance walk, so its
+        // bucket holds no reserve — never offer it for draws, or the draw
+        // dropdown (and the free-funds figure, which resolves through here)
+        // would show money that isn't actually set aside.
+        const skippedIds = this.skippedTransactions[date];
+        if (skippedIds && skippedIds.includes(t.recurringId)) return;
         const existing = recurringBySeries.get(t.recurringId);
         const candidate = {
           // Un-materialized instances have no id yet — use a synthetic key the

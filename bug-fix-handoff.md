@@ -89,7 +89,46 @@ One file reviewed per session, in the fixed order below. Sessions share NO conte
     ends despite the user picking a limit. Also: a date-change edit of a
     recurring occurrence ignores the Edit-scope select (always moves just that
     occurrence). Both judgment calls; left.
-- [ ] /Users/andraejones/Documents/CashFlow/js/transaction-store.js (1979)
+- [x] /Users/andraejones/Documents/CashFlow/js/transaction-store.js (1979) — 2026-07-05, 1 fixed / 3 log-only
+
+  Round-2 full re-read (round-1 entry: 0 fixed / 3 log-only, its LOWs still
+  stand). Focus areas: allocation lifecycle (draw/reverse, roll-forward,
+  close-out sweep, free-funds), load/save integrity gate, tombstones, import.
+  All 37 `scripts/verify-logic.js` tests pass (suite was 36; this session
+  added TEST 37, proven to fail without the fix via stash/run/pop).
+  - MEDIUM (FIXED) `transaction-store.js:882` (getAllocations) — a SKIPPED
+    recurring allocation occurrence was still offered as the live bucket.
+    Skipped instances stay materialized in the transactions map but are
+    non-events in the balance walk (calculation-service excludes them), so the
+    bucket held NO reserve — yet the draw dropdown sold it as "$X remaining"
+    and, if it was the free-funds series, getFreeFundsAllocation showed the
+    family an unbacked spendable figure (running balance sits $X higher than
+    the model implies). One click reachable: the Skip button renders on every
+    recurring row incl. allocation instances (transaction-ui.js:1004).
+    getUnsettledTransactions already had the skip check; getAllocations didn't.
+    Fix: skip-listed instances are never offered (same `skippedTransactions[
+    date].includes(recurringId)` guard). Existing draws already linked to a
+    bucket that later gets skipped are unaffected by design — the resolver is
+    deliberately id-based/ungated and the edit form re-adds a linked bucket
+    (documented gate model). Deliberate semantics choice: the close-out
+    sweep's liveRollingDate still counts a skipped instance as superseding, so
+    skipping a period means "no bucket this period", not "keep last period's
+    bucket rolling" — matches the no-carryforward model. TEST 37 locks offer/
+    free-funds hiding + restore-on-unskip.
+  - LOW (log-only) `transaction-store.js:383-394` — loadData's catch resets
+    transactions/balances/recurring/etc. but not monthlyNotes,
+    movedTransactions, or _deletedItems, leaving partially-parsed stale state
+    in memory after a mid-load throw. Harmless: `_loadFailed` blocks all
+    saves, so it's display-only until reload. Left.
+  - LOW (log-only) `transaction-store.js:925` — setFreeFundsAllocation doesn't
+    validate the target series is `allocated === true`; a non-allocation id
+    gets flagged (inert — getFreeFundsRecurringId filters on allocated — but
+    the stray flag persists/syncs). Caller-gated today. Left.
+  - LOW (log-only) `transaction-store.js:350` — loadData's minRecurringId
+    cleanup only runs when BOTH debts and recurringTransactions are non-empty,
+    so a legitimately-empty recurring list leaves stale `debt.minRecurringId`
+    pointers (importData's equivalent at :1920 nulls them). Consumers
+    find() → undefined, harmless. Left.
 - [ ] /Users/andraejones/Documents/CashFlow/js/recurring-manager.js (1961)
 - [ ] /Users/andraejones/Documents/CashFlow/js/bank-reconcile.js (1616)
 - [ ] /Users/andraejones/Documents/CashFlow/js/cloud-sync.js (1547)
@@ -116,6 +155,13 @@ One file reviewed per session, in the fixed order below. Sessions share NO conte
   empty → transaction-ui stores NaN (treated as no-limit). If utils.js's
   session wants to fix it at the source (e.g. default value), coordinate with
   the log-only note under transaction-ui.js.
+- scripts/verify-logic.js suite is now 37 tests (session 3 round 2 added TEST
+  37: skipped allocation buckets hidden from draws + free-funds).
+- transaction-store.js getAllocationFloorSuggestion still counts a skipped
+  live instance as the live-period boundary (cutoff). Harmless once the
+  getAllocations skip guard exists (no draws can be stamped to a skipped
+  period), so left unchanged — noting in case calculation-service/search
+  sessions see period-boundary oddities.
 
 ## Verified not bugs
 
@@ -130,6 +176,14 @@ One file reviewed per session, in the fixed order below. Sessions share NO conte
   an Ending Balance on/before the viewed date absorbs everything dated
   on/before it.
 
+- transaction-store.js getAllocations' recurring branch not gating on
+  autoCloseout/closeoutDate (unlike the one-time branch) is documented design:
+  recurring auto-close-out instances never carry closeoutDate and are
+  effectively drawable only on their own date (allocation-draw-gate memory,
+  user decision 2026-07-01).
+- transaction-store.js updateTransaction's refund-then-redraw can grow a draw
+  on an unrelated edit if the bucket was refilled in between — intended
+  re-reconcile ("re-debit based on the merged amount/target" comment).
 - debt-snowball.js targeted-infusion excess above the target debt's balance is
   DROPPED, not redistributed — but identically in all 3 sites that must stay
   aligned (projection walk :1827, snapshot :1381, allocation breakdown :3268),

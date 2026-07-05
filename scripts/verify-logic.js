@@ -2606,6 +2606,72 @@ console.log("TEST 36: Add Form Rejects Unexpandable Custom Interval / NaN Variab
   }
 }
 
+// TEST 37: A skipped recurring allocation occurrence holds no reserve (the
+// balance walk excludes skipped instances), so getAllocations must not offer
+// its bucket for draws — and the free-funds figure, which resolves through
+// getAllocations, must not display it as spendable money. Unskipping restores
+// the bucket.
+console.log("TEST 37: Skipped Recurring Allocation Bucket Is Not Offered Or Displayed");
+{
+  const s = new TransactionStore();
+  s.resetData();
+
+  const t37 = new Date();
+  const day = (offset) =>
+    Utils.formatDateString(
+      new Date(t37.getFullYear(), t37.getMonth(), t37.getDate() + offset)
+    );
+
+  const seriesId = s.addRecurringTransaction({
+    startDate: day(-2), amount: 200, type: "expense", description: "Groceries",
+    recurrence: "weekly", allocated: true, settled: true,
+  });
+  // The live instance for this period, materialized at its anchor date.
+  s.addTransaction(day(-2), {
+    amount: 200, type: "expense", description: "Groceries",
+    recurringId: seriesId, allocated: true, settled: true,
+  });
+
+  const offeredBefore = s.getAllocations().find(
+    (a) => a.recurring === true && a.recurringId === seriesId
+  );
+  if (!offeredBefore || offeredBefore.remaining !== 200) {
+    throw new Error(
+      "Live allocation bucket should be offered before the skip: " +
+        JSON.stringify(offeredBefore)
+    );
+  }
+
+  // User skips this period's allocation — the instance stays in the map but
+  // is a non-event for balances, so no reserve exists behind the bucket.
+  s.setTransactionSkipped(day(-2), seriesId, true);
+  if (
+    s.getAllocations().some(
+      (a) => a.recurring === true && a.recurringId === seriesId
+    )
+  ) {
+    throw new Error("Skipped allocation bucket must not be offered for draws");
+  }
+  s.setFreeFundsAllocation(seriesId);
+  if (s.getFreeFundsAllocation() !== null) {
+    throw new Error(
+      "Free-funds display must not show a skipped (unreserved) bucket"
+    );
+  }
+
+  // Unskipping restores the bucket to both surfaces.
+  s.setTransactionSkipped(day(-2), seriesId, false);
+  const restored = s.getFreeFundsAllocation();
+  if (!restored || restored.remaining !== 200 || restored.date !== day(-2)) {
+    throw new Error(
+      "Unskipping should restore the live bucket, got: " + JSON.stringify(restored)
+    );
+  }
+  s.setFreeFundsAllocation(null);
+  s.cancelPendingSave();
+  console.log("✅ Skipped allocation buckets are hidden from draws and free-funds until unskipped");
+}
+
 // Run the async network tests sequentially (shared global.fetch mock): TEST 32
 // first, then TEST 30, which prints the final banner.
 runReplaceRemoteTest()
