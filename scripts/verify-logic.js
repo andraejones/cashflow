@@ -2389,6 +2389,92 @@ console.log("TEST 34: Free-Funds Designation Is Exclusive And Resolves The Live 
   console.log("✅ Free-funds designation is exclusive and resolves the live bucket");
 }
 
+// TEST 35: A debt cleared by a real minimum payment earlier in the CURRENT
+// month keeps that payment. The alreadyPaid maintenance path used to end the
+// recurrence at the previous month's end and prune all current-month minimums,
+// deleting the very payment that cleared the debt — erasing real spending from
+// the balance walk and oscillating (paid 100/remaining 0 ↔ paid 0/remaining
+// 100, endDate flip-flopping) on every render.
+console.log("TEST 35: Already-Paid Debt Keeps Its Current-Month Clearing Payment");
+{
+  const T35_RealDate = Date;
+  const T35_FIXED_TODAY = new T35_RealDate(2026, 5, 15, 12, 0, 0); // 2026-06-15
+  class T35_FrozenDate extends T35_RealDate {
+    constructor(...args) {
+      if (args.length === 0) { super(T35_FIXED_TODAY.getTime()); } else { super(...args); }
+    }
+    static now() { return T35_FIXED_TODAY.getTime(); }
+  }
+  global.Date = T35_FrozenDate;
+  try {
+    const s = new TransactionStore();
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    const calc = new CalculationService(s, rm);
+    const ui = Object.create(DebtSnowballUI.prototype);
+    ui.store = s;
+    ui.recurringManager = rm;
+    ui.calculationService = calc;
+    ui.daySpecificOptions = [];
+
+    s.addRecurringTransaction({
+      startDate: "2026-06-01", amount: 2000, type: "income",
+      description: "Salary", recurrence: "monthly",
+    });
+    // $100 debt whose $100 minimum (due the 3rd) already cleared it in full.
+    const debtId = s.addDebt({
+      name: "Small Card", balance: 100, minPayment: 100, dueDay: 3,
+      recurrence: "monthly", interestRate: 0, dueStartDate: "2026-06-03",
+    });
+    ui.ensureMinimumPaymentRecurring(s.getDebts().find((d) => d.id === debtId));
+    s.setDebtSnowballSettings({ dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: true });
+    rm.applyRecurringTransactions(2026, 5); // materialize June like the calendar
+
+    const june3Row = () =>
+      (s.getTransactions()["2026-06-03"] || []).find(
+        (t) => t.debtId === debtId && t.debtRole === "minimum"
+      ) || null;
+    const endDateOf = () => {
+      const d = s.getDebts().find((x) => x.id === debtId);
+      return s.getRecurringTransactions().find((r) => r.id === d.minRecurringId).endDate;
+    };
+
+    // Two renders: the first must not delete the payment; the second must not
+    // oscillate the recurrence end date or the snapshot.
+    for (let pass = 1; pass <= 2; pass++) {
+      ui.ensureSnowballPaymentsForHorizon(2026, 5);
+      const row = june3Row();
+      if (!row || Number(row.amount) !== 100) {
+        throw new Error(
+          `Render ${pass}: the June 3 clearing payment was deleted/changed (${JSON.stringify(row)})`
+        );
+      }
+      if (endDateOf() !== "2026-06-03") {
+        throw new Error(
+          `Render ${pass}: expected endDate 2026-06-03 (the clearing payment), got ${endDateOf()}`
+        );
+      }
+      const snap = ui.getHistoricalDebtSnapshot(new Date(2026, 5, 16));
+      if (snap.paidByDebtId[debtId] !== 100 || snap.remainingByDebtId[debtId] !== 0) {
+        throw new Error(
+          `Render ${pass}: snapshot oscillated — paid ${snap.paidByDebtId[debtId]} / remaining ${snap.remainingByDebtId[debtId]}`
+        );
+      }
+      calc.invalidateCache();
+      const balance = calc.getRunningBalanceForDate("2026-06-15");
+      if (balance !== 1900) {
+        throw new Error(
+          `Render ${pass}: running balance should stay 1900 (2000 income − 100 real payment), got ${balance}`
+        );
+      }
+    }
+    s.cancelPendingSave();
+    console.log("✅ Already-paid debt keeps its current-month clearing payment (no oscillation)");
+  } finally {
+    global.Date = T35_RealDate;
+  }
+}
+
 // Run the async network tests sequentially (shared global.fetch mock): TEST 32
 // first, then TEST 30, which prints the final banner.
 runReplaceRemoteTest()

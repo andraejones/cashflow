@@ -2004,6 +2004,34 @@ class DebtSnowballUI {
     return null;
   }
 
+  // Latest real (amount > 0) materialized minimum-payment occurrence for this
+  // debt that has already happened (landed before the projection start, i.e.
+  // on/before today). Compared and returned on the scheduled occurrence date
+  // (originalDate when a business-day adjustment moved the landing date) so the
+  // result stays consistent with the recurrence-window checks in
+  // cleanupOrphanedDebtMinimums.
+  getLatestPaidMinimumOccurrence(debt) {
+    if (!debt || !debt.id) return null;
+    const now = new Date();
+    const projectionStartString = Utils.formatDateString(
+      new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+    );
+    const transactions = this.store.getTransactions();
+    let latest = null;
+    Object.keys(transactions).forEach((dateKey) => {
+      if (dateKey >= projectionStartString) return;
+      transactions[dateKey].forEach((t) => {
+        if (t.debtRole !== "minimum" || t.debtId !== debt.id) return;
+        if (!(Number(t.amount) > 0)) return;
+        const occurrence = t.originalDate || dateKey;
+        if (!latest || occurrence > latest) {
+          latest = occurrence;
+        }
+      });
+    });
+    return latest;
+  }
+
   // Compute the date a debt's minimum-payment recurring should stop expanding.
   // The recurrence is ended at the debt's projected payoff so the minimum
   // payment never appears after the debt is paid off. Any user-set debt.endDate
@@ -2023,6 +2051,17 @@ class DebtSnowballUI {
         }
         const lastDay = new Date(endYear, endMonth + 1, 0, 12, 0, 0);
         payoffEnd = Utils.formatDateString(lastDay);
+        // ...but never before a real payment already made this month. The
+        // payment that cleared the debt is often days old (minimum due the
+        // 3rd, today the 5th); an earlier endDate puts that historical row
+        // outside the recurrence window, so cleanupOrphanedDebtMinimums
+        // deletes it — erasing real spending from the balance walk and
+        // flipping the debt back to unpaid, with endDate oscillating between
+        // the two states on every render.
+        const lastPaid = this.getLatestPaidMinimumOccurrence(debt);
+        if (lastPaid && lastPaid > payoffEnd) {
+          payoffEnd = lastPaid;
+        }
       } else {
         // Pays off during the projection: keep the payment that clears it,
         // anchored to its real (possibly adjusted) date.
@@ -2084,9 +2123,19 @@ class DebtSnowballUI {
     const monthPrefix = `${year}-${String(month + 1).padStart(2, "0")}-`;
     const viewIndex = this.getMonthIndex(year, month);
     let changed = false;
+    // Rows dated before the projection start are historical facts — payments
+    // already reflected in the real running balance — and must never be pruned
+    // even when the debt is already at zero (same boundary rule as
+    // adjustMinimumPaymentTransactions). Without this, a debt cleared by a
+    // minimum payment earlier in the current month gets that very payment
+    // deleted here the moment its balance reads zero.
+    const now = new Date();
+    const projectionStartString = Utils.formatDateString(
+      new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+    );
 
     Object.keys(transactions).forEach((dateKey) => {
-      if (!dateKey.startsWith(monthPrefix)) {
+      if (!dateKey.startsWith(monthPrefix) || dateKey < projectionStartString) {
         return;
       }
       const list = transactions[dateKey];
