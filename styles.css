@@ -788,6 +788,16 @@ body.app-locked .fab-today {
   font-size: 0.85em;
 }
 
+/* Free-funds mode: a future-day balance lifted by the shortfall cushion (a
+   slice of the bucket held back, treated as already drawn). Dotted underline
+   hints at the title explaining how much of the figure is cushion. The
+   negative-day ⚠/highlight stays keyed to the REAL balance, so a fully
+   cushioned trough reads 0.00 but keeps its warning. */
+.balance.cushioned {
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
 /* Allocated Transactions modal: recurring rows pair the row button with the
    free-funds star toggle side by side (buttons can't nest). */
 .allocated-row-wrap {

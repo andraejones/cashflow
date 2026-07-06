@@ -2980,6 +2980,52 @@ console.log("TEST 42: Shared Payee Name Stretches Pass-1 Date Window");
   console.log("✅ Exact amount + shared payee bridges holiday ACH drift; neutral names keep the 2-day window");
 }
 
+// TEST 43: Free-funds shortfall cushion. The bucket's reserve is already
+// carved out of every projected balance, so a healthy (≥0) 30-day trough must
+// never shrink the advertised free funds — the old display cap
+// min(remaining, trough) double-counted the reserve. A NEGATIVE trough means
+// the plan can't fully cash-back the reserve: that shortfall is held back
+// from the bucket (cushion) and the displayed low, lifted by the cushion,
+// bottoms out at 0 while the bucket covers it.
+console.log("TEST 43: Free-Funds Cushion Absorbs The 30-Day Shortfall, Never Double-Counts");
+{
+  const s = new TransactionStore();
+  s.resetData();
+  const rm = new RecurringTransactionManager(s);
+  const calc = new CalculationService(s, rm);
+
+  const cases = [
+    // [remaining, trough, expCushion, expDisplay] — expected shown low = trough + cushion
+    [100, 50, 0, 100],   // healthy trough: full bucket advertised (no double-count)
+    [100, -5, 5, 95],    // user's scenario: spend 55 past a 50 low → hold back 5, show 95, low reads 0
+    [100, 0, 0, 100],    // exactly-zero trough: nothing to absorb
+    [100, -100, 100, 0], // shortfall consumes the whole bucket
+    [100, -150, 100, 0], // shortfall exceeds bucket: display floors at 0, low reads -50
+    [0, -25, 0, 0],      // empty bucket cushions nothing
+    [500, 200, 0, 500],  // old cap would have shown 200 here — must show 500
+    [10.005, -0.004, 0, 10.01], // cent rounding on both figures
+  ];
+  for (const [remaining, trough, expCushion, expDisplay] of cases) {
+    const { cushion, display } = calc.getFreeFundsCushion(remaining, trough);
+    if (cushion !== expCushion || display !== expDisplay) {
+      throw new Error(
+        `getFreeFundsCushion(${remaining}, ${trough}) = {cushion:${cushion}, display:${display}}, expected {cushion:${expCushion}, display:${expDisplay}}`
+      );
+    }
+    // Invariants: shown low (trough + cushion) never overshoots past 0, and
+    // bucket + balances stay conserved (display + cushion = remaining, cents).
+    const shownLow = calc.roundToCents(trough + cushion);
+    if (trough < 0 && shownLow > 0) {
+      throw new Error(`Cushion overshoots: trough ${trough} + cushion ${cushion} = ${shownLow} > 0`);
+    }
+    if (calc.roundToCents(display + cushion) !== calc.roundToCents(Math.max(0, Number(remaining) || 0))) {
+      throw new Error(`Cushion + display must equal remaining: ${display} + ${cushion} != ${remaining}`);
+    }
+  }
+  s.cancelPendingSave();
+  console.log("✅ Healthy trough leaves free funds untouched; negative trough is held back so the shown low bottoms at 0");
+}
+
 // Run the async network tests sequentially (shared global.fetch mock): TEST 32
 // first, then TEST 30, which prints the final banner.
 runReplaceRemoteTest()

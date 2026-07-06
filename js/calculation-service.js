@@ -584,6 +584,24 @@ class CalculationService {
     return minBalance;
   }
 
+  // Free-funds shortfall cushion (pure math, derived at render — nothing is
+  // persisted). The designated bucket's reserve is already carved out of
+  // every projected balance, so spending the bucket never moves the 30-day
+  // trough; a NEGATIVE trough means the plan can't fully cash-back the
+  // reserve. Treat that shortfall as already drawn from the bucket:
+  // `cushion` is the slice held back to cover the trough, `display` is what
+  // remains to advertise as spendable. Displayed future balances lift by
+  // `cushion`, so the shown 30-day low bottoms out at 0 while the bucket can
+  // cover it, and goes negative only by the uncovered excess. Self-reverses
+  // when the dip resolves (income lands, anchor entered, day exits the
+  // window); real draws against the bucket are unaffected.
+  getFreeFundsCushion(bucketRemaining, lowestBalance) {
+    const remaining = Math.max(0, Number(bucketRemaining) || 0);
+    const shortfall = Math.max(0, -(Number(lowestBalance) || 0));
+    const cushion = this.roundToCents(Math.min(remaining, shortfall));
+    return { cushion, display: this.roundToCents(remaining - cushion) };
+  }
+
   calculateMinimum() {
     // Calculate the minimum running balance from today through the next 30 days
     // This should match how the calendar displays running balances

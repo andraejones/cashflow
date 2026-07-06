@@ -385,17 +385,26 @@ class CalendarUI {
       }
     }
 
-    // Free-funds display cap: never advertise more "free" money than the
-    // 30-day trough can absorb. Spending the shown figure must leave every day
-    // in the Minimum window at or above zero, so the calendar shows
-    // min(bucket remaining, 30-day lowest balance), floored at 0. Only the
-    // displayed figure is clamped — the bucket itself keeps its real
-    // remaining, so draws are unaffected.
-    const freeFundsDisplay = freeFundsBucket
-      ? Math.max(0, Math.min(freeFundsBucket.remaining, lowestBalance))
-      : null;
-    const freeFundsCapped =
-      freeFundsBucket !== null && freeFundsDisplay < freeFundsBucket.remaining;
+    // Free-funds shortfall cushion: the bucket is the family's shock
+    // absorber. Its reserve is already subtracted from every projected
+    // balance (on top of Ending Balance anchors too, via
+    // getReservedTotalOnOrBefore), so spending the bucket never moves the
+    // 30-day trough — but a NEGATIVE trough means the plan can't fully
+    // cash-back the reserve. Treat that shortfall as already drawn: the
+    // current day shows the bucket minus the cushion, and future days
+    // display their balance lifted by the cushion ("as if drawn"), so the
+    // shown 30-day low bottoms out at 0 while the bucket covers it. All
+    // derived at render time — the stored bucket keeps its real remaining,
+    // draws are unaffected, and the cushion self-reverses when the dip
+    // resolves. Negative-day highlighting stays keyed to REAL balances so
+    // the tight days remain visible even when their figure reads 0.00.
+    const { cushion: freeFundsCushion, display: freeFundsDisplay } =
+      freeFundsBucket
+        ? this.calculationService.getFreeFundsCushion(
+            freeFundsBucket.remaining,
+            lowestBalance
+          )
+        : { cushion: 0, display: null };
 
     // Days on which a debt is fully paid off by the snowball plan, so they can
     // be flagged at a glance.
@@ -494,7 +503,7 @@ class CalendarUI {
           hasAllocated, isPayoffDay, hasMoveAnomaly,
           dailyTotals, cellExpense, runningBalance,
           transactionCount, dayTransactions, carriedUnsettled,
-          freeFundsMode, freeFundsBucket, freeFundsDisplay, freeFundsCapped,
+          freeFundsMode, freeFundsBucket, freeFundsDisplay, freeFundsCushion,
           isFutureDay: dateString > todayStr,
         });
         calendarAgenda.appendChild(agendaRow);
@@ -520,10 +529,12 @@ class CalendarUI {
         ${freeFundsMode
           ? (isCurrentDay
             ? (freeFundsBucket
-              ? `<div class="balance free-funds" title="${freeFundsCapped ? "Free funds (limited by the 30-day minimum balance)" : "Free funds available"}">${freeFundsDisplay.toFixed(2)}</div>`
+              ? `<div class="balance free-funds" title="${freeFundsCushion > 0 ? `Free funds ($${freeFundsCushion.toFixed(2)} held back to cover the 30-day low)` : "Free funds available"}">${freeFundsDisplay.toFixed(2)}</div>`
               : "")
             : dateString > todayStr
-              ? `<div class="balance">${runningBalance.toFixed(2)}</div>`
+              ? (freeFundsCushion > 0
+                ? `<div class="balance cushioned" title="Includes $${freeFundsCushion.toFixed(2)} held back from free funds">${this.calculationService.roundToCents(runningBalance + freeFundsCushion).toFixed(2)}</div>`
+                : `<div class="balance">${runningBalance.toFixed(2)}</div>`)
               : "")
           : `<div class="balance">${runningBalance.toFixed(2)}</div>`
         }
@@ -569,9 +580,16 @@ class CalendarUI {
     let summaryHtml = `<span class="summary-segment">Monthly Summary:</span> <span class="summary-segment">Income: $${summary.income.toFixed(2)}</span> <span class="summary-segment">| Expenses: $${summary.expense.toFixed(2)}</span>`;
 
     if (showMinimum) {
-      const minimum = this.calculationService.calculateMinimum();
+      let minimum = this.calculationService.calculateMinimum();
+      let minimumTitle = "";
+      if (freeFundsMode && freeFundsCushion > 0) {
+        // Keep the summary Minimum coherent with the cushioned day balances:
+        // the held-back free-funds slice lifts this walk's trough too.
+        minimum = this.calculationService.roundToCents(minimum + freeFundsCushion);
+        minimumTitle = ` title="Includes $${freeFundsCushion.toFixed(2)} held back from free funds"`;
+      }
       const minimumClass = minimum <= 0 ? 'minimum-negative' : '';
-      summaryHtml += ` <span class="summary-segment">| Minimum: <span class="${minimumClass}">$${minimum.toFixed(2)}</span></span>`;
+      summaryHtml += ` <span class="summary-segment">| Minimum: <span class="${minimumClass}"${minimumTitle}>$${minimum.toFixed(2)}</span></span>`;
     }
 
     // Add Notes link with star indicator if notes exist
@@ -853,10 +871,12 @@ class CalendarUI {
           ${d.freeFundsMode
             ? (d.isCurrentDay
               ? (d.freeFundsBucket
-                ? `<span class="balance free-funds" title="${d.freeFundsCapped ? "Free funds (limited by the 30-day minimum balance)" : "Free funds available"}">${d.freeFundsDisplay.toFixed(2)}</span>`
+                ? `<span class="balance free-funds" title="${d.freeFundsCushion > 0 ? `Free funds ($${d.freeFundsCushion.toFixed(2)} held back to cover the 30-day low)` : "Free funds available"}">${d.freeFundsDisplay.toFixed(2)}</span>`
                 : "")
               : d.isFutureDay
-                ? `<span class="balance">${d.runningBalance.toFixed(2)}</span>`
+                ? (d.freeFundsCushion > 0
+                  ? `<span class="balance cushioned" title="Includes $${d.freeFundsCushion.toFixed(2)} held back from free funds">${this.calculationService.roundToCents(d.runningBalance + d.freeFundsCushion).toFixed(2)}</span>`
+                  : `<span class="balance">${d.runningBalance.toFixed(2)}</span>`)
                 : "")
             : `<span class="balance">${d.runningBalance.toFixed(2)}</span>`
           }
