@@ -1347,7 +1347,7 @@ class BankReconcileUI {
       .join("");
     return this._section(
       "apponly",
-      `In app, not on statement (${items.length})`,
+      `Settled in app, no bank record yet (${items.length})`,
       "No matching bank line — planned/future spending, a duplicate, or a typo. Worth a look.",
       rows
     );
@@ -1392,7 +1392,7 @@ class BankReconcileUI {
       .join("");
     return this._section(
       "pendingbank",
-      `In app — pending at bank (${items.length})`,
+      `Unsettled in app and bank (${items.length})`,
       "Bank placed a hold; clearing soon — expected, no action needed.",
       rows
     );
