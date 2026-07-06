@@ -32,10 +32,13 @@ Scripts must load in this order due to dependencies:
 5. `transaction-ui.js` - Transaction forms
 6. `calendar-ui.js` - Calendar rendering
 7. `search-ui.js` - Search & CSV export
-8. `debt-snowball.js` - Debt snowball modeling
-9. `cloud-sync.js` - GitHub Gist sync
-10. `pin-protection.js` - PIN lock & encryption
-11. `app.js` - Application orchestrator
+8. `bank-reconcile.js` - Bank statement reconciliation
+9. `debt-snowball.js` - Debt snowball modeling
+10. `what-if.js` - What-if draft preview
+11. `savings-goals.js` - Savings goals
+12. `cloud-sync.js` - GitHub Gist sync
+13. `pin-protection.js` - PIN lock & encryption
+14. `app.js` - Application orchestrator
 
 ### Initialization Flow
 
@@ -71,6 +74,10 @@ Settled/unsettled support: `setTransactionSettled(date, index, isSettled)` toggl
 
 **DebtSnowballUI** (`debt-snowball.js`) - Debt entry management, snowball payment generation, and plan timeline.
 
+**WhatIfUI** (`what-if.js`) - What-if preview: draft transactions flagged `whatIf: true` ride in the in-memory transactions map so every balance walk sees them, but `_filterPersistedTransactions` keeps them out of localStorage/exports/sync. Banner above the calendar shows the 30-day-minimum swing with Apply/Discard.
+
+**SavingsGoalsUI** (`savings-goals.js`) - Savings goals (`store.savingsGoals`, synced like cashInfusions). Feasibility line reuses the balance walk via `CalculationService.getMinimumBalanceThrough(targetDate)` minus the snowball daily floor.
+
 **CloudSync** (`cloud-sync.js`) - GitHub Gist integration with bi-directional sync and debounced saves. Also owns the GitHub token at rest: it encrypts/decrypts `github_token_encrypted` with an AES-GCM key derived from the plaintext `_device_id` (PinProtection is not involved in token storage).
 
 **PinProtection** (`pin-protection.js`) - PIN setup/verification, XOR encryption of the TransactionStore data (transactions, debts, etc.) keyed by the current PIN, and session inactivity monitoring (120s timeout). It does **not** read or write `github_token_encrypted` — that is CloudSync's, encrypted separately via `_device_id`.
@@ -85,8 +92,8 @@ Settled/unsettled support: `setTransactionSettled(date, index, isSettled)` toggl
 
 ```
 transactions, monthlyBalances, recurringTransactions, skippedTransactions,
-debts, cashInfusions, debtSnowballSettings, monthlyNotes, movedTransactions,
-deletedItems, pin_hash, github_token_encrypted, gist_id, auto_sync_enabled,
+debts, cashInfusions, savingsGoals, debtSnowballSettings, monthlyNotes,
+movedTransactions, deletedItems, pin_hash, github_token_encrypted, gist_id, auto_sync_enabled,
 webauthn_credential_id, biometric_pin, _device_id, gist_etag,
 local_last_sync, _backup_before_merge, calendar_view_mode
 ```

@@ -14,7 +14,8 @@ global.window = {
   localStorage: global.localStorage
 };
 global.document = {
-  addEventListener: () => {}
+  addEventListener: () => {},
+  getElementById: () => null
 };
 global.Utils = {
   generateUniqueId: () => Math.random().toString(36).substr(2, 9),
@@ -2670,6 +2671,229 @@ console.log("TEST 37: Skipped Recurring Allocation Bucket Is Not Offered Or Disp
   s.setFreeFundsAllocation(null);
   s.cancelPendingSave();
   console.log("✅ Skipped allocation buckets are hidden from draws and free-funds until unskipped");
+}
+
+// TEST 38: What-if drafts (whatIf: true) overlay the in-memory transactions
+// map so every balance walk sees them, but they must never reach localStorage,
+// exports, or cloud sync. Applying commits them as real transactions;
+// discarding removes them without a trace.
+console.log("TEST 38: What-If Drafts Affect The Walk But Never Persist Until Applied");
+{
+  const s = new TransactionStore();
+  s.resetData();
+  const t38 = new Date();
+  const day = (offset) =>
+    Utils.formatDateString(
+      new Date(t38.getFullYear(), t38.getMonth(), t38.getDate() + offset)
+    );
+
+  s.addTransaction(day(0), { amount: 500, type: "income", description: "Pay" });
+  s.addWhatIfTransaction(day(1), {
+    amount: 120, type: "expense", description: "New tires", settled: true,
+  });
+
+  // The walk sees the draft.
+  const rm = new RecurringTransactionManager(s);
+  const cs = new CalculationService(s, rm);
+  const totals = cs.calculateDailyTotals(day(1));
+  if (totals.expense !== 120) {
+    throw new Error(`Draft not visible to the balance walk: ${JSON.stringify(totals)}`);
+  }
+
+  // Persistence and export never see it.
+  s.saveData(false);
+  const raw = JSON.parse(global.localStorage.getItem("transactions"));
+  const rawHasDraft = Object.keys(raw).some((d) =>
+    raw[d].some((t) => t.whatIf === true || t.description === "New tires")
+  );
+  if (rawHasDraft) throw new Error("What-if draft leaked into localStorage");
+  const exported = s.exportData();
+  const exportHasDraft = Object.keys(exported.transactions).some((d) =>
+    exported.transactions[d].some((t) => t.whatIf === true)
+  );
+  if (exportHasDraft) throw new Error("What-if draft leaked into exportData");
+
+  // Discard removes it from the live map.
+  if (s.clearWhatIfTransactions() !== 1) {
+    throw new Error("clearWhatIfTransactions should report 1 removed draft");
+  }
+  if ((s.getTransactions()[day(1)] || []).length !== 0 && s.getTransactions()[day(1)]) {
+    throw new Error("Discarded draft still present");
+  }
+
+  // Apply commits the draft as a real, persisted transaction.
+  s.addWhatIfTransaction(day(2), {
+    amount: 75, type: "expense", description: "Committed", settled: true,
+  });
+  if (s.applyWhatIfTransactions() !== 1) {
+    throw new Error("applyWhatIfTransactions should report 1 committed draft");
+  }
+  const committed = (s.getTransactions()[day(2)] || []).find(
+    (t) => t.description === "Committed"
+  );
+  if (!committed || committed.whatIf !== undefined || !committed.id) {
+    throw new Error(`Applied draft is not a real transaction: ${JSON.stringify(committed)}`);
+  }
+  const exported2 = s.exportData();
+  const exportedCommitted = (exported2.transactions[day(2)] || []).some(
+    (t) => t.description === "Committed"
+  );
+  if (!exportedCommitted) throw new Error("Applied draft missing from exportData");
+  s.cancelPendingSave();
+  console.log("✅ What-if drafts overlay the walk, never persist, and commit cleanly on apply");
+}
+
+// TEST 39: Savings goals are a first-class synced collection: CRUD +
+// normalization, persistence round-trip, export/import, and tombstoned
+// deletion that survives a cloud merge (the remote copy must not resurrect).
+console.log("TEST 39: Savings Goals CRUD, Round-Trip, And Tombstoned Merge");
+{
+  const s = new TransactionStore();
+  s.resetData();
+  const goalId = s.addSavingsGoal({
+    name: "Vacation", targetAmount: 1200, targetDate: "2027-03-01", saved: 100,
+  });
+  s.updateSavingsGoal(goalId, { saved: 250 });
+  s.flushPendingSave();
+
+  // Reload from the same mock storage.
+  const reloaded = new TransactionStore();
+  const rGoal = reloaded.getSavingsGoals().find((g) => g.id === goalId);
+  if (!rGoal || rGoal.saved !== 250 || rGoal.name !== "Vacation") {
+    throw new Error(`Goal did not round-trip storage: ${JSON.stringify(rGoal)}`);
+  }
+
+  // Export/import round-trip.
+  const exported = s.exportData();
+  const s2 = new TransactionStore();
+  s2.resetData();
+  if (!s2.importData(JSON.parse(JSON.stringify(exported)))) {
+    throw new Error("importData rejected an export containing savingsGoals");
+  }
+  if (s2.getSavingsGoals().length !== 1) {
+    throw new Error("Imported data lost the savings goal");
+  }
+  s2.cancelPendingSave();
+
+  // Delete tombstones the goal; a merge with a remote that still has it must
+  // not resurrect it — while a different remote-only goal still comes through.
+  s.deleteSavingsGoal(goalId);
+  if (!s._deletedItems.savingsGoals.some((d) => d.id === goalId)) {
+    throw new Error("deleteSavingsGoal did not record a tombstone");
+  }
+  const sync = new CloudSync(s, () => {});
+  const merged = sync._mergeData(s.exportData(), JSON.parse(JSON.stringify(exported)));
+  if (merged.savingsGoals.length !== 0) {
+    throw new Error("Cloud merge resurrected a deleted savings goal");
+  }
+  const remoteWithNew = JSON.parse(JSON.stringify(exported));
+  remoteWithNew.savingsGoals = [{
+    id: "t39-remote-goal", name: "Roof", targetAmount: 5000,
+    targetDate: "2027-06-01", saved: 0, _lastModified: new Date().toISOString(),
+  }];
+  const merged2 = sync._mergeData(s.exportData(), remoteWithNew);
+  if (merged2.savingsGoals.length !== 1 || merged2.savingsGoals[0].id !== "t39-remote-goal") {
+    throw new Error(`Remote-only goal should merge in: ${JSON.stringify(merged2.savingsGoals)}`);
+  }
+  s.cancelPendingSave();
+  console.log("✅ Savings goals persist, export, import, and merge with tombstones");
+}
+
+// TEST 40: Bank-reconcile suggests a recurring series for a payee that repeats
+// at a steady interval with steady amounts and no covering series — and stays
+// quiet for irregular spend or payees an existing series already covers.
+// Accepting a suggestion creates a definition starting at the NEXT expected
+// date so past statement lines aren't double-counted.
+console.log("TEST 40: Statement Recurring-Pattern Detection And Series Creation");
+{
+  const s = new TransactionStore();
+  s.resetData();
+  const rm = new RecurringTransactionManager(s);
+  const br = new BankReconcileUI(s, rm, () => {}, () => {});
+  const mkRow = (date, signed, description) => ({
+    date, postedDate: date, signed, description, pending: false,
+    matched: false, _match: null,
+  });
+  const rows = [
+    mkRow("2026-06-05", -15.99, "Recurring Withdrawal SPOTIFY USA"),
+    mkRow("2026-06-12", -15.99, "Recurring Withdrawal SPOTIFY USA"),
+    mkRow("2026-06-19", -15.99, "Recurring Withdrawal SPOTIFY USA"),
+    // Irregular spend at one merchant: 1-day gap, wild amounts — no schedule.
+    mkRow("2026-06-03", -42.10, "POS Withdrawal HOMETOWN DELI FL"),
+    mkRow("2026-06-04", -8.77, "POS Withdrawal HOMETOWN DELI FL"),
+  ];
+
+  const suggestions = br._detectRecurringCandidates(rows);
+  if (suggestions.length !== 1) {
+    throw new Error(`Expected exactly 1 suggestion, got: ${JSON.stringify(suggestions)}`);
+  }
+  const sug = suggestions[0];
+  if (sug.recurrence !== "weekly" || sug.amount !== 15.99 || sug.type !== "expense") {
+    throw new Error(`Wrong suggestion shape: ${JSON.stringify(sug)}`);
+  }
+  const todayIso = Utils.formatDateString(new Date());
+  if (sug.nextDate <= todayIso) {
+    throw new Error(`Suggested start date must be in the future: ${sug.nextDate}`);
+  }
+
+  // Accepting creates the series at the next expected date.
+  br._createRecurringFromSuggestion(sug);
+  const defs = s.getRecurringTransactions();
+  if (defs.length !== 1 || defs[0].startDate !== sug.nextDate || defs[0].recurrence !== "weekly") {
+    throw new Error(`Created definition is wrong: ${JSON.stringify(defs)}`);
+  }
+  if (sug.created !== true) {
+    throw new Error("Suggestion not marked created");
+  }
+
+  // With the series in place (payee now in the recurring vocabulary), the
+  // same statement no longer suggests it.
+  const again = br._detectRecurringCandidates(rows);
+  if (again.length !== 0) {
+    throw new Error(`Covered payee was re-suggested: ${JSON.stringify(again)}`);
+  }
+  s.cancelPendingSave();
+  console.log("✅ Steady statement patterns are suggested once and start at the next expected date");
+}
+
+// TEST 41: Undo-delete semantics. The undo toast restores a deleted one-time
+// transaction under a FRESH id (via addTransaction) because the old id is
+// tombstoned for sync — a merge with a remote that still carries the old copy
+// must keep it dead while the restored copy survives.
+console.log("TEST 41: Undo Restore Uses A Fresh Id That Survives The Merge");
+{
+  const s = new TransactionStore();
+  s.resetData();
+  const d41 = "2026-07-10";
+  const oldId = s.addTransaction(d41, {
+    amount: 40, type: "expense", description: "Mistake", settled: true,
+  });
+  const remote = JSON.parse(JSON.stringify(s.exportData())); // synced copy pre-delete
+
+  s.deleteTransaction(d41, 0);
+  if (!s._deletedItems.transactions.some((x) => x.id === oldId)) {
+    throw new Error("Delete did not tombstone the transaction id");
+  }
+
+  // The undo path re-adds a cleaned clone (no id/_lastModified), as
+  // TransactionUI._restoreDeletedTransaction does.
+  const newId = s.addTransaction(d41, {
+    amount: 40, type: "expense", description: "Mistake", settled: true,
+  });
+  if (newId === oldId) {
+    throw new Error("Restored transaction must get a fresh id");
+  }
+
+  const sync = new CloudSync(s, () => {});
+  const merged = sync._mergeData(s.exportData(), remote);
+  const mergedList = merged.transactions[d41] || [];
+  if (mergedList.length !== 1 || mergedList[0].id !== newId) {
+    throw new Error(
+      `Merge should keep only the restored copy: ${JSON.stringify(mergedList)}`
+    );
+  }
+  s.cancelPendingSave();
+  console.log("✅ Undo-restored transactions survive the merge; the old id stays dead");
 }
 
 // Run the async network tests sequentially (shared global.fetch mock): TEST 32

@@ -788,6 +788,7 @@ class CloudSync {
     const deletedRecurringIds = [...new Set([...extractIds(localDeleted.recurringTransactions), ...extractIds(remoteDeleted.recurringTransactions)])];
     const deletedDebtIds = [...new Set([...extractIds(localDeleted.debts), ...extractIds(remoteDeleted.debts)])];
     const deletedCashInfusionIds = [...new Set([...extractIds(localDeleted.cashInfusions), ...extractIds(remoteDeleted.cashInfusions)])];
+    const deletedSavingsGoalIds = [...new Set([...extractIds(localDeleted.savingsGoals), ...extractIds(remoteDeleted.savingsGoals)])];
 
     // Deduplicate full deleted item objects (preserving deletedAt for pruning)
     const dedupeDeletedItems = (items) => {
@@ -816,6 +817,7 @@ class CloudSync {
       recurringTransactions: dedupeDeletedItems([...(localDeleted.recurringTransactions || []), ...(remoteDeleted.recurringTransactions || [])]),
       debts: dedupeDeletedItems([...(localDeleted.debts || []), ...(remoteDeleted.debts || [])]),
       cashInfusions: dedupeDeletedItems([...(localDeleted.cashInfusions || []), ...(remoteDeleted.cashInfusions || [])]),
+      savingsGoals: dedupeDeletedItems([...(localDeleted.savingsGoals || []), ...(remoteDeleted.savingsGoals || [])]),
       skips: mergedSkipEvents
     };
 
@@ -848,6 +850,11 @@ class CloudSync {
         localData.cashInfusions || [],
         remoteData.cashInfusions || [],
         deletedCashInfusionIds
+      ),
+      savingsGoals: this._mergeById(
+        localData.savingsGoals || [],
+        remoteData.savingsGoals || [],
+        deletedSavingsGoalIds
       ),
       monthlyNotes: this._mergeMonthlyNotes(
         localData.monthlyNotes,
@@ -1400,7 +1407,7 @@ class CloudSync {
           const mergedData = this._mergeData(localData, remoteData);
 
           // Only resync if merge actually produced different data than remote
-          const fieldsToCompare = ['transactions', 'recurringTransactions', 'skippedTransactions', 'debts', 'cashInfusions', 'monthlyNotes', 'movedTransactions', 'debtSnowballSettings'];
+          const fieldsToCompare = ['transactions', 'recurringTransactions', 'skippedTransactions', 'debts', 'cashInfusions', 'savingsGoals', 'monthlyNotes', 'movedTransactions', 'debtSnowballSettings'];
           const mergedJson = fieldsToCompare.map(f => JSON.stringify(mergedData[f])).join('');
           const remoteJson = fieldsToCompare.map(f => JSON.stringify(remoteData[f])).join('');
 
@@ -1532,6 +1539,11 @@ class CloudSync {
     // Check cash infusions
     for (const infusion of localData.cashInfusions || []) {
       if (checkTimestamp(infusion)) return true;
+    }
+
+    // Check savings goals
+    for (const goal of localData.savingsGoals || []) {
+      if (checkTimestamp(goal)) return true;
     }
 
     // Check monthly notes

@@ -159,6 +159,54 @@ const Utils = {
     }, 3000);
   },
 
+  // A toast with an Undo action for just-completed destructive operations.
+  // Separate class from the notification toasts so showNotification's sweep
+  // doesn't remove it mid-countdown. `onUndo` runs at most once.
+  showUndoToast: function (message, onUndo, duration = 8000) {
+    const existing = document.querySelectorAll(".undo-toast");
+    existing.forEach((toast) => toast.remove());
+
+    const toast = document.createElement("div");
+    toast.className = "undo-toast";
+    toast.setAttribute("role", "status");
+    toast.setAttribute("aria-live", "polite");
+
+    const text = document.createElement("span");
+    text.className = "undo-toast-message";
+    text.textContent = message;
+    toast.appendChild(text);
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "undo-toast-button";
+    button.textContent = "Undo";
+    toast.appendChild(button);
+
+    document.body.appendChild(toast);
+    this.announceToScreenReader(message);
+
+    let done = false;
+    const dismiss = () => {
+      if (!toast.isConnected) return;
+      toast.style.animation = "slideOut 0.3s ease-in forwards";
+      setTimeout(() => toast.remove(), 300);
+    };
+    const timer = setTimeout(dismiss, duration);
+
+    button.addEventListener("click", () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      toast.remove();
+      try {
+        if (typeof onUndo === "function") onUndo();
+      } catch (error) {
+        console.error("Undo action failed:", error);
+        this.showNotification("Could not undo that action", "error");
+      }
+    });
+  },
+
   getAppModalElements: function () {
     const modal = document.getElementById("appModal");
     if (!modal) {

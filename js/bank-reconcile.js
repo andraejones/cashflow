@@ -610,7 +610,147 @@ class BankReconcileUI {
       clearedUnsettled,
       dateDrifted,
       pendingMatched,
+      recurringSuggestions: this._detectRecurringCandidates(bankRows),
     };
+    this._renderReport();
+  }
+
+  // ---- Recurring-pattern detection ----------------------------------------
+  // Payees that repeat at a regular interval on this statement but have no
+  // recurring series in the app are natural candidates for one — setup of
+  // recurring transactions is the most tedious data entry, and the statement
+  // already carries the schedule. Suggest-only: the user confirms each.
+
+  _detectRecurringCandidates(bankRows) {
+    // Group posted lines by normalized merchant + direction. Pending holds are
+    // excluded (their amounts/dates aren't final), as are share transfers
+    // (person-to-person, no merchant).
+    const groups = new Map();
+    bankRows.forEach((b) => {
+      if (b.pending || b._shareTransfer) return;
+      const name = this._normalizeMerchant(b.description);
+      if (!name) return;
+      const key = `${name.toUpperCase()}|${b.signed < 0 ? "out" : "in"}`;
+      if (!groups.has(key)) groups.set(key, { name, rows: [] });
+      groups.get(key).rows.push(b);
+    });
+
+    // Payees already covered by a recurring series or debt — nothing to suggest.
+    const recurringVocab = new Set();
+    const addVocab = (desc) => {
+      if (!desc) return;
+      this._nameTokens(desc).forEach((t) => recurringVocab.add(t));
+      this._nameTokens(this._normalizeMerchant(desc)).forEach((t) =>
+        recurringVocab.add(t)
+      );
+    };
+    (this.store.getRecurringTransactions() || []).forEach((r) => {
+      if (!r) return;
+      addVocab(r.description);
+      addVocab(r.debtName);
+    });
+    (this.store.getDebts() || []).forEach((d) => d && addVocab(d.name));
+
+    const todayIso = Utils.formatDateString(new Date());
+    const suggestions = [];
+    groups.forEach(({ name, rows }) => {
+      // Covered by an existing series (a line matched a recurring instance).
+      if (rows.some((b) => b._match && b._match.recurringId)) return;
+      if (
+        this._attestedIn(this._nameTokens(name), recurringVocab) ||
+        this._attestedIn(this._nameTokens(rows[0].description), recurringVocab)
+      ) {
+        return;
+      }
+
+      const dates = [...new Set(rows.map((b) => b.date))].sort();
+      if (dates.length < 2) return;
+      const gaps = [];
+      for (let i = 1; i < dates.length; i++) {
+        gaps.push(this._dayGap(dates[i - 1], dates[i]));
+      }
+      const freq = this._inferFrequency(gaps);
+      if (!freq) return;
+
+      // Wildly varying amounts mean irregular spending at the same merchant,
+      // not a bill — groceries every ~7 days shouldn't become a series.
+      const amounts = rows.map((b) => Math.abs(b.signed));
+      if (Math.min(...amounts) < 0.7 * Math.max(...amounts)) return;
+
+      // Start the series at the next expected occurrence so past instances
+      // (already on the statement, possibly already logged as one-time
+      // entries) aren't re-created and double-counted.
+      let nextDate = this._nextOccurrence(dates[dates.length - 1], freq);
+      while (nextDate <= todayIso) {
+        nextDate = this._nextOccurrence(nextDate, freq);
+      }
+
+      const latest = rows.reduce((a, b) => (a.date > b.date ? a : b));
+      suggestions.push({
+        name,
+        type: latest.signed < 0 ? "expense" : "income",
+        amount: Math.round(Math.abs(latest.signed) * 100) / 100,
+        recurrence: freq.recurrence,
+        occurrences: dates.length,
+        nextDate,
+        created: false,
+      });
+    });
+
+    suggestions.sort((a, b) => (a.nextDate < b.nextDate ? -1 : 1));
+    return suggestions;
+  }
+
+  // Interval bands allow the usual weekend/settlement jitter. All gaps must
+  // agree — one stray interval means it's not a schedule.
+  _inferFrequency(gaps) {
+    const within = (lo, hi) => gaps.every((g) => g >= lo && g <= hi);
+    if (within(6, 8)) return { recurrence: "weekly", unit: "days", step: 7 };
+    if (within(12, 16)) return { recurrence: "bi-weekly", unit: "days", step: 14 };
+    if (within(27, 34)) return { recurrence: "monthly", unit: "months", step: 1 };
+    return null;
+  }
+
+  _nextOccurrence(iso, freq) {
+    if (freq.unit === "months") {
+      const d = Utils.parseDateString(iso);
+      // Anchor to the day-of-month; JS Date clamps overflow (Jan 31 -> Mar 3),
+      // so land on the last day of the target month instead when it overflows.
+      const targetMonth = d.getMonth() + freq.step;
+      const next = new Date(d.getFullYear(), targetMonth, d.getDate());
+      if (next.getMonth() !== ((targetMonth % 12) + 12) % 12) {
+        return Utils.formatDateString(
+          new Date(d.getFullYear(), targetMonth + 1, 0)
+        );
+      }
+      return Utils.formatDateString(next);
+    }
+    return this._shiftIso(iso, freq.step);
+  }
+
+  _createRecurringFromSuggestion(suggestion) {
+    if (!suggestion || suggestion.created) return;
+    const def = {
+      id: Utils.generateUniqueId(),
+      startDate: suggestion.nextDate,
+      amount: suggestion.amount,
+      type: suggestion.type,
+      description: suggestion.name,
+      recurrence: suggestion.recurrence,
+    };
+    if (def.type === "expense") {
+      def.settled = true;
+      def.allocated = false;
+    }
+    this.store.addRecurringTransaction(def);
+    this.recurringManager.invalidateCache();
+    suggestion.created = true;
+    Utils.showNotification(
+      `Recurring ${suggestion.recurrence} ${suggestion.type} created for ${suggestion.name}, starting ${this._shortDate(suggestion.nextDate)}`
+    );
+    // Refresh the calendar (future instances now expand) and re-render this
+    // report in place — a full _run would just re-derive the same sections.
+    this.onChange();
     this._renderReport();
   }
 
@@ -1008,6 +1148,7 @@ class BankReconcileUI {
     html += this._sectionReview(r.reviewPairs);
     html += this._sectionClearedUnsettled(r.clearedUnsettled);
     html += this._sectionDateDrifted(r.dateDrifted);
+    html += this._sectionRecurringSuggest(r.recurringSuggestions);
     html += this._sectionPending(r.missingPending);
     html += this._sectionPendingMatched(r.pendingMatched);
     html += this._sectionAppOnlyUnmatched(r.appOnlyUnmatched);
@@ -1257,6 +1398,35 @@ class BankReconcileUI {
     );
   }
 
+  _sectionRecurringSuggest(list) {
+    if (!list || list.length === 0) return "";
+    const freqLabel = {
+      weekly: "weekly",
+      "bi-weekly": "every 2 weeks",
+      monthly: "monthly",
+    };
+    const items = list
+      .map((s, i) => {
+        const action = s.created
+          ? '<span class="br-note">Added ✓</span>'
+          : `<button type="button" class="br-action" data-act="create-recurring" data-i="${i}">Make recurring</button>`;
+        return `
+        <div class="bank-reconcile-row">
+          <span class="br-date">${this._shortDate(s.nextDate)}</span>
+          <span class="br-amount ${s.type === "expense" ? "expense" : "income"}">${this._money(s.type === "expense" ? -s.amount : s.amount)}</span>
+          <span class="br-desc">${this._esc(s.name)} — ${s.occurrences}× ${freqLabel[s.recurrence] || s.recurrence} on this statement</span>
+          ${action}
+        </div>`;
+      })
+      .join("");
+    return this._section(
+      "suggest",
+      `Looks recurring (${list.length})`,
+      "Repeats at a regular interval but isn't a recurring series in the app. Creating one starts at the next expected date so nothing is double-counted.",
+      items
+    );
+  }
+
   _section(kind, title, hint, innerHtml) {
     return `
       <div class="bank-reconcile-section br-${kind}">
@@ -1277,6 +1447,7 @@ class BankReconcileUI {
         else if (act === "fix-amount") this._fixAmount(this.result.reviewPairs[i]);
         else if (act === "fix-date") this._fixDate(this.result.dateDrifted[i]);
         else if (act === "shift-series") this._shiftSeries(this.result.dateDrifted[i]);
+        else if (act === "create-recurring") this._createRecurringFromSuggestion(this.result.recurringSuggestions[i]);
       });
     });
 

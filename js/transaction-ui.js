@@ -908,7 +908,9 @@ class TransactionUI {
             transactionDiv.classList.add("allocated-transaction");
           }
           let statusLabel = "";
-          if (isSkipped) {
+          if (t.whatIf === true) {
+            statusLabel = " (What-if draft)";
+          } else if (isSkipped) {
             statusLabel = isAuthorizedLater ? " (Authorized)" : " (Skipped)";
           } else if (isHidden) {
             statusLabel = " (Hidden - Debt Snowball)";
@@ -1561,10 +1563,16 @@ class TransactionUI {
                   this.showTransactionDetails(date);
                   return;
                 }
+                const restoreClone = { ...transactions[currentIndex] };
+                delete restoreClone.id;
+                delete restoreClone._lastModified;
+                delete restoreClone.drawAmount;
                 this.store.deleteTransaction(u.date, currentIndex);
                 this.showTransactionDetails(date);
                 this._notifyChange();
-                Utils.showNotification("Transaction deleted");
+                Utils.showUndoToast("Transaction deleted", () =>
+                  this._restoreDeletedTransaction(u.date, restoreClone)
+                );
               };
               deleteBtn.addEventListener("click", doDelete);
               deleteBtn.addEventListener("keydown", (event) => {
@@ -2069,13 +2077,42 @@ class TransactionUI {
         Utils.showNotification("Error: Transaction not found", "error");
         return;
       }
+      // Snapshot for undo: restored under a fresh id (the deleted id is
+      // tombstoned for sync — reusing it would let the next cloud merge
+      // delete the restored copy again). Dropping drawAmount lets
+      // addTransaction re-apply the allocation draw cleanly.
+      const restoreClone = { ...this.store.getTransactions()[date][liveIndex] };
+      delete restoreClone.id;
+      delete restoreClone._lastModified;
+      delete restoreClone.drawAmount;
       this.store.deleteTransaction(date, liveIndex);
+      this.showTransactionDetails(date);
+      this._notifyChange();
+      Utils.showUndoToast("Transaction deleted", () =>
+        this._restoreDeletedTransaction(date, restoreClone)
+      );
+      return;
     }
 
     this.showTransactionDetails(date);
     this._notifyChange();
 
     Utils.showNotification("Transaction deleted successfully");
+  }
+
+
+  // Re-add a just-deleted one-time transaction (undo toast callback). Runs
+  // through addTransaction so it gets a fresh id/timestamp, re-applies any
+  // allocation draw, persists, and syncs. Refreshes the day modal only if the
+  // user still has it open.
+  _restoreDeletedTransaction(date, transaction) {
+    this.store.addTransaction(date, transaction);
+    const modal = document.getElementById("transactionModal");
+    if (modal && modal.style.display === "block") {
+      this.showTransactionDetails(date);
+    }
+    this._notifyChange();
+    Utils.showNotification("Transaction restored");
   }
 
 

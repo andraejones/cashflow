@@ -517,6 +517,73 @@ class CalculationService {
     return result;
   }
 
+  // Minimum projected running balance from today (inclusive) through
+  // `endDateString`, walking the same per-day balance math as calculateMinimum
+  // but over an arbitrary horizon. Used by savings goals to answer "how much
+  // could leave the account before this date without dipping below the floor".
+  // Horizon is capped at ~2 years; returns null for past/invalid dates.
+  getMinimumBalanceThrough(endDateString) {
+    if (!endDateString) return null;
+    const today = new Date();
+    const todayYear = today.getFullYear();
+    const todayMonth = today.getMonth();
+    const todayDay = today.getDate();
+    const end = Utils.parseDateString(endDateString);
+    const todayMidday = new Date(todayYear, todayMonth, todayDay, 12, 0, 0);
+    const horizonDays = Math.min(
+      730,
+      Math.round((end - todayMidday) / 86400000)
+    );
+    if (isNaN(horizonDays) || horizonDays < 0) return null;
+
+    this.invalidateCache();
+
+    const summary = this.calculateMonthlySummary(todayYear, todayMonth);
+    let runningBalance = summary.startingBalance;
+
+    for (let day = 1; day <= todayDay; day++) {
+      const dateString = `${todayYear}-${String(todayMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      const dailyTotals = this.calculateDailyTotals(dateString);
+      if (dailyTotals.balance !== null) {
+        runningBalance = this.roundToCents(
+          dailyTotals.balance - this.getReservedTotalOnOrBefore(dateString)
+        );
+      } else {
+        runningBalance = this.roundToCents(runningBalance + dailyTotals.income - dailyTotals.expense);
+      }
+    }
+
+    let minBalance = runningBalance;
+    const expandedMonths = new Set();
+    for (let i = 1; i <= horizonDays; i++) {
+      const futureDate = new Date(todayYear, todayMonth, todayDay + i, 12, 0, 0);
+      const futureYear = futureDate.getFullYear();
+      const futureMonth = futureDate.getMonth();
+      const futureDay = futureDate.getDate();
+      const dateString = `${futureYear}-${String(futureMonth + 1).padStart(2, "0")}-${String(futureDay).padStart(2, "0")}`;
+
+      const monthKey = `${futureYear}-${futureMonth}`;
+      if (!expandedMonths.has(monthKey)) {
+        this.recurringManager.applyRecurringTransactions(futureYear, futureMonth);
+        expandedMonths.add(monthKey);
+      }
+
+      const dailyTotals = this.calculateDailyTotals(dateString);
+      if (dailyTotals.balance !== null) {
+        runningBalance = this.roundToCents(
+          dailyTotals.balance - this.getReservedTotalOnOrBefore(dateString)
+        );
+      } else {
+        runningBalance = this.roundToCents(runningBalance + dailyTotals.income - dailyTotals.expense);
+      }
+      if (runningBalance < minBalance) {
+        minBalance = runningBalance;
+      }
+    }
+
+    return minBalance;
+  }
+
   calculateMinimum() {
     // Calculate the minimum running balance from today through the next 30 days
     // This should match how the calendar displays running balances

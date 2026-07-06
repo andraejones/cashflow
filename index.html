@@ -50,6 +50,8 @@
       </div>
 
       <div id="monthSummary" role="region" aria-label="Monthly summary" aria-live="polite"></div>
+
+      <div id="whatIfBanner" class="what-if-banner" role="region" aria-label="What-if preview" aria-live="polite" hidden></div>
     </div>
 
     <div id="calendarDays" class="days" role="grid" aria-label="Calendar days"></div>
@@ -235,6 +237,58 @@
       <h3 id="allocatedTransactionsTitle">Allocated Transactions</h3>
       <p class="recent-transactions-hint">Ordered soonest to farthest. Click a transaction to open its day and edit or delete it.</p>
       <div id="allocatedTransactionsList" class="recent-transactions-list" role="list"></div>
+    </div>
+  </div>
+
+  <div id="whatIfModal" class="modal" role="dialog" aria-labelledby="whatIfTitle" aria-hidden="true">
+    <div class="modal-content">
+      <span id="whatIfClose" class="close" role="button" tabindex="0" aria-label="Close">&times;</span>
+      <h3 id="whatIfTitle">What-If Preview</h3>
+      <p class="recent-transactions-hint">
+        Try a purchase or income without saving it. Drafts show on the calendar
+        with 🔮 and affect every balance until you apply or discard them.
+      </p>
+      <div class="what-if-form" role="form" aria-label="Add draft transaction">
+        <input type="date" id="whatIfDate" aria-label="Draft date" />
+        <input type="text" inputmode="numeric" id="whatIfAmount" placeholder="Amount" aria-label="Draft amount" autocomplete="off" />
+        <select id="whatIfType" aria-label="Draft type">
+          <option value="expense">Expense</option>
+          <option value="income">Income</option>
+        </select>
+        <input type="text" id="whatIfDescription" placeholder="Description (optional)" aria-label="Draft description" autocomplete="off" />
+        <button id="whatIfAddButton" class="primary-button" type="button">Preview on Calendar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="savingsGoalsModal" class="modal" role="dialog" aria-labelledby="savingsGoalsTitle" aria-hidden="true">
+    <div class="modal-content">
+      <span id="savingsGoalsClose" class="close" role="button" tabindex="0" aria-label="Close">&times;</span>
+      <h3 id="savingsGoalsTitle">Savings Goals</h3>
+      <p class="recent-transactions-hint">
+        Track what you're setting aside. The projection reuses your calendar's
+        balances to show whether each goal fits the plan.
+      </p>
+      <div id="savingsGoalsList" class="savings-goals-list" role="list"></div>
+      <button id="savingsGoalAddButton" class="primary-button" type="button">Add Goal</button>
+
+      <div id="savingsGoalForm" class="savings-goal-form" style="display: none">
+        <h4 id="savingsGoalFormTitle">Add Goal</h4>
+        <div class="savings-goal-form-grid">
+          <label for="savingsGoalName">Name</label>
+          <input type="text" id="savingsGoalName" placeholder="e.g., Emergency fund" />
+          <label for="savingsGoalTarget">Target amount</label>
+          <input type="number" id="savingsGoalTarget" step="0.01" min="0" />
+          <label for="savingsGoalDate">Target date</label>
+          <input type="date" id="savingsGoalDate" />
+          <label for="savingsGoalSaved">Already saved</label>
+          <input type="number" id="savingsGoalSaved" step="0.01" min="0" />
+        </div>
+        <div class="savings-goal-form-actions">
+          <button id="savingsGoalSaveButton" class="primary-button" type="button">Save Goal</button>
+          <button id="savingsGoalCancelButton" class="secondary-button" type="button">Cancel</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -448,6 +502,8 @@
   <script src="js/search-ui.js"></script>
   <script src="js/bank-reconcile.js"></script>
   <script src="js/debt-snowball.js"></script>
+  <script src="js/what-if.js"></script>
+  <script src="js/savings-goals.js"></script>
   <script src="js/cloud-sync.js"></script>
 
   <script src="js/pin-protection.js"></script>

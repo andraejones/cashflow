@@ -48,6 +48,18 @@ class CashflowApp {
       this.calculationService
     );
 
+    this.whatIf = new WhatIfUI(
+      this.store,
+      this.calculationService,
+      () => this.updateUI()
+    );
+
+    this.savingsGoals = new SavingsGoalsUI(
+      this.store,
+      this.calculationService,
+      () => this.updateUI()
+    );
+
     // Wire up transactionUI to debtSnowball for "Convert to Debt" feature
     this.transactionUI.setDebtSnowballUI(this.debtSnowball);
 
@@ -203,6 +215,8 @@ class CashflowApp {
       this.recurringManager.invalidateCache();
     }
     this.calendarUI.generateCalendar();
+    // Banner tracks the live draft set (drafts can also vanish via sync merge).
+    this.whatIf.refreshBanner();
   }
 
 

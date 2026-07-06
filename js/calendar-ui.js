@@ -622,6 +622,26 @@ class CalendarUI {
         type="button"
         role="menuitem"
         class="calendar-option"
+        onclick="app.whatIf.openForm(); app.calendarUI.closeAppMenu();"
+        aria-haspopup="dialog"
+        aria-controls="whatIfModal"
+      >
+        What-If Preview
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        class="calendar-option"
+        onclick="app.savingsGoals.show(); app.calendarUI.closeAppMenu();"
+        aria-haspopup="dialog"
+        aria-controls="savingsGoalsModal"
+      >
+        Savings Goals
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        class="calendar-option"
         onclick="app.debtSnowball.showView(); app.calendarUI.closeAppMenu();"
         aria-controls="debtSnowballView"
       >
@@ -768,6 +788,7 @@ class CalendarUI {
               ? Utils.escapeHtml(t.description.trim())
               : fallback;
             const flags = [];
+            if (t.whatIf === true) flags.push('<span class="agenda-item-flag" title="What-if draft (not saved)">🔮</span>');
             if (t.allocated === true) flags.push('<span class="agenda-item-flag" title="Reserved bucket">🔒</span>');
             if (t.type === "expense" && t.settled === false) flags.push('<span class="agenda-item-flag" title="Unsettled">⏳</span>');
             return `<li class="agenda-item${isSkipped ? " skipped" : ""}">

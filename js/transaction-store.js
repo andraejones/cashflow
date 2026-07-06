@@ -12,6 +12,7 @@ class TransactionStore {
     this.movedTransactions = {};
     this.debts = [];
     this.cashInfusions = [];
+    this.savingsGoals = [];
     this.monthlyNotes = {};
     this.lastUpdated = null;
     this.debtSnowballSettings = {
@@ -28,6 +29,7 @@ class TransactionStore {
       recurringTransactions: [],
       debts: [],
       cashInfusions: [],
+      savingsGoals: [],
       skips: []
     };
     this.onSaveCallbacks = [];
@@ -133,6 +135,19 @@ class TransactionStore {
     };
   }
 
+  _normalizeSavingsGoal(goal) {
+    return {
+      ...goal,
+      id: goal.id || Utils.generateUniqueId(),
+      _lastModified: goal._lastModified || new Date().toISOString(),
+      name: typeof goal.name === "string" ? goal.name : "",
+      targetAmount: Math.round((Number(goal.targetAmount) || 0) * 100) / 100,
+      targetDate: typeof goal.targetDate === "string" ? goal.targetDate : "",
+      saved: Math.round((Number(goal.saved) || 0) * 100) / 100,
+    };
+  }
+
+
   registerSaveCallback(callback) {
     if (typeof callback === 'function') {
       this.onSaveCallbacks.push(callback);
@@ -186,6 +201,9 @@ class TransactionStore {
       const storedDebts = decrypt(this.storage.getItem("debts"), true);
       const storedCashInfusions = decrypt(
         this.storage.getItem("cashInfusions"), true
+      );
+      const storedSavingsGoals = decrypt(
+        this.storage.getItem("savingsGoals"), true
       );
       const storedSnowballSettings = decrypt(
         this.storage.getItem("debtSnowballSettings"), true
@@ -288,6 +306,13 @@ class TransactionStore {
         }));
       }
 
+      if (storedSavingsGoals) {
+        const parsedGoals = JSON.parse(storedSavingsGoals);
+        this.savingsGoals = parsedGoals.map((goal) =>
+          this._normalizeSavingsGoal(goal)
+        );
+      }
+
       if (storedSnowballSettings) {
         const parsedSettings = JSON.parse(storedSnowballSettings);
         this.debtSnowballSettings = {
@@ -386,6 +411,7 @@ class TransactionStore {
       this.skippedTransactions = {};
       this.debts = [];
       this.cashInfusions = [];
+      this.savingsGoals = [];
       this.lastUpdated = null;
       this.debtSnowballSettings = {
         dailyFloor: 0,
@@ -402,7 +428,7 @@ class TransactionStore {
    */
   _pruneDeletedItems() {
     const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
-    const keys = ['transactions', 'recurringTransactions', 'debts', 'cashInfusions'];
+    const keys = ['transactions', 'recurringTransactions', 'debts', 'cashInfusions', 'savingsGoals'];
 
     keys.forEach(key => {
       if (Array.isArray(this._deletedItems[key])) {
@@ -429,8 +455,11 @@ class TransactionStore {
   _filterPersistedTransactions(transactions) {
     const filtered = {};
     for (const date in transactions) {
+      // What-if drafts (whatIf: true) are preview-only overlays on the balance
+      // walk — never persisted to storage, exports, or cloud sync.
       const kept = transactions[date].filter(t =>
-        !t.recurringId || t.modifiedInstance || t.movedFrom !== undefined
+        t.whatIf !== true &&
+        (!t.recurringId || t.modifiedInstance || t.movedFrom !== undefined)
       );
       if (kept.length > 0) {
         filtered[date] = kept;
@@ -499,6 +528,10 @@ class TransactionStore {
         encrypt(JSON.stringify(this.cashInfusions))
       );
       this.storage.setItem(
+        "savingsGoals",
+        encrypt(JSON.stringify(this.savingsGoals))
+      );
+      this.storage.setItem(
         "debtSnowballSettings",
         encrypt(JSON.stringify(this.debtSnowballSettings))
       );
@@ -543,6 +576,7 @@ class TransactionStore {
     this.skippedTransactions = {};
     this.debts = [];
     this.cashInfusions = [];
+    this.savingsGoals = [];
     this.monthlyNotes = {};
     this.movedTransactions = {};
     this.lastUpdated = null;
@@ -556,6 +590,7 @@ class TransactionStore {
       recurringTransactions: [],
       debts: [],
       cashInfusions: [],
+      savingsGoals: [],
       skips: []
     };
     // Reset replaces in-memory state with a known-good empty state, so any
@@ -651,6 +686,122 @@ class TransactionStore {
     this.cashInfusions.splice(index, 1);
     this.debouncedSave();
     return true;
+  }
+
+
+  getSavingsGoals() {
+    return this.savingsGoals;
+  }
+
+
+  addSavingsGoal(goal) {
+    if (!goal) {
+      console.error("Invalid savings goal data");
+      return null;
+    }
+    const normalized = this._normalizeSavingsGoal(goal);
+    normalized._lastModified = new Date().toISOString();
+    this.savingsGoals.push(normalized);
+    this.debouncedSave();
+    return normalized.id;
+  }
+
+
+  updateSavingsGoal(id, updates) {
+    if (!id || !updates) {
+      console.error("Invalid parameters for updateSavingsGoal");
+      return false;
+    }
+    const index = this.savingsGoals.findIndex((g) => g.id === id);
+    if (index === -1) {
+      return false;
+    }
+    this.savingsGoals[index] = this._normalizeSavingsGoal({
+      ...this.savingsGoals[index],
+      ...updates,
+      id,
+      _lastModified: new Date().toISOString(),
+    });
+    this.debouncedSave();
+    return true;
+  }
+
+
+  deleteSavingsGoal(id) {
+    if (!id) {
+      console.error("Invalid ID for deleteSavingsGoal");
+      return false;
+    }
+    const index = this.savingsGoals.findIndex((g) => g.id === id);
+    if (index === -1) {
+      return false;
+    }
+    // Track deleted ID for merge conflict resolution (with timestamp for pruning)
+    this._deletedItems.savingsGoals.push({ id, deletedAt: Date.now() });
+    this.savingsGoals.splice(index, 1);
+    this.debouncedSave();
+    return true;
+  }
+
+
+  // ---- What-if preview drafts --------------------------------------------
+  // Draft transactions flagged `whatIf: true` ride in the in-memory
+  // transactions map so every balance walk (calendar, minimum, snowball
+  // projection) sees them, but _filterPersistedTransactions keeps them out of
+  // localStorage, exports, and cloud sync. No save is triggered here — nothing
+  // persisted changes until the drafts are applied.
+
+  addWhatIfTransaction(date, transaction) {
+    if (!date || !transaction) return false;
+    if (!this.transactions[date]) {
+      this.transactions[date] = [];
+    }
+    this.transactions[date].push({ ...transaction, whatIf: true });
+    return true;
+  }
+
+
+  getWhatIfTransactions() {
+    const drafts = [];
+    Object.keys(this.transactions).forEach((date) => {
+      this.transactions[date].forEach((t) => {
+        if (t.whatIf === true) drafts.push({ date, transaction: t });
+      });
+    });
+    drafts.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    return drafts;
+  }
+
+
+  clearWhatIfTransactions() {
+    let removed = 0;
+    Object.keys(this.transactions).forEach((date) => {
+      const before = this.transactions[date].length;
+      this.transactions[date] = this.transactions[date].filter(
+        (t) => t.whatIf !== true
+      );
+      removed += before - this.transactions[date].length;
+      if (this.transactions[date].length === 0) {
+        delete this.transactions[date];
+      }
+    });
+    return removed;
+  }
+
+
+  // Commit every draft as a real transaction (id + timestamp via
+  // addTransaction, which also persists and syncs). Returns the count.
+  applyWhatIfTransactions() {
+    const drafts = this.getWhatIfTransactions();
+    this.clearWhatIfTransactions();
+    drafts.forEach(({ date, transaction }) => {
+      const real = { ...transaction };
+      delete real.whatIf;
+      delete real.id;
+      delete real._lastModified;
+      this.addTransaction(date, real);
+    });
+    return drafts.length;
   }
 
 
@@ -1754,6 +1905,7 @@ class TransactionStore {
       movedTransactions: this.movedTransactions,
       debts: this.debts,
       cashInfusions: this.cashInfusions,
+      savingsGoals: this.savingsGoals,
       monthlyNotes: this.monthlyNotes,
       debtSnowballSettings: this.debtSnowballSettings,
       _deletedItems: this._deletedItems,
@@ -1788,6 +1940,7 @@ class TransactionStore {
       movedTransactions: this.movedTransactions,
       debts: this.debts,
       cashInfusions: this.cashInfusions,
+      savingsGoals: this.savingsGoals,
       monthlyNotes: this.monthlyNotes,
       debtSnowballSettings: this.debtSnowballSettings,
       _deletedItems: this._deletedItems,
@@ -1819,6 +1972,9 @@ class TransactionStore {
         date: typeof infusion.date === "string" ? infusion.date : "",
         targetDebtId: infusion.targetDebtId || null,
       }));
+      this.savingsGoals = (data.savingsGoals || []).map((goal) =>
+        this._normalizeSavingsGoal(goal)
+      );
       this.debtSnowballSettings = {
         dailyFloor: Number(data.debtSnowballSettings?.dailyFloor) || 0,
         extraPaymentStartMonth: this.normalizeExtraStartMonth(
@@ -1844,6 +2000,9 @@ class TransactionStore {
         debts: Array.isArray(importedDeleted.debts) ? importedDeleted.debts : [],
         cashInfusions: Array.isArray(importedDeleted.cashInfusions)
           ? importedDeleted.cashInfusions
+          : [],
+        savingsGoals: Array.isArray(importedDeleted.savingsGoals)
+          ? importedDeleted.savingsGoals
           : [],
         skips: Array.isArray(importedDeleted.skips) ? importedDeleted.skips : [],
       };
@@ -1975,6 +2134,7 @@ class TransactionStore {
       this.movedTransactions = backup.movedTransactions;
       this.debts = backup.debts;
       this.cashInfusions = backup.cashInfusions;
+      this.savingsGoals = backup.savingsGoals;
       this.monthlyNotes = backup.monthlyNotes;
       this.debtSnowballSettings = backup.debtSnowballSettings;
       this._deletedItems = backup._deletedItems;
