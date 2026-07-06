@@ -2896,6 +2896,90 @@ console.log("TEST 41: Undo Restore Uses A Fresh Id That Survives The Merge");
   console.log("✅ Undo-restored transactions survive the merge; the old id stays dead");
 }
 
+// TEST 42: Name-assisted date-window stretch in pass 1. Settled entries
+// normally match only within toleranceDays (2), but an ACH draft due before a
+// holiday weekend posts 3-4 days late (due Fri 7/3 — July 4th observed — posts
+// Mon 7/6). When the bank line and the app entry share a distinctive payee
+// word AND the amount is exact, the window stretches to unsettledToleranceDays
+// so the pair reconciles and surfaces as date drift, instead of a false
+// "Missing from app" + "Settled, no bank record" double report. A name-neutral
+// entry at the same 3-day gap must NOT stretch.
+console.log("TEST 42: Shared Payee Name Stretches Pass-1 Date Window");
+{
+  // The anchor line keeps the statement's reporting window open back to 6/29
+  // (a one-line statement would clamp reporting to 7/6 and hide the 7/3 entry).
+  const csv =
+    "Posted Date,Transaction Date,Description,Deposit,Withdrawal,Balance\n" +
+    "7/6/2026,7/6/2026,Withdrawal ACH CAPITAL ONE,,($73.00),$1295.81\n" +
+    "6/29/2026,6/29/2026,Withdrawal Debit Card JASON'S DELI FORT MYERS FL,,($53.25),$2073.30\n";
+  const addAnchor = (s) =>
+    s.addTransaction("2026-06-29", {
+      amount: 53.25, type: "expense",
+      description: "Jasons Deli", settled: true,
+    });
+
+  // Same payee: exact amount, 3-day gap — must match and report date drift.
+  {
+    const s = new TransactionStore();
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    const ui = new BankReconcileUI(s, rm, () => {}, () => {});
+    addAnchor(s);
+    s.addTransaction("2026-07-03", {
+      amount: 73, type: "expense",
+      description: "Debt Payment: Capital One", settled: true,
+    });
+
+    const parsed = ui._parseSuncoastCsv(csv);
+    if (parsed.error) throw new Error("Parse error: " + parsed.error);
+    ui._run(parsed.rows);
+
+    const r = ui.result;
+    if (r.matchedCount !== 2 || r.missingFromApp.length !== 0) {
+      throw new Error(
+        `Same-payee holiday drift must match: matched=${r.matchedCount}, missing=${r.missingFromApp.length}`
+      );
+    }
+    if (r.dateDrifted.length !== 1 || r.dateDrifted[0].app.date !== "2026-07-03") {
+      throw new Error(`Pair must surface as date drift: ${JSON.stringify(r.dateDrifted)}`);
+    }
+    if (r.appOnlyUnmatched.length !== 0) {
+      throw new Error("Matched entry must not also report as unmatched");
+    }
+    s.cancelPendingSave();
+  }
+
+  // Name-neutral entry: same amount and gap, but no shared payee word — the
+  // settled 2-day window holds and both sides report as discrepancies.
+  {
+    const s = new TransactionStore();
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    const ui = new BankReconcileUI(s, rm, () => {}, () => {});
+    addAnchor(s);
+    s.addTransaction("2026-07-03", {
+      amount: 73, type: "expense",
+      description: "Monthly subscription", settled: true,
+    });
+
+    const parsed = ui._parseSuncoastCsv(csv);
+    if (parsed.error) throw new Error("Parse error: " + parsed.error);
+    ui._run(parsed.rows);
+
+    const r = ui.result;
+    if (r.matchedCount !== 1 || r.missingFromApp.length !== 1) {
+      throw new Error(
+        `Name-neutral 3-day gap must NOT match: matched=${r.matchedCount}, missing=${r.missingFromApp.length}`
+      );
+    }
+    if (r.appOnlyUnmatched.length !== 1) {
+      throw new Error("Unmatched settled entry must still be reported");
+    }
+    s.cancelPendingSave();
+  }
+  console.log("✅ Exact amount + shared payee bridges holiday ACH drift; neutral names keep the 2-day window");
+}
+
 // Run the async network tests sequentially (shared global.fetch mock): TEST 32
 // first, then TEST 30, which prints the final banner.
 runReplaceRemoteTest()

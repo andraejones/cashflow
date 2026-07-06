@@ -27,7 +27,9 @@ class BankReconcileUI {
 
     // Match a bank line to an app entry when the signed amount is equal and the
     // dates are within this many days (Transaction Date vs the day it was
-    // logged routinely differ by 1, sometimes 2).
+    // logged routinely differ by 1, sometimes 2). When the two also share a
+    // distinctive payee word, pass 1 stretches this to unsettledToleranceDays —
+    // see _bestMatch.
     this.toleranceDays = 2;
     // Unsettled expenses are explicitly waiting to clear and can sit for days
     // before posting, so give them a wider match window than settled entries.
@@ -838,10 +840,20 @@ class BankReconcileUI {
     for (const cand of appItems) {
       if (cand.matched) continue;
       if (this._blockMatch(bankRow, cand)) continue;
-      const gap = this._dayGap(bankRow.date, cand.date);
-      if (gap > this._toleranceFor(cand)) continue;
       if (!predicate(cand)) continue;
       const coh = this._nameCoherence(bankRow, cand);
+      // A shared distinctive payee word stretches the date window to the
+      // unsettled tolerance even for settled entries. Exact amount (pass 1's
+      // predicate) plus the same payee is strong evidence of the same money
+      // movement, and ACH drafts due before a holiday weekend legitimately
+      // post 3-4 days late (a payment due Fri 7/3 — July 4th observed —
+      // settles Mon 7/6), which the settled 2-day window can never cover.
+      const gap = this._dayGap(bankRow.date, cand.date);
+      const tol =
+        coh === 1
+          ? Math.max(this._toleranceFor(cand), this.unsettledToleranceDays)
+          : this._toleranceFor(cand);
+      if (gap > tol) continue;
       if (coh > bestCoh || (coh === bestCoh && gap < bestGap)) {
         best = cand;
         bestCoh = coh;
