@@ -385,6 +385,18 @@ class CalendarUI {
       }
     }
 
+    // Free-funds display cap: never advertise more "free" money than the
+    // 30-day trough can absorb. Spending the shown figure must leave every day
+    // in the Minimum window at or above zero, so the calendar shows
+    // min(bucket remaining, 30-day lowest balance), floored at 0. Only the
+    // displayed figure is clamped — the bucket itself keeps its real
+    // remaining, so draws are unaffected.
+    const freeFundsDisplay = freeFundsBucket
+      ? Math.max(0, Math.min(freeFundsBucket.remaining, lowestBalance))
+      : null;
+    const freeFundsCapped =
+      freeFundsBucket !== null && freeFundsDisplay < freeFundsBucket.remaining;
+
     // Days on which a debt is fully paid off by the snowball plan, so they can
     // be flagged at a glance.
     const payoffDates = this.debtSnowball ? this.debtSnowball.getPayoffDates() : null;
@@ -482,7 +494,7 @@ class CalendarUI {
           hasAllocated, isPayoffDay, hasMoveAnomaly,
           dailyTotals, cellExpense, runningBalance,
           transactionCount, dayTransactions, carriedUnsettled,
-          freeFundsMode, freeFundsBucket,
+          freeFundsMode, freeFundsBucket, freeFundsDisplay, freeFundsCapped,
           isFutureDay: dateString > todayStr,
         });
         calendarAgenda.appendChild(agendaRow);
@@ -508,7 +520,7 @@ class CalendarUI {
         ${freeFundsMode
           ? (isCurrentDay
             ? (freeFundsBucket
-              ? `<div class="balance free-funds" title="Free funds available">${freeFundsBucket.remaining.toFixed(2)}</div>`
+              ? `<div class="balance free-funds" title="${freeFundsCapped ? "Free funds (limited by the 30-day minimum balance)" : "Free funds available"}">${freeFundsDisplay.toFixed(2)}</div>`
               : "")
             : dateString > todayStr
               ? `<div class="balance">${runningBalance.toFixed(2)}</div>`
@@ -841,7 +853,7 @@ class CalendarUI {
           ${d.freeFundsMode
             ? (d.isCurrentDay
               ? (d.freeFundsBucket
-                ? `<span class="balance free-funds" title="Free funds available">${d.freeFundsBucket.remaining.toFixed(2)}</span>`
+                ? `<span class="balance free-funds" title="${d.freeFundsCapped ? "Free funds (limited by the 30-day minimum balance)" : "Free funds available"}">${d.freeFundsDisplay.toFixed(2)}</span>`
                 : "")
               : d.isFutureDay
                 ? `<span class="balance">${d.runningBalance.toFixed(2)}</span>`
