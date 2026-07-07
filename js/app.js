@@ -230,6 +230,9 @@ class CashflowApp {
     Object.keys(transactions).forEach((date) => {
       transactions[date].forEach((t) => {
         if (t.hidden === true) return;
+        // Snowball payoff rows are engine-generated derived data, not user
+        // entries — keep them out of the Recent Transactions list.
+        if (t.snowballGenerated === true) return;
         // Only entries the user actually entered or modified — recurring
         // expansions without a stored timestamp are derived data.
         if (!t._lastModified) return;
