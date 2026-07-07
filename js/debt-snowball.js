@@ -270,8 +270,6 @@ class DebtSnowballUI {
       semiMonthlyDays: recurringTransaction.semiMonthlyDays || null,
       semiMonthlyLastDay: recurringTransaction.semiMonthlyLastDay || false,
       customInterval: recurringTransaction.customInterval || null,
-      variableAmount: recurringTransaction.variableAmount || false,
-      variablePercentage: recurringTransaction.variablePercentage || 0,
       endDate: recurringTransaction.endDate || "",
       maxOccurrences: recurringTransaction.maxOccurrences || null,
     };
@@ -379,7 +377,6 @@ class DebtSnowballUI {
       Utils.buildCustomIntervalOptions(this.debtAdvancedOptions, 'debt');
     }
     Utils.buildBusinessDayOptions(this.debtAdvancedOptions, 'debt');
-    Utils.buildVariableAmountOptions(this.debtAdvancedOptions, 'debt');
     if (this.debtEndConditionOptions) {
       this.debtEndConditionOptions.style.display = "block";
       Utils.buildEndConditionOptions(this.debtEndConditionOptions, 'debt');
@@ -541,27 +538,6 @@ class DebtSnowballUI {
       businessDayAdjustment.value = debt?.businessDayAdjustment || "none";
     }
 
-    const variableAmountCheck = document.getElementById(
-      "debtVariableAmountCheck"
-    );
-    const variableAmountOptions = document.getElementById(
-      "debtVariableAmountOptions"
-    );
-    if (variableAmountCheck) {
-      variableAmountCheck.checked = debt?.variableAmount === true;
-      if (variableAmountOptions) {
-        variableAmountOptions.style.display = variableAmountCheck.checked
-          ? "block"
-          : "none";
-      }
-    }
-    if (debt?.variableAmount) {
-      const variablePercentage = document.getElementById("debtVariablePercentage");
-      if (variablePercentage) {
-        variablePercentage.value = Number(debt.variablePercentage) || 0;
-      }
-    }
-
     const endConditionNone = document.getElementById("debtEndConditionNone");
     const endConditionDate = document.getElementById("debtEndConditionDate");
     const endConditionOccurrence = document.getElementById(
@@ -590,9 +566,6 @@ class DebtSnowballUI {
   collectDebtAdvancedOptions(recurrence) {
     const options = {
       businessDayAdjustment: "none",
-      variableAmount: false,
-      variableType: "percentage",
-      variablePercentage: 0,
       endDate: "",
       maxOccurrences: null,
       semiMonthlyDays: null,
@@ -632,16 +605,6 @@ class DebtSnowballUI {
     );
     if (businessDayAdjustment) {
       options.businessDayAdjustment = businessDayAdjustment.value;
-    }
-
-    const variableAmountCheck = document.getElementById(
-      "debtVariableAmountCheck"
-    );
-    if (variableAmountCheck && variableAmountCheck.checked) {
-      const variablePercentage = document.getElementById("debtVariablePercentage");
-      options.variableAmount = true;
-      options.variableType = "percentage";
-      options.variablePercentage = parseFloat(variablePercentage?.value || "0");
     }
 
     const endConditionRadios = document.querySelectorAll(
@@ -944,15 +907,6 @@ class DebtSnowballUI {
           ? { ...debt.customInterval }
           : null,
       businessDayAdjustment: debt.businessDayAdjustment || "none",
-      variableAmount: debt.variableAmount === true,
-      variableType:
-        debt.variableAmount === true
-          ? debt.variableType || "percentage"
-          : null,
-      variablePercentage:
-        debt.variableAmount === true
-          ? Number(debt.variablePercentage) || 0
-          : null,
       endDate: debt.endDate || null,
       maxOccurrences:
         typeof debt.maxOccurrences === "number" && debt.maxOccurrences > 0

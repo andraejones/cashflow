@@ -13,7 +13,7 @@ Updated for appVersion 2.0.0 on 2026-06-24 (source of truth: `js/transaction-sto
 ## Features
 
 - Monthly calendar with daily totals and a running balance. The lowest-balance day in the next 30 days is highlighted, the first day the balance drops to zero or below is flagged as a crisis day, and every negative/zero-balance day is shaded.
-- One-off and recurring transactions (daily to yearly, twice-a-month, custom intervals, day-specific rules like "first Monday of the month", business-day adjustments, variable/escalating amounts, optional end date or max-occurrence limit).
+- One-off and recurring transactions (daily to yearly, twice-a-month, custom intervals, day-specific rules like "first Monday of the month", business-day adjustments, optional end date or max-occurrence limit).
 - Recurring transaction occurrences can be rescheduled to a different date or skipped individually without affecting other occurrences. When editing a recurring transaction, choose to update only this occurrence, this and future occurrences, or all occurrences.
 - Authorized recurring payments: a recurring occurrence that was settled a day or two after its scheduled date shows as "(Authorized)" (grayed, not struck through, no calendar star) rather than "(Skipped)", since the payment did happen and just cleared later. Genuine skips and backward moves are unchanged.
 - Ending balances act as reconciliation anchors: an entered ending balance is shown as-is and is treated as authoritative cash on that day, reconciling unsettled expenses dated on or before it; only later unsettled items drag the running balance.

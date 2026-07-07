@@ -58,14 +58,6 @@ class PinProtection {
     return this.webAuthnAvailable;
   }
 
-  encodeBase64(value) {
-    return btoa(unescape(encodeURIComponent(value)));
-  }
-
-  decodeBase64(value) {
-    return decodeURIComponent(escape(atob(value)));
-  }
-
   // Secure PIN hashing using SHA-256 with salt
   async hashPinSecure(pin, salt = null) {
     const encoder = new TextEncoder();
@@ -92,56 +84,19 @@ class PinProtection {
     return `${saltBase64}:${hashBase64}`;
   }
 
-  // Legacy hash for migration detection
-  hashPinLegacy(pin) {
-    return this.encodeBase64(pin).split("").reverse().join("");
-  }
-
   isPinSet() {
     return localStorage.getItem("pin_hash") !== null;
   }
 
-  // Check if stored hash is legacy format (no colon separator)
-  _isLegacyHash() {
-    const stored = localStorage.getItem("pin_hash");
-    return stored && !stored.includes(':');
-  }
-
-  // Length-independent-then-constant-time string compare for hash verification.
-  // The timing risk is negligible for a local-only app, but cheap to remove.
-  // Hash lengths are fixed, so the length early-out leaks nothing useful.
-  _constantTimeEquals(a, b) {
-    if (typeof a !== "string" || typeof b !== "string") return false;
-    if (a.length !== b.length) return false;
-    let mismatch = 0;
-    for (let i = 0; i < a.length; i++) {
-      mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
-    }
-    return mismatch === 0;
-  }
-
   async verifyPin(pin) {
     const stored = localStorage.getItem("pin_hash");
-    if (!stored) return false;
+    // Only the salted salt:hash format is supported (legacy hashes were
+    // migrated on unlock long ago); anything else fails closed.
+    if (!stored || !stored.includes(':')) return false;
 
-    // Check for legacy format and migrate if needed
-    if (this._isLegacyHash()) {
-      // Verify against legacy hash
-      const legacyHash = this.hashPinLegacy(pin);
-      if (this._constantTimeEquals(legacyHash, stored)) {
-        // Migrate to secure hash
-        const secureHash = await this.hashPinSecure(pin);
-        localStorage.setItem("pin_hash", secureHash);
-        console.log("Migrated PIN to secure hash format");
-        return true;
-      }
-      return false;
-    }
-
-    // Verify against secure hash
     const [saltBase64] = stored.split(':');
     const computedHash = await this.hashPinSecure(pin, saltBase64);
-    return this._constantTimeEquals(computedHash, stored);
+    return computedHash === stored;
   }
 
   async setPin(pin) {
@@ -168,19 +123,6 @@ class PinProtection {
     return this.currentPin;
   }
 
-  // Legacy XOR decrypt for migration
-  _decryptLegacyXOR(value, pin) {
-    try {
-      const decoded = this.decodeBase64(value);
-      const xor = Array.from(decoded).map((ch, i) =>
-        String.fromCharCode(ch.charCodeAt(0) ^ pin.charCodeAt(i % pin.length))
-      ).join("");
-      return xor;
-    } catch (e) {
-      return null;
-    }
-  }
-
   // Synchronous encrypt for compatibility - stores as marker for async encryption
   encrypt(value) {
     if (!this.currentPin) return value;
@@ -196,24 +138,18 @@ class PinProtection {
   decrypt(value) {
     if (!this.currentPin) return value;
     try {
-      // New byte-level XOR (emoji-safe)
-      if (value.startsWith("xor2:")) {
-        const raw = atob(value.slice(5));
-        const bytes = Uint8Array.from(raw, ch => ch.charCodeAt(0));
-        const pinBytes = new TextEncoder().encode(this.currentPin);
-        const xored = bytes.map((b, i) => b ^ pinBytes[i % pinBytes.length]);
-        return new TextDecoder().decode(xored);
+      // Byte-level XOR (emoji-safe). Anything without the prefix is
+      // unrecoverable (legacy formats were re-encrypted on save long ago);
+      // return "" so loadData's loadFailed guard protects the on-disk copy.
+      if (!value.startsWith("xor2:")) {
+        console.error("PIN decryption error: unrecognized ciphertext format");
+        return "";
       }
-      // Legacy XOR format (no emoji support, kept for old data)
-      if (value.startsWith("xor:")) {
-        return this._decryptLegacyXOR(value.slice(4), this.currentPin);
-      }
-      // Try legacy XOR without prefix (for old data)
-      const decoded = this.decodeBase64(value);
-      const xor = Array.from(decoded).map((ch, i) =>
-        String.fromCharCode(ch.charCodeAt(0) ^ this.currentPin.charCodeAt(i % this.currentPin.length))
-      ).join("");
-      return xor;
+      const raw = atob(value.slice(5));
+      const bytes = Uint8Array.from(raw, ch => ch.charCodeAt(0));
+      const pinBytes = new TextEncoder().encode(this.currentPin);
+      const xored = bytes.map((b, i) => b ^ pinBytes[i % pinBytes.length]);
+      return new TextDecoder().decode(xored);
     } catch (e) {
       console.error("PIN decryption error", e);
       return "";
@@ -385,19 +321,8 @@ class PinProtection {
     if (!credentialId) return null;
 
     try {
-      // Check for legacy obfuscated format (shorter, no salt/iv structure)
-      const decoded = this.base64ToArrayBuffer(stored);
-      if (decoded.byteLength < this.SALT_LENGTH + this.IV_LENGTH + 17) {
-        // Legacy format - decode and migrate
-        const legacyPin = this.decodeBase64(stored).split('').reverse().join('');
-        // Re-store with proper encryption
-        await this.storePinForBiometrics(legacyPin);
-        console.log("Migrated biometric PIN to secure format");
-        return legacyPin;
-      }
-
-      // Modern AES-GCM encrypted format
-      const combined = new Uint8Array(decoded);
+      // AES-GCM encrypted format: salt + iv + ciphertext
+      const combined = new Uint8Array(this.base64ToArrayBuffer(stored));
       const salt = combined.slice(0, this.SALT_LENGTH);
       const iv = combined.slice(this.SALT_LENGTH, this.SALT_LENGTH + this.IV_LENGTH);
       const ciphertext = combined.slice(this.SALT_LENGTH + this.IV_LENGTH);

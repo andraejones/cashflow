@@ -646,56 +646,6 @@ const Utils = {
     container.appendChild(group);
   },
 
-  buildVariableAmountOptions: function (container, idPrefix) {
-    const group = document.createElement("div");
-    group.className = "option-group";
-    const checkboxDiv = document.createElement("div");
-
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.id = this._buildId(idPrefix, "variableAmountCheck");
-    checkbox.name = this._buildId(idPrefix, "variableAmountCheck");
-
-    const checkboxLabel = document.createElement("label");
-    checkboxLabel.setAttribute("for", this._buildId(idPrefix, "variableAmountCheck"));
-    checkboxLabel.textContent = "Amount changes over time";
-
-    checkboxDiv.appendChild(checkbox);
-    checkboxDiv.appendChild(checkboxLabel);
-    const variableOptions = document.createElement("div");
-    variableOptions.id = this._buildId(idPrefix, "variableAmountOptions");
-    variableOptions.style.display = "none";
-    variableOptions.style.marginTop = "10px";
-
-    const percentLabel = document.createElement("label");
-    percentLabel.setAttribute("for", this._buildId(idPrefix, "variablePercentage"));
-    percentLabel.textContent = "Percentage change per occurrence:";
-
-    const percentInput = document.createElement("input");
-    percentInput.type = "number";
-    percentInput.id = this._buildId(idPrefix, "variablePercentage");
-    percentInput.name = this._buildId(idPrefix, "variablePercentage");
-    percentInput.step = "0.1";
-    percentInput.value = "0";
-    percentInput.style.width = "60px";
-
-    const percentSign = document.createElement("span");
-    percentSign.textContent = "%";
-
-    variableOptions.appendChild(percentLabel);
-    variableOptions.appendChild(document.createElement("br"));
-    variableOptions.appendChild(percentInput);
-    variableOptions.appendChild(percentSign);
-    checkbox.addEventListener("change", function () {
-      variableOptions.style.display = this.checked ? "block" : "none";
-    });
-
-    group.appendChild(checkboxDiv);
-    group.appendChild(variableOptions);
-
-    container.appendChild(group);
-  },
-
   buildEndConditionOptions: function (container, idPrefix) {
     const group = document.createElement("div");
     group.className = "option-group";

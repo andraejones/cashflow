@@ -586,7 +586,6 @@ class TransactionUI {
       Utils.buildCustomIntervalOptions(advancedOptions, '');
     }
     Utils.buildBusinessDayOptions(advancedOptions, '');
-    Utils.buildVariableAmountOptions(advancedOptions, '');
     Utils.buildEndConditionOptions(advancedOptions, '');
     const transactionForm = document.getElementById("transactionForm");
     transactionForm.appendChild(advancedOptions);
@@ -876,9 +875,6 @@ class TransactionUI {
                 if (dayOption) {
                   additionalInfo += ` (${dayOption.label})`;
                 }
-              }
-              if (recurringTransaction.variableAmount) {
-                additionalInfo += ` (Variable: ${recurringTransaction.variablePercentage}% change)`;
               }
             }
           }
@@ -2229,17 +2225,6 @@ class TransactionUI {
           }
         }
       }
-      const variableCheckEl = document.getElementById("variableAmountCheck");
-      if (variableCheckEl && variableCheckEl.checked) {
-        const pctEl = document.getElementById("variablePercentage");
-        if (pctEl && !Number.isFinite(parseFloat(pctEl.value))) {
-          Utils.showNotification(
-            "Variable amount percentage must be a number",
-            "error"
-          );
-          return false;
-        }
-      }
       if (recurrence === "once") {
         const newTransaction = {
           amount: amount,
@@ -2450,15 +2435,6 @@ class TransactionUI {
     const businessDayAdjustment = document.getElementById("businessDayAdjustment");
     if (businessDayAdjustment) {
       recurringTransaction.businessDayAdjustment = businessDayAdjustment.value;
-    }
-    const variableAmountCheck = document.getElementById("variableAmountCheck");
-    if (variableAmountCheck && variableAmountCheck.checked) {
-      const variablePercentage = document.getElementById("variablePercentage");
-      if (variablePercentage) {
-        recurringTransaction.variableAmount = true;
-        recurringTransaction.variableType = "percentage";
-        recurringTransaction.variablePercentage = parseFloat(variablePercentage.value);
-      }
     }
     const endConditionRadios = document.querySelectorAll('input[name="endCondition"]');
     for (const radio of endConditionRadios) {

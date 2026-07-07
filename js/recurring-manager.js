@@ -1400,15 +1400,8 @@ class RecurringTransactionManager {
           }
         }
       }
-      const scheduledDate = originalDateString
-        ? Utils.parseDateString(originalDateString)
-        : currentDate;
-      const amount = rt.variableAmount
-        ? this.calculateVariableAmount(rt, scheduledDate, startDate)
-        : rt.amount;
-
       const newTransaction = {
-        amount: amount,
+        amount: rt.amount,
         type: rt.type,
         description: rt.description,
         recurringId: rt.id,
@@ -1435,89 +1428,6 @@ class RecurringTransactionManager {
 
       transactions[dateString].push(newTransaction);
     }
-  }
-
-
-  calculateVariableAmount(rt, currentDate, startDate) {
-    if (!rt.variableAmount) {
-      return rt.amount;
-    }
-
-    let amount = rt.amount;
-
-    if (rt.variableType === "percentage") {
-      let occurrences = 0;
-
-      switch (rt.recurrence) {
-        case "once":
-          occurrences = 0;
-          break;
-        case "daily":
-          occurrences = this.daysBetween(startDate, currentDate);
-          break;
-        case "weekly":
-          occurrences = Math.floor(this.daysBetween(startDate, currentDate) / 7);
-          break;
-        case "bi-weekly":
-          occurrences = Math.floor(this.daysBetween(startDate, currentDate) / 14);
-          break;
-        case "monthly":
-          occurrences =
-            (currentDate.getFullYear() - startDate.getFullYear()) * 12 +
-            currentDate.getMonth() -
-            startDate.getMonth();
-          break;
-        case "semi-monthly":
-          occurrences = this.countOccurrencesBefore(rt, currentDate);
-          break;
-        case "quarterly":
-          occurrences = Math.floor(
-            ((currentDate.getFullYear() - startDate.getFullYear()) * 12 +
-              currentDate.getMonth() -
-              startDate.getMonth()) /
-            3
-          );
-          break;
-        case "semi-annual":
-          occurrences = Math.floor(
-            ((currentDate.getFullYear() - startDate.getFullYear()) * 12 +
-              currentDate.getMonth() -
-              startDate.getMonth()) /
-            6
-          );
-          break;
-        case "yearly":
-          occurrences = currentDate.getFullYear() - startDate.getFullYear();
-          break;
-        case "custom":
-          if (rt.customInterval) {
-            const custom = rt.customInterval;
-            const intervalValue = custom.value || 1;
-            if (custom.unit === "days") {
-              occurrences = Math.floor(
-                this.daysBetween(startDate, currentDate) / intervalValue
-              );
-            } else if (custom.unit === "weeks") {
-              occurrences = Math.floor(
-                this.daysBetween(startDate, currentDate) / (intervalValue * 7)
-              );
-            } else if (custom.unit === "months") {
-              const monthsDiff =
-                (currentDate.getFullYear() - startDate.getFullYear()) * 12 +
-                currentDate.getMonth() -
-                startDate.getMonth();
-              occurrences = Math.floor(monthsDiff / intervalValue);
-            }
-          }
-          break;
-      }
-      // Use linear calculation (not compound) for variable amounts
-      // Linear: base + (base * percentage * occurrences)
-      const baseAmount = rt.amount;
-      amount = baseAmount + (baseAmount * (rt.variablePercentage / 100) * occurrences);
-    }
-
-    return amount;
   }
 
 
@@ -1742,15 +1652,6 @@ class RecurringTransactionManager {
         newRecurringTransaction.customInterval = {
           ...recurringTransaction.customInterval,
         };
-      }
-
-      if (recurringTransaction.variableAmount) {
-        newRecurringTransaction.variableAmount =
-          recurringTransaction.variableAmount;
-        newRecurringTransaction.variableType =
-          recurringTransaction.variableType;
-        newRecurringTransaction.variablePercentage =
-          recurringTransaction.variablePercentage;
       }
 
       if (recurringTransaction.settled !== undefined) {

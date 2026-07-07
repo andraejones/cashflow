@@ -2540,7 +2540,6 @@ console.log("TEST 36: Add Form Rejects Unexpandable Custom Interval / NaN Variab
       transactionDescription: { value: "Sub" },
       transactionSettled: { checked: true },
       transactionAllocate: { checked: false },
-      variableAmountCheck: { checked: false },
     };
 
     // Case 1: custom recurrence with interval 0 must be rejected, nothing saved.
@@ -2557,27 +2556,12 @@ console.log("TEST 36: Add Form Rejects Unexpandable Custom Interval / NaN Variab
       throw new Error("Custom interval 0 persisted a recurring definition");
     }
 
-    // Case 2: variable amount with a cleared (NaN) percentage must be rejected.
-    setForm({
-      ...baseForm,
-      transactionRecurrence: { value: "monthly" },
-      variableAmountCheck: { checked: true },
-      variablePercentage: { value: "" },
-    });
-    if (tui.addTransaction() !== false) {
-      throw new Error("NaN variable percentage was accepted");
-    }
-    if (s.getRecurringTransactions().length !== 0) {
-      throw new Error("NaN variable percentage persisted a recurring definition");
-    }
-
-    // Case 3: a valid custom series still saves, expands, and keeps a finite amount.
+    // Case 2: a valid custom series still saves, expands, and keeps a finite amount.
     setForm({
       ...baseForm,
       transactionRecurrence: { value: "custom" },
       customIntervalValue: { value: "2" },
       customIntervalUnit: { value: "weeks" },
-      variableAmountCheck: { checked: false },
     });
     if (tui.addTransaction() !== true) {
       throw new Error("Valid custom recurrence was rejected");

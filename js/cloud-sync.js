@@ -176,15 +176,10 @@ class CloudSync {
 
   // AES-GCM decryption for tokens
   async decryptValueAsync(encryptedValue) {
-    // Check for legacy format (no "aes:" prefix)
+    // Only the "aes:" format is supported (legacy tokens were re-encrypted
+    // on first sync long ago); anything else means re-entering credentials.
     if (!encryptedValue.startsWith("aes:")) {
-      // Legacy format - decode and migrate
-      try {
-        const legacyValue = atob(encryptedValue).split("").reverse().join("");
-        return legacyValue;
-      } catch {
-        return null;
-      }
+      return null;
     }
 
     try {
@@ -235,12 +230,6 @@ class CloudSync {
     let token = null;
     if (encryptedToken) {
       token = await this.decryptValueAsync(encryptedToken);
-      // If we decrypted legacy format, re-encrypt with new format
-      if (token && !encryptedToken.startsWith("aes:")) {
-        const newEncrypted = await this.encryptValueAsync(token);
-        localStorage.setItem("github_token_encrypted", newEncrypted);
-        console.log("Migrated GitHub token to secure encryption");
-      }
     }
     const gistId = localStorage.getItem("gist_id");
     return { token, gistId };

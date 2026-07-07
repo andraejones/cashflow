@@ -125,10 +125,6 @@ class TransactionStore {
                 : "days",
           }
           : null,
-      variableAmount: debt.variableAmount === true,
-      variableType:
-        debt.variableType === "percentage" ? "percentage" : "fixed",
-      variablePercentage: Number(debt.variablePercentage) || 0,
       endDate: typeof debt.endDate === "string" ? debt.endDate : "",
       maxOccurrences: Number(debt.maxOccurrences) || null,
       interestRate: Number(debt.interestRate) || 0,
