@@ -30,8 +30,11 @@ yarn-error.log*
 # Node (future-proofing — project is currently buildless)
 node_modules/
 
-# Local exports / backups
+# Local exports / backups / bank statements — personal financial data,
+# must never reach GitHub (repo is public)
 cashflow_data_*.json
+cashflow_backup*.json
+*.csv
 *.bak
 *.tmp
 
