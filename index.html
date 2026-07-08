@@ -83,6 +83,7 @@
         <select id="transactionType" aria-label="Transaction type">
           <option value="expense">Expense</option>
           <option value="income">Income</option>
+          <option value="allocation">Allocation</option>
           <option value="balance">Balance</option>
         </select>
         <div id="descriptionField" class="description-field">
@@ -93,10 +94,6 @@
           <label id="settledToggleLabel" class="settled-toggle-label">
             <input type="checkbox" id="transactionSettled" checked />
             Settled
-          </label>
-          <label id="allocateToggleLabel" class="settled-toggle-label allocate-toggle-label">
-            <input type="checkbox" id="transactionAllocate" />
-            Allocate
           </label>
           <label id="autoCloseoutToggleLabel" class="settled-toggle-label auto-closeout-toggle-label" style="display:none">
             <input type="checkbox" id="transactionAutoCloseout" />

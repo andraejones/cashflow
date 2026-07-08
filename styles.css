@@ -2779,17 +2779,6 @@ body.app-locked #calendarOptions {
   border: none;
 }
 
-/* Settled toggle disabled while "Allocate" is checked */
-.settled-toggle-label.is-disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.settled-toggle-label.is-disabled input[type="checkbox"] {
-  cursor: not-allowed;
-}
-
-.allocate-toggle-label input[type="checkbox"],
 .auto-closeout-toggle-label input[type="checkbox"] {
   accent-color: #8b5cf6;
 }

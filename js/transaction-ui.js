@@ -77,15 +77,8 @@ class TransactionUI {
       this.updateAutoAdjustVisibility();
       this.updateFreeFundsVisibility();
     });
-    document.getElementById("transactionAllocate").addEventListener("change", () => {
-      this.syncAllocateState();
-      this.updateDrawAllocationVisibility();
-    });
     document.getElementById("transactionAutoCloseout").addEventListener("change", () => {
       this.syncAllocateState();
-    });
-    document.getElementById("transactionDrawAllocation").addEventListener("change", () => {
-      this.syncDrawState();
     });
     // The drawable recurring bucket depends on the transaction's date (the
     // soonest instance on/after it), so re-evaluate the dropdown when it
@@ -191,8 +184,8 @@ class TransactionUI {
 
     // Autocomplete is turned off for allocations — they aren't everyday
     // expenses and shouldn't be matched against the suggestion list.
-    const allocateCb = document.getElementById("transactionAllocate");
-    if (allocateCb && allocateCb.checked) {
+    const typeEl = document.getElementById("transactionType");
+    if (typeEl && typeEl.value === "allocation") {
       this.closeDescriptionSuggestions();
       return;
     }
@@ -333,13 +326,14 @@ class TransactionUI {
   }
 
   updateSettledToggleVisibility() {
-    const isExpense = document.getElementById("transactionType").value === "expense";
+    const type = document.getElementById("transactionType").value;
     const toggleGroup = document.getElementById("toggleGroup");
     if (toggleGroup) {
-      toggleGroup.style.display = isExpense ? "" : "none";
+      toggleGroup.style.display =
+        type === "expense" || type === "allocation" ? "" : "none";
     }
+    this.syncAllocateState();
     this.updateDrawAllocationVisibility();
-    this.updateCloseoutDateVisibility();
   }
 
 
@@ -355,12 +349,10 @@ class TransactionUI {
     if (!field || !input) return;
     const type = document.getElementById("transactionType").value;
     const recurrence = document.getElementById("transactionRecurrence").value;
-    const allocateCb = document.getElementById("transactionAllocate");
     const autoCloseoutCb = document.getElementById("transactionAutoCloseout");
     const applicable =
-      type === "expense" &&
+      type === "allocation" &&
       recurrence === "once" &&
-      allocateCb && allocateCb.checked &&
       autoCloseoutCb && autoCloseoutCb.checked;
     if (!applicable) {
       field.style.display = "none";
@@ -377,24 +369,21 @@ class TransactionUI {
   }
 
 
-  // Shows the "Draw from allocation" dropdown for one-time, non-allocated
-  // expenses and (re)populates it with each allocation's remaining balance.
-  // Hidden when there are no allocations to draw from.
+  // Shows the "Draw from allocation" dropdown for one-time expenses and
+  // (re)populates it with each allocation's remaining balance. Hidden when
+  // there are no allocations to draw from. Allocations themselves can't draw
+  // from another allocation, which the type select makes structural: the
+  // dropdown only appears for the plain "Expense" type.
   updateDrawAllocationVisibility() {
     const select = document.getElementById("transactionDrawAllocation");
     if (!select) return;
     const type = document.getElementById("transactionType").value;
     const recurrence = document.getElementById("transactionRecurrence").value;
-    const allocateCb = document.getElementById("transactionAllocate");
-    const isAllocated = allocateCb && allocateCb.checked;
 
-    // Drawing only applies to one-time expenses that aren't themselves
-    // allocations.
-    const applicable = type === "expense" && recurrence === "once" && !isAllocated;
+    const applicable = type === "expense" && recurrence === "once";
     if (!applicable) {
       select.style.display = "none";
       select.value = "";
-      this.syncDrawState();
       return;
     }
 
@@ -416,7 +405,6 @@ class TransactionUI {
     });
     select.value = previous && allocations.some((a) => a.id === previous) ? previous : "";
     select.style.display = allocations.length > 0 ? "" : "none";
-    this.syncDrawState();
   }
 
 
@@ -451,43 +439,24 @@ class TransactionUI {
   }
 
 
-  // Selecting an allocation to draw from and the "Allocate" checkbox are
-  // mutually exclusive — an allocation can't draw from another.
-  syncDrawState() {
-    const select = document.getElementById("transactionDrawAllocation");
-    const allocateCb = document.getElementById("transactionAllocate");
-    const allocateLabel = document.getElementById("allocateToggleLabel");
-    if (!select || !allocateCb || !allocateLabel) return;
-    const drawing = select.value !== "";
-    if (drawing && allocateCb.checked) {
-      allocateCb.checked = false;
-      this.syncAllocateState();
-    }
-    allocateCb.disabled = drawing;
-    allocateLabel.classList.toggle("is-disabled", drawing);
-  }
-
-
-  // When "Allocate" is checked, settlement no longer applies: the Settled
-  // toggle is disabled (and saving forces settled=true so the expense subtracts
-  // like a normal cleared expense rather than being carried as unsettled), the
-  // "Auto close-out" toggle is revealed, and the description autocomplete is
-  // suppressed.
+  // When the "Allocation" type is selected, settlement no longer applies: the
+  // Settled toggle is hidden (saving forces settled=true so the reserve
+  // subtracts like a normal cleared expense rather than being carried as
+  // unsettled), the "Auto close-out" toggle is revealed, and the description
+  // autocomplete is suppressed.
   //
   // Recurrence is available for any allocation, with two distinct flavors:
-  //   - Allocate + auto close-out → a fresh pinned, use-it-or-lose-it bucket
+  //   - Allocation + auto close-out → a fresh pinned, use-it-or-lose-it bucket
   //     each period that closes once its own date passes.
-  //   - Allocate only (no auto close-out) → a rolling bucket that stays live
+  //   - Allocation only (no auto close-out) → a rolling bucket that stays live
   //     across its period; each new instance closes the prior one (forfeiting
   //     any unspent remainder back to the balance).
   syncAllocateState() {
-    const allocateCb = document.getElementById("transactionAllocate");
-    const settledCb = document.getElementById("transactionSettled");
+    const typeEl = document.getElementById("transactionType");
     const settledLabel = document.getElementById("settledToggleLabel");
-    if (!allocateCb || !settledCb || !settledLabel) return;
-    const allocated = allocateCb.checked;
-    settledCb.disabled = allocated;
-    settledLabel.classList.toggle("is-disabled", allocated);
+    if (!typeEl || !settledLabel) return;
+    const allocated = typeEl.value === "allocation";
+    settledLabel.style.display = allocated ? "none" : "";
 
     // The auto close-out toggle only applies to allocations.
     const autoCloseoutCb = document.getElementById("transactionAutoCloseout");
@@ -497,16 +466,6 @@ class TransactionUI {
     }
     if (autoCloseoutCb && !allocated) {
       autoCloseoutCb.checked = false;
-    }
-
-    const recurrenceSelect = document.getElementById("transactionRecurrence");
-    if (recurrenceSelect) {
-      // Recurrence is allowed for any allocation flavor; only the balance type
-      // hides it. (autoCloseout no longer gates recurrence visibility.)
-      const type = document.getElementById("transactionType");
-      if (!type || type.value !== "balance") {
-        recurrenceSelect.style.display = "";
-      }
     }
 
     if (allocated) {
@@ -519,17 +478,17 @@ class TransactionUI {
 
   // The "Suggest amount from spending history" opt-in only applies to
   // recurring allocations (floor suggestions are computed per series from
-  // period demand history), so it's shown only when Allocate is checked AND a
-  // recurrence is selected. Hiding also unchecks, so a form left in another
-  // state can't silently carry the flag onto a save.
+  // period demand history), so it's shown only when the Allocation type is
+  // selected AND a recurrence is chosen. Hiding also unchecks, so a form left
+  // in another state can't silently carry the flag onto a save.
   updateAutoAdjustVisibility() {
     const label = document.getElementById("autoAdjustToggleLabel");
     const cb = document.getElementById("transactionAutoAdjust");
     if (!label || !cb) return;
-    const allocateCb = document.getElementById("transactionAllocate");
+    const typeEl = document.getElementById("transactionType");
     const recurrence = document.getElementById("transactionRecurrence");
     const applies =
-      allocateCb && allocateCb.checked &&
+      typeEl && typeEl.value === "allocation" &&
       recurrence && recurrence.value !== "once";
     label.style.display = applies ? "" : "none";
     if (!applies) {
@@ -539,17 +498,17 @@ class TransactionUI {
 
   // The "free funds" designation only applies to recurring allocations (the
   // series' live bucket stands in for calendar balances), so the toggle
-  // follows the same visibility rule as auto-adjust: Allocate checked AND a
-  // recurrence selected. Hiding also unchecks so a stale state can't carry
-  // the flag onto a save.
+  // follows the same visibility rule as auto-adjust: the Allocation type
+  // selected AND a recurrence chosen. Hiding also unchecks so a stale state
+  // can't carry the flag onto a save.
   updateFreeFundsVisibility() {
     const label = document.getElementById("freeFundsToggleLabel");
     const cb = document.getElementById("transactionFreeFunds");
     if (!label || !cb) return;
-    const allocateCb = document.getElementById("transactionAllocate");
+    const typeEl = document.getElementById("transactionType");
     const recurrence = document.getElementById("transactionRecurrence");
     const applies =
-      allocateCb && allocateCb.checked &&
+      typeEl && typeEl.value === "allocation" &&
       recurrence && recurrence.value !== "once";
     label.style.display = applies ? "" : "none";
     if (!applies) {
@@ -694,22 +653,18 @@ class TransactionUI {
       transactionSettled.checked = true;
       transactionSettled.disabled = false;
     }
-    const settledToggleLabel = document.getElementById("settledToggleLabel");
-    if (settledToggleLabel) settledToggleLabel.classList.remove("is-disabled");
 
-    // Clear the Allocate toggle so its hidden-recurrence / autocomplete-off
-    // state doesn't linger into the next time the add form opens.
-    const transactionAllocate = document.getElementById("transactionAllocate");
-    if (transactionAllocate) {
-      transactionAllocate.checked = false;
-      transactionAllocate.disabled = false;
+    // Reset an abandoned Allocation entry back to a plain expense so its
+    // autocomplete-off / auto-close-out state doesn't linger into the next
+    // time the add form opens.
+    const transactionTypeEl = document.getElementById("transactionType");
+    if (transactionTypeEl && transactionTypeEl.value === "allocation") {
+      transactionTypeEl.value = "expense";
     }
     const transactionAutoCloseout = document.getElementById("transactionAutoCloseout");
     if (transactionAutoCloseout) transactionAutoCloseout.checked = false;
     const transactionCloseoutDate = document.getElementById("transactionCloseoutDate");
     if (transactionCloseoutDate) transactionCloseoutDate.value = "";
-    const allocateToggleLabel = document.getElementById("allocateToggleLabel");
-    if (allocateToggleLabel) allocateToggleLabel.classList.remove("is-disabled");
     this.syncAllocateState();
 
     const advancedOptions = document.getElementById("advancedRecurrenceOptions");
@@ -797,6 +752,7 @@ class TransactionUI {
       transactionType.innerHTML = `
         <option value="expense">Expense</option>
         <option value="income">Income</option>
+        <option value="allocation">Allocation</option>
         <option value="balance">Balance</option>
       `;
       const transactions = this.store.getTransactions();
@@ -2169,7 +2125,12 @@ class TransactionUI {
 
       const date = dateElement.value;
       const amount = parseFloat(amountElement.value);
-      const type = typeElement.value;
+      // "Allocation" is a form-level type only: it persists as an expense with
+      // the allocated flag, so the stored data model (and every balance-walk
+      // path reading it) is unchanged.
+      const rawType = typeElement.value;
+      const type = rawType === "allocation" ? "expense" : rawType;
+      const allocated = rawType === "allocation";
       const description = descriptionElement.value;
       const recurrence = recurrenceElement.value;
       if (!date || isNaN(amount)) {
@@ -2232,7 +2193,6 @@ class TransactionUI {
           description: description,
         };
         if (type === "expense") {
-          const allocated = document.getElementById("transactionAllocate").checked;
           newTransaction.allocated = allocated;
           // Allocated expenses always count as cleared (never carried unsettled).
           newTransaction.settled = allocated
@@ -2281,7 +2241,6 @@ class TransactionUI {
           recurrence: recurrence,
         };
         if (type === "expense") {
-          const allocated = document.getElementById("transactionAllocate").checked;
           newRecurringTransaction.allocated = allocated;
           newRecurringTransaction.settled = allocated
             ? true
@@ -2335,8 +2294,11 @@ class TransactionUI {
       document.getElementById("transactionRecurrence").value = "once";
       document.getElementById("transactionSettled").checked = true;
       document.getElementById("transactionSettled").disabled = false;
-      document.getElementById("transactionAllocate").checked = false;
-      document.getElementById("transactionAllocate").disabled = false;
+      // After saving an allocation, drop the form back to a plain expense so
+      // the next add doesn't silently create another allocation.
+      if (rawType === "allocation") {
+        typeElement.value = "expense";
+      }
       document.getElementById("transactionAutoCloseout").checked = false;
       document.getElementById("autoCloseoutToggleLabel").style.display = "none";
       document.getElementById("transactionAutoAdjust").checked = false;
@@ -2345,8 +2307,7 @@ class TransactionUI {
       document.getElementById("freeFundsToggleLabel").style.display = "none";
       document.getElementById("transactionCloseoutDate").value = "";
       document.getElementById("closeoutDateField").style.display = "none";
-      document.getElementById("settledToggleLabel").classList.remove("is-disabled");
-      document.getElementById("allocateToggleLabel").classList.remove("is-disabled");
+      document.getElementById("settledToggleLabel").style.display = "";
       const drawSelect = document.getElementById("transactionDrawAllocation");
       drawSelect.value = "";
       drawSelect.style.display = "none";
@@ -2370,7 +2331,9 @@ class TransactionUI {
           ? "balance set"
           : type === "income"
             ? "income"
-            : "expense";
+            : allocated
+              ? "allocation"
+              : "expense";
       Utils.showNotification(
         `Successfully added ${typeText} of $${amount.toFixed(2)}`
       );

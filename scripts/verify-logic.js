@@ -2539,7 +2539,6 @@ console.log("TEST 36: Add Form Rejects Unexpandable Custom Interval / NaN Variab
       transactionType: { value: "expense" },
       transactionDescription: { value: "Sub" },
       transactionSettled: { checked: true },
-      transactionAllocate: { checked: false },
     };
 
     // Case 1: custom recurrence with interval 0 must be rejected, nothing saved.
