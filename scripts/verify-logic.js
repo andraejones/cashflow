@@ -62,6 +62,10 @@ const files = [
   'calculation-service.js',
   'cloud-sync.js',
   'debt-snowball.js',
+  // DebtSnowballUI prototype companions (class file must load first)
+  'debt-snowball-engine.js',
+  'debt-snowball-payments.js',
+  'debt-snowball-render.js',
   'bank-reconcile.js'
 ];
 
