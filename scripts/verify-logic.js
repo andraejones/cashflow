@@ -36,7 +36,13 @@ global.Utils = {
   // No-op UI helpers so headless tests can drive UI-adjacent methods
   // (e.g. BankReconcileUI._shiftSeries) that fire notifications.
   showNotification: () => {},
-  formatDisplayDate: (str) => str
+  formatDisplayDate: (str) => str,
+  escapeHtml: (str) => String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
 };
 // Minimal ModalManager stub — bank-reconcile references it only in show/hide,
 // which these tests never call, but the stub keeps accidental calls harmless.

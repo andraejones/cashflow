@@ -1787,13 +1787,10 @@ class BankReconcileUI {
   }
 
   _esc(str) {
-    return String(str)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
+    return Utils.escapeHtml(str);
   }
 
   _attr(str) {
-    return this._esc(str).replace(/"/g, "&quot;");
+    return Utils.escapeHtml(str);
   }
 }
