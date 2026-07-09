@@ -3,6 +3,6 @@
   "private": true,
   "description": "Offline-first personal finance calendar. No build step; open index.html directly.",
   "scripts": {
-    "test": "node scripts/verify-logic.js"
+    "test": "node scripts/verify-logic.js && node scripts/verify-walk-parity.js"
   }
 }
