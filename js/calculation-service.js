@@ -341,25 +341,158 @@ class CalculationService {
     return result;
   }
 
-  getRunningBalanceForDate(dateString) {
-    const [year, month, day] = dateString.split("-").map(Number);
-    const summary = this.calculateMonthlySummary(year, month - 1);
-    let runningBalance = summary.startingBalance;
+  // THE shared day-by-day running-balance walk. Every balance path in the app
+  // (monthly balances, running balance, day breakdown, 30-day minimum, the
+  // calendar's display and min/crisis loops) must step through days via this
+  // method so the canonical rules live in exactly one place:
+  //   - normal day:  balance += income − expense
+  //   - Ending Balance day (reconciliation anchor): balance RESETS to the
+  //     entered figure minus getReservedTotalOnOrBefore(date) (allocation
+  //     reserves stay reserved across the anchor), the carried-unsettled
+  //     accumulator resets to 0, and the allocation accumulator resets to the
+  //     reserved total. The day's own income/expense are NOT re-applied — the
+  //     entered figure already reconciles same-day activity.
+  // Walks [startDateString, endDateString] inclusive; if start > end it runs
+  // zero iterations and returns the seeds unchanged. Never invalidates caches;
+  // callers own invalidation. `ensureRecurringExpansion` expands each month
+  // once, immediately before computing that month's first day.
+  // See [[balance-walk-paths]].
+  walkDays(startDateString, endDateString, {
+    seedBalance,
+    seedUnsettled = 0,
+    seedAllocated = 0,
+    trackUnsettled = false,
+    trackAllocations = false,
+    ensureRecurringExpansion = false,
+    onDay = null,
+  }) {
+    let balance = this.roundToCents(seedBalance);
+    let unsettledCarry = this.roundToCents(seedUnsettled);
+    let allocatedCarry = this.roundToCents(seedAllocated);
+    let lastDailyTotals = null;
 
-    for (let d = 1; d <= day; d++) {
-      const ds = `${year}-${String(month).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-      const dailyTotals = this.calculateDailyTotals(ds);
-      if (dailyTotals.balance !== null) {
-        // Ending Balance = gross bank total; keep allocation reserves reserved
-        // by subtracting still-live reserves dated on/before this anchor.
-        runningBalance = this.roundToCents(
-          dailyTotals.balance - this.getReservedTotalOnOrBefore(ds)
-        );
-      } else {
-        runningBalance = this.roundToCents(runningBalance + dailyTotals.income - dailyTotals.expense);
+    if (startDateString <= endDateString) {
+      const [sy, sm, sd] = startDateString.split("-").map(Number);
+      const [ey, em, ed] = endDateString.split("-").map(Number);
+      const startMid = new Date(sy, sm - 1, sd, 12, 0, 0);
+      const endMid = new Date(ey, em - 1, ed, 12, 0, 0);
+      const dayCount = Math.round((endMid - startMid) / 86400000);
+      const expandedMonths = ensureRecurringExpansion ? new Set() : null;
+
+      for (let i = 0; i <= dayCount; i++) {
+        const cursor = new Date(sy, sm - 1, sd + i, 12, 0, 0);
+        const year = cursor.getFullYear();
+        const month = cursor.getMonth() + 1;
+        const day = cursor.getDate();
+        const dateString = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+
+        if (expandedMonths) {
+          const monthKey = `${year}-${month}`;
+          if (!expandedMonths.has(monthKey)) {
+            this.recurringManager.applyRecurringTransactions(year, month - 1);
+            expandedMonths.add(monthKey);
+          }
+        }
+
+        const dailyTotals = this.calculateDailyTotals(dateString);
+        lastDailyTotals = dailyTotals;
+        const isAnchor = dailyTotals.balance !== null;
+        let reservedOnOrBefore = null;
+        if (isAnchor) {
+          reservedOnOrBefore = this.getReservedTotalOnOrBefore(dateString);
+          balance = this.roundToCents(dailyTotals.balance - reservedOnOrBefore);
+          if (trackUnsettled) unsettledCarry = 0;
+          if (trackAllocations) allocatedCarry = reservedOnOrBefore;
+        } else {
+          balance = this.roundToCents(balance + dailyTotals.income - dailyTotals.expense);
+          if (trackUnsettled) {
+            unsettledCarry = this.roundToCents(unsettledCarry + dailyTotals.unsettledExpense);
+          }
+          if (trackAllocations) {
+            allocatedCarry = this.roundToCents(allocatedCarry + dailyTotals.allocatedExpense);
+          }
+        }
+
+        if (onDay) {
+          const keepGoing = onDay({
+            dateString, year, month, day,
+            dailyTotals, isAnchor, reservedOnOrBefore,
+            balance, unsettledCarry, allocatedCarry,
+          });
+          if (keepGoing === false) break;
+        }
       }
     }
-    return runningBalance;
+
+    return { balance, unsettledCarry, allocatedCarry, lastDailyTotals };
+  }
+
+  // Seeds for walking a month from its first day: the month's starting balance
+  // plus (optionally) the carried-forward accumulators. Unsettled carry counts
+  // only unsettled items after the most recent anchor strictly before the
+  // month (an Ending Balance reconciles everything on/before it); allocation
+  // reserves persist across anchors, so their carry is every live bucket dated
+  // before the month regardless of anchors.
+  getMonthSeed(year, month0, { trackUnsettled = false, trackAllocations = false } = {}) {
+    const summary = this.calculateMonthlySummary(year, month0);
+    const monthStartStr = `${year}-${String(month0 + 1).padStart(2, "0")}-01`;
+
+    let unsettledCarry = 0;
+    if (trackUnsettled) {
+      const carryAnchor = this.getReconciliationAnchor(monthStartStr, { inclusive: false });
+      for (const u of this.store.getUnsettledTransactions()) {
+        if (u.date < monthStartStr && (carryAnchor === null || u.date > carryAnchor)) {
+          unsettledCarry = this.roundToCents(unsettledCarry + u.transaction.amount);
+        }
+      }
+    }
+
+    let allocatedCarry = 0;
+    if (trackAllocations) {
+      const prevMonthLastDay = Utils.formatDateString(new Date(year, month0, 0, 12, 0, 0));
+      allocatedCarry = this.getReservedTotalOnOrBefore(prevMonthLastDay);
+    }
+
+    return { balance: summary.startingBalance, unsettledCarry, allocatedCarry };
+  }
+
+  // The calendar cell's expense figure. The current day is "live": it shows its
+  // own activity (settled + pending) PLUS every unsettled item carried forward
+  // from earlier days, which sit on today until settled. Every other day counts
+  // settled spend only. `unsettledCarryAfterDay` is the walk's accumulator
+  // AFTER the day (it already includes the day's own unsettled, so the day's
+  // portion is subtracted to isolate the carried-forward slice; the clamp
+  // guards the reconciliation-anchor reset case).
+  getCellExpense(dailyTotals, unsettledCarryAfterDay, isCurrentDay) {
+    const carriedForwardUnsettled = Math.max(
+      0,
+      this.roundToCents(unsettledCarryAfterDay - dailyTotals.unsettledExpense)
+    );
+    const cellExpense = isCurrentDay
+      ? this.roundToCents(dailyTotals.expense + carriedForwardUnsettled)
+      : this.roundToCents(dailyTotals.expense - dailyTotals.unsettledExpense);
+    return { carriedForwardUnsettled, cellExpense };
+  }
+
+  // Unsettled expenses carried forward onto `boundaryDateString`: everything
+  // unsettled dated before it and after the most recent anchor on/before it
+  // (inclusive bound — an anchor ON the boundary reconciles the whole past).
+  // Shared by the calendar agenda's carried list and the day-detail modal's
+  // "UNSETTLED (CARRIED FORWARD)" section.
+  getCarriedUnsettledList(boundaryDateString) {
+    const anchor = this.getReconciliationAnchor(boundaryDateString, { inclusive: true });
+    return this.store.getUnsettledTransactions().filter(
+      (u) => u.date < boundaryDateString && (anchor === null || u.date > anchor)
+    );
+  }
+
+  getRunningBalanceForDate(dateString) {
+    const [year, month] = dateString.split("-").map(Number);
+    const summary = this.calculateMonthlySummary(year, month - 1);
+    const monthStartStr = `${year}-${String(month).padStart(2, "0")}-01`;
+    return this.walkDays(monthStartStr, dateString, {
+      seedBalance: summary.startingBalance,
+    }).balance;
   }
 
   // Full per-day balance breakdown for a single date, mirroring the figures the
@@ -539,47 +672,26 @@ class CalculationService {
     this.invalidateCache();
 
     const summary = this.calculateMonthlySummary(todayYear, todayMonth);
-    let runningBalance = summary.startingBalance;
+    const monthStartStr = `${todayYear}-${String(todayMonth + 1).padStart(2, "0")}-01`;
+    const todayStr = Utils.formatDateString(todayMidday);
+    const balanceToday = this.walkDays(monthStartStr, todayStr, {
+      seedBalance: summary.startingBalance,
+    }).balance;
 
-    for (let day = 1; day <= todayDay; day++) {
-      const dateString = `${todayYear}-${String(todayMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-      const dailyTotals = this.calculateDailyTotals(dateString);
-      if (dailyTotals.balance !== null) {
-        runningBalance = this.roundToCents(
-          dailyTotals.balance - this.getReservedTotalOnOrBefore(dateString)
-        );
-      } else {
-        runningBalance = this.roundToCents(runningBalance + dailyTotals.income - dailyTotals.expense);
-      }
-    }
-
-    let minBalance = runningBalance;
-    const expandedMonths = new Set();
-    for (let i = 1; i <= horizonDays; i++) {
-      const futureDate = new Date(todayYear, todayMonth, todayDay + i, 12, 0, 0);
-      const futureYear = futureDate.getFullYear();
-      const futureMonth = futureDate.getMonth();
-      const futureDay = futureDate.getDate();
-      const dateString = `${futureYear}-${String(futureMonth + 1).padStart(2, "0")}-${String(futureDay).padStart(2, "0")}`;
-
-      const monthKey = `${futureYear}-${futureMonth}`;
-      if (!expandedMonths.has(monthKey)) {
-        this.recurringManager.applyRecurringTransactions(futureYear, futureMonth);
-        expandedMonths.add(monthKey);
-      }
-
-      const dailyTotals = this.calculateDailyTotals(dateString);
-      if (dailyTotals.balance !== null) {
-        runningBalance = this.roundToCents(
-          dailyTotals.balance - this.getReservedTotalOnOrBefore(dateString)
-        );
-      } else {
-        runningBalance = this.roundToCents(runningBalance + dailyTotals.income - dailyTotals.expense);
-      }
-      if (runningBalance < minBalance) {
-        minBalance = runningBalance;
-      }
-    }
+    let minBalance = balanceToday;
+    const tomorrowStr = Utils.formatDateString(
+      new Date(todayYear, todayMonth, todayDay + 1, 12, 0, 0)
+    );
+    const horizonEndStr = Utils.formatDateString(
+      new Date(todayYear, todayMonth, todayDay + horizonDays, 12, 0, 0)
+    );
+    this.walkDays(tomorrowStr, horizonEndStr, {
+      seedBalance: balanceToday,
+      ensureRecurringExpansion: true,
+      onDay: (r) => {
+        if (r.balance < minBalance) minBalance = r.balance;
+      },
+    });
 
     return minBalance;
   }
@@ -614,68 +726,32 @@ class CalculationService {
     const todayMonth = today.getMonth();
     const todayDay = today.getDate();
 
-    // Get the starting balance for the current month using the same method as the calendar
+    // Balance at end of today (walked from the month start), then track the
+    // minimum from today (inclusive) through the next 30 days. The forward leg
+    // expands recurring transactions month-by-month as it crosses them.
     const summary = this.calculateMonthlySummary(todayYear, todayMonth);
-    let runningBalance = summary.startingBalance;
+    const monthStartStr = `${todayYear}-${String(todayMonth + 1).padStart(2, "0")}-01`;
+    const todayStr = Utils.formatDateString(
+      new Date(todayYear, todayMonth, todayDay, 12, 0, 0)
+    );
+    const balanceToday = this.walkDays(monthStartStr, todayStr, {
+      seedBalance: summary.startingBalance,
+    }).balance;
 
-    // Calculate running balance up to and including today. An Ending Balance is
-    // a reconciliation anchor (shown as entered); unsettled expenses reduce the
-    // balance only via normal expense subtraction on their own day.
-    for (let day = 1; day <= todayDay; day++) {
-      const dateString = `${todayYear}-${String(todayMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-      const dailyTotals = this.calculateDailyTotals(dateString);
-
-      if (dailyTotals.balance !== null) {
-        // Ending Balance = gross bank total; keep allocation reserves reserved
-        // by subtracting still-live reserves dated on/before this anchor.
-        runningBalance = this.roundToCents(
-          dailyTotals.balance - this.getReservedTotalOnOrBefore(dateString)
-        );
-      } else {
-        runningBalance = this.roundToCents(runningBalance + dailyTotals.income - dailyTotals.expense);
-      }
-    }
-
-    // Track minimum balance from today through next 30 days
-    let minBalance = runningBalance;
-
-    // Now iterate through the next 30 days (starting from tomorrow).
-    // Track which (year, month) pairs we've already expanded so we don't
-    // re-run applyRecurringTransactions on every day of the same month.
-    const expandedMonths = new Set();
-    for (let i = 1; i <= 30; i++) {
-      const futureDate = new Date(todayYear, todayMonth, todayDay + i, 12, 0, 0);
-      const futureYear = futureDate.getFullYear();
-      const futureMonth = futureDate.getMonth();
-      const futureDay = futureDate.getDate();
-
-      // If we've crossed into a new month, we need to properly continue the running balance
-      // The running balance carries over from the previous day, we just add income/expense for each day
-      const dateString = `${futureYear}-${String(futureMonth + 1).padStart(2, "0")}-${String(futureDay).padStart(2, "0")}`;
-
-      // Make sure recurring transactions are applied for this month — once per month.
-      const monthKey = `${futureYear}-${futureMonth}`;
-      if (!expandedMonths.has(monthKey)) {
-        this.recurringManager.applyRecurringTransactions(futureYear, futureMonth);
-        expandedMonths.add(monthKey);
-      }
-
-      const dailyTotals = this.calculateDailyTotals(dateString);
-
-      if (dailyTotals.balance !== null) {
-        // Ending Balance = gross bank total; keep allocation reserves reserved
-        // by subtracting still-live reserves dated on/before this anchor.
-        runningBalance = this.roundToCents(
-          dailyTotals.balance - this.getReservedTotalOnOrBefore(dateString)
-        );
-      } else {
-        runningBalance = this.roundToCents(runningBalance + dailyTotals.income - dailyTotals.expense);
-      }
-
-      if (runningBalance < minBalance) {
-        minBalance = runningBalance;
-      }
-    }
+    let minBalance = balanceToday;
+    const tomorrowStr = Utils.formatDateString(
+      new Date(todayYear, todayMonth, todayDay + 1, 12, 0, 0)
+    );
+    const endStr = Utils.formatDateString(
+      new Date(todayYear, todayMonth, todayDay + 30, 12, 0, 0)
+    );
+    this.walkDays(tomorrowStr, endStr, {
+      seedBalance: balanceToday,
+      ensureRecurringExpansion: true,
+      onDay: (r) => {
+        if (r.balance < minBalance) minBalance = r.balance;
+      },
+    });
 
     return minBalance;
   }
