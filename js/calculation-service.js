@@ -503,61 +503,27 @@ class CalculationService {
   // Kept here so the day-detail modal reuses the same walk instead of
   // re-deriving it. See [[balance-walk-paths]].
   getDayBalanceBreakdown(dateString) {
-    const [year, month, day] = dateString.split("-").map(Number);
-    const summary = this.calculateMonthlySummary(year, month - 1);
-    let runningBalance = summary.startingBalance;
-
-    // Carry unsettled expenses forward from prior months. An Ending Balance
-    // reconciles everything dated on/before it, so only unsettled items after
-    // the most recent anchor before this month still carry in.
+    const [year, month] = dateString.split("-").map(Number);
     const monthStartStr = `${year}-${String(month).padStart(2, "0")}-01`;
-    const allUnsettled = this.store.getUnsettledTransactions();
-    const carryAnchor = this.getReconciliationAnchor(monthStartStr, { inclusive: false });
-    let runningUnsettledExpense = 0;
-    for (const u of allUnsettled) {
-      if (u.date < monthStartStr && (carryAnchor === null || u.date > carryAnchor)) {
-        runningUnsettledExpense = this.roundToCents(
-          runningUnsettledExpense + u.transaction.amount
-        );
-      }
-    }
-
-    // Carry allocation reserves forward from prior months. Unlike unsettled,
-    // reserves persist across Ending Balances, so include every live bucket
-    // regardless of anchors (skip-aware, matching calculateDailyTotals).
-    let runningAllocatedExpense = 0;
-    const allTransactions = this.store.getTransactions();
-    Object.keys(allTransactions).forEach((d) => {
-      if (d >= monthStartStr) return;
-      allTransactions[d].forEach((t) => {
-        if (t.type !== "expense" || t.allocated !== true) return;
-        if (
-          t.recurringId &&
-          this.recurringManager.isTransactionSkipped(d, t.recurringId)
-        ) {
-          return;
-        }
-        runningAllocatedExpense = this.roundToCents(
-          runningAllocatedExpense + t.amount
-        );
-      });
+    const seed = this.getMonthSeed(year, month - 1, {
+      trackUnsettled: true,
+      trackAllocations: true,
     });
-
-    let dailyTotals = null;
-    for (let d = 1; d <= day; d++) {
-      const ds = `${year}-${String(month).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-      dailyTotals = this.calculateDailyTotals(ds);
-      if (dailyTotals.balance !== null) {
-        const reservedOnOrBefore = this.getReservedTotalOnOrBefore(ds);
-        runningBalance = this.roundToCents(dailyTotals.balance - reservedOnOrBefore);
-        runningUnsettledExpense = 0;
-        runningAllocatedExpense = reservedOnOrBefore;
-      } else {
-        runningBalance = this.roundToCents(runningBalance + dailyTotals.income - dailyTotals.expense);
-        runningUnsettledExpense = this.roundToCents(runningUnsettledExpense + dailyTotals.unsettledExpense);
-        runningAllocatedExpense = this.roundToCents(runningAllocatedExpense + dailyTotals.allocatedExpense);
-      }
-    }
+    const walk = this.walkDays(monthStartStr, dateString, {
+      seedBalance: seed.balance,
+      seedUnsettled: seed.unsettledCarry,
+      seedAllocated: seed.allocatedCarry,
+      trackUnsettled: true,
+      trackAllocations: true,
+    });
+    const runningBalance = walk.balance;
+    const runningUnsettledExpense = walk.unsettledCarry;
+    const runningAllocatedExpense = walk.allocatedCarry;
+    // monthStart <= dateString always holds, so the walk saw at least one day;
+    // the fallback only guards malformed input.
+    const dailyTotals = walk.lastDailyTotals || {
+      income: 0, expense: 0, unsettledExpense: 0, allocatedExpense: 0, balance: null,
+    };
 
     const balanceWithoutUnsettled = runningUnsettledExpense > 0
       ? this.roundToCents(
@@ -568,20 +534,13 @@ class CalculationService {
       ? this.roundToCents(runningBalance + runningAllocatedExpense)
       : null;
 
-    // On the current day the cell's expense figure folds in unsettled items
-    // carried forward from earlier days (they sit on today until settled);
-    // every other day shows settled spend only.
     const todayStr = Utils.formatDateString(new Date());
     const isCurrentDay = dateString === todayStr;
-    const carriedForwardUnsettled = Math.max(
-      0,
-      this.roundToCents(runningUnsettledExpense - (dailyTotals ? dailyTotals.unsettledExpense : 0))
+    const { cellExpense } = this.getCellExpense(
+      dailyTotals,
+      runningUnsettledExpense,
+      isCurrentDay
     );
-    const cellExpense = isCurrentDay
-      ? this.roundToCents((dailyTotals ? dailyTotals.expense : 0) + carriedForwardUnsettled)
-      : this.roundToCents(
-          (dailyTotals ? dailyTotals.expense : 0) - (dailyTotals ? dailyTotals.unsettledExpense : 0)
-        );
 
     const transactions = this.store.getTransactions();
     const transactionCount = transactions[dateString]
@@ -589,7 +548,7 @@ class CalculationService {
       : 0;
 
     return {
-      income: this.roundToCents(dailyTotals ? dailyTotals.income : 0),
+      income: this.roundToCents(dailyTotals.income),
       expense: cellExpense,
       balance: runningBalance,
       balanceWithoutUnsettled,
