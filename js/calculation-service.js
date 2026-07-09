@@ -181,74 +181,32 @@ class CalculationService {
     let previousBalance = 0;
     allMonths.forEach((monthKey, index) => {
       const [year, month] = monthKey.split("-").map(Number);
-      let monthIncome = 0;
-      let monthExpense = 0;
-      let runningBalance = previousBalance;
-      let firstDayBalance = null;
       const isFirstMonth = index === 0;
       const daysInMonth = new Date(year, month, 0).getDate();
-      for (let day = 1; day <= daysInMonth; day++) {
-        const dateString = Utils.formatDateString(new Date(year, month - 1, day, 12, 0, 0));
+      const firstDayStr = `${monthKey}-01`;
+      const lastDayStr = `${monthKey}-${String(daysInMonth).padStart(2, "0")}`;
 
-        if (transactions[dateString]) {
-          let balanceSet = false;
-          let dailyBalance = runningBalance;
-          transactions[dateString].forEach((t) => {
-            if (t.type === "balance") {
-              balanceSet = true;
-              dailyBalance = t.amount;
-            }
-          });
-          if (balanceSet) {
-            // An Ending Balance is the gross bank total, shown as-is for
-            // unsettled purposes (those on/before are reconciled). Allocation
-            // reserves, however, stay reserved across the anchor: subtract every
-            // still-live reserve dated on/before it so the running balance is
-            // available-after-reserves.
-            dailyBalance = this.roundToCents(
-              dailyBalance - this.getReservedTotalOnOrBefore(dateString)
-            );
-          }
-          if (day === 1 && balanceSet) {
-            firstDayBalance = dailyBalance;
-          }
-          // Only apply income/expense if no balance transaction was set
-          // "Ending Balance" means that IS the final balance for the day
-          if (!balanceSet) {
-            transactions[dateString].forEach((t) => {
-              const isSkipped =
-                t.recurringId &&
-                this.recurringManager.isTransactionSkipped(
-                  dateString,
-                  t.recurringId
-                );
+      // A month that OPENS on an Ending Balance anchors its own starting
+      // balance (the anchor-adjusted figure), instead of inheriting the prior
+      // month's close.
+      let firstDayBalance = null;
+      const result = this.walkDays(firstDayStr, lastDayStr, {
+        seedBalance: previousBalance,
+        onDay: (r) => {
+          if (r.day === 1 && r.isAnchor) firstDayBalance = r.balance;
+        },
+      });
 
-              if (!isSkipped) {
-                if (t.type === "income") {
-                  monthIncome = this.roundToCents(monthIncome + t.amount);
-                  dailyBalance = this.roundToCents(dailyBalance + t.amount);
-                } else if (t.type === "expense") {
-                  monthExpense = this.roundToCents(monthExpense + t.amount);
-                  dailyBalance = this.roundToCents(dailyBalance - t.amount);
-                }
-              }
-            });
-          }
-
-          runningBalance = dailyBalance;
-        }
-      }
-      if (firstDayBalance !== null) {
-        monthlyBalances[monthKey] = {
-          startingBalance: this.roundToCents(firstDayBalance),
-          endingBalance: this.roundToCents(runningBalance),
-        };
-      } else {
-        monthlyBalances[monthKey] = {
-          startingBalance: this.roundToCents(isFirstMonth ? 0 : previousBalance),
-          endingBalance: this.roundToCents(runningBalance),
-        };
-      }
+      monthlyBalances[monthKey] = {
+        startingBalance: this.roundToCents(
+          firstDayBalance !== null
+            ? firstDayBalance
+            : isFirstMonth
+              ? 0
+              : previousBalance
+        ),
+        endingBalance: this.roundToCents(result.balance),
+      };
       previousBalance = monthlyBalances[monthKey].endingBalance;
     });
     // derived data (monthlyBalances) is updated in memory, no need to persist to disk on every view
