@@ -58,6 +58,10 @@ const vm = require('vm');
 const jsDir = path.join(__dirname, '../js');
 const files = [
   'transaction-store.js',
+  // TransactionStore prototype companions (class file must load first)
+  'transaction-store-persistence.js',
+  'transaction-store-domains.js',
+  'transaction-store-allocations.js',
   'recurring-manager.js',
   'calculation-service.js',
   'cloud-sync.js',

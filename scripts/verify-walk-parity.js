@@ -57,7 +57,15 @@ global.ModalManager = { openModal: () => {}, closeModal: () => {}, topModal: () 
 
 const vm = require('vm');
 const jsDir = path.join(__dirname, '../js');
-['transaction-store.js', 'recurring-manager.js', 'calculation-service.js'].forEach((file) => {
+[
+  'transaction-store.js',
+  // TransactionStore prototype companions (class file must load first)
+  'transaction-store-persistence.js',
+  'transaction-store-domains.js',
+  'transaction-store-allocations.js',
+  'recurring-manager.js',
+  'calculation-service.js',
+].forEach((file) => {
   vm.runInThisContext(fs.readFileSync(path.join(jsDir, file), 'utf8'));
 });
 

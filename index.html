@@ -491,6 +491,11 @@
   <script src="js/utils.js"></script>
 
   <script src="js/transaction-store.js"></script>
+  <!-- TransactionStore prototype companions — must load after transaction-store.js
+       and before anything instantiates the store (app.js) -->
+  <script src="js/transaction-store-persistence.js"></script>
+  <script src="js/transaction-store-domains.js"></script>
+  <script src="js/transaction-store-allocations.js"></script>
   <script src="js/recurring-manager.js"></script>
   <script src="js/calculation-service.js"></script>
 
