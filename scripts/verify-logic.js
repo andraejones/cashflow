@@ -3015,6 +3015,73 @@ console.log("TEST 43: Free-Funds Cushion Absorbs The 30-Day Shortfall, Never Dou
   console.log("✅ Healthy trough leaves free funds untouched; negative trough is held back so the shown low bottoms at 0");
 }
 
+// TEST 44: Snowball projection subtracts allocation reserves at Ending Balance
+// anchors, matching every CalculationService walk path. Previously the
+// projection reset checking to the RAW entered figure, silently un-reserving
+// allocation buckets and (with a future-dated anchor) pulling payoffs earlier.
+console.log("TEST 44: Snowball Projection Reserves Survive A Future Anchor");
+{
+  const SA_RealDate = Date;
+  const SA_FIXED_TODAY = new SA_RealDate(2026, 5, 10, 12, 0, 0); // 2026-06-10
+  class SA_FrozenDate extends SA_RealDate {
+    constructor(...args) {
+      if (args.length === 0) { super(SA_FIXED_TODAY.getTime()); } else { super(...args); }
+    }
+    static now() { return SA_FIXED_TODAY.getTime(); }
+  }
+  global.Date = SA_FrozenDate;
+  try {
+    const s = new TransactionStore();
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    const calc = new CalculationService(s, rm);
+    const ui = Object.create(DebtSnowballUI.prototype);
+    ui.store = s;
+    ui.recurringManager = rm;
+    ui.calculationService = calc;
+    ui.daySpecificOptions = [];
+
+    // $500 reserved before the projection window; a $5000 Ending Balance lands
+    // mid-projection (2026-06-20 > projection start 06-11). Salary keeps the
+    // account funded so the payoff eventually happens.
+    s.addTransaction("2026-06-05", {
+      amount: 500, type: "expense", description: "Reserve", allocated: true, settled: true,
+    });
+    s.addTransaction("2026-06-20", {
+      amount: 5000, type: "balance", description: "Ending Balance",
+    });
+    s.addRecurringTransaction({
+      startDate: "2026-06-01", amount: 2000, type: "income",
+      description: "Salary", recurrence: "monthly",
+    });
+    const debtId = s.addDebt({
+      name: "Card", balance: 4600, minPayment: 50, dueDay: 25,
+      recurrence: "monthly", interestRate: 0, dueStartDate: "2026-06-25",
+    });
+    ui.ensureMinimumPaymentRecurring(s.getDebts().find((d) => d.id === debtId));
+    s.setDebtSnowballSettings({ dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false });
+
+    const proj = ui.calculateSnowballProjection(2026, 5, true);
+    const p = proj.payoffByDebtId[debtId];
+    if (!p) throw new Error("Debt should eventually be paid off in the projection");
+    // With reserves surviving the anchor, checking on 06-20 is 4500 — NOT
+    // enough for the $4,600 payoff (raw-anchor behavior paid off in June).
+    // July's salary tops it up, so the payoff lands in July.
+    if (p.year === 2026 && p.month === 5) {
+      throw new Error(
+        "Payoff landed in June: the projection used the raw anchor figure (reserves were absorbed)"
+      );
+    }
+    if (!(p.year === 2026 && p.month === 6)) {
+      throw new Error(`Payoff expected July 2026, got ${p.year}-${p.month + 1}-${p.day}`);
+    }
+    s.cancelPendingSave();
+    console.log("✅ Projection keeps allocation reserves reserved across a future Ending Balance");
+  } finally {
+    global.Date = SA_RealDate;
+  }
+}
+
 // Run the async network tests sequentially (shared global.fetch mock): TEST 32
 // first, then TEST 30, which prints the final banner.
 runReplaceRemoteTest()

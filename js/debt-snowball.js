@@ -1699,7 +1699,15 @@ class DebtSnowballUI {
         }
         const flow = getDayFlow(day.ds, day.year, day.month);
         if (flow.anchor !== null) {
-          c = flow.anchor;
+          // Ending Balance = gross bank total; keep allocation reserves
+          // reserved across the anchor (same rule as CalculationService's
+          // walk, which also seeded startingChecking reserve-aware).
+          c = roundToCents(
+            flow.anchor -
+              (this.calculationService
+                ? this.calculationService.getReservedTotalOnOrBefore(day.ds)
+                : 0)
+          );
         } else {
           c = roundToCents(c + flow.baseNet);
           const mins = minsByDate.get(day.ds);
@@ -1819,7 +1827,16 @@ class DebtSnowballUI {
       const flow = getDayFlow(ds, year, month);
       const onAnchor = flow.anchor !== null;
       if (onAnchor) {
-        checking = roundToCents(flow.anchor);
+        // Ending Balance = gross bank total; keep allocation reserves reserved
+        // across the anchor (matches every CalculationService walk path — the
+        // projection's own starting checking came from the reserve-aware
+        // getRunningBalanceForDate).
+        checking = roundToCents(
+          flow.anchor -
+            (this.calculationService
+              ? this.calculationService.getReservedTotalOnOrBefore(ds)
+              : 0)
+        );
       } else {
         checking = roundToCents(checking + flow.baseNet);
       }
