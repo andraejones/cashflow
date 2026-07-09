@@ -2526,9 +2526,17 @@ console.log("TEST 36: Add Form Rejects Unexpandable Custom Interval / NaN Variab
     activeElement: null,
   };
   try {
-    vm.runInThisContext(
-      fs.readFileSync(path.join(jsDir, "transaction-ui.js"), "utf8")
-    );
+    // TransactionUI is split into a class file plus prototype companions
+    // (see index.html) — load them all, class first.
+    [
+      "transaction-ui.js",
+      "transaction-ui-forms.js",
+      "transaction-ui-daydetail.js",
+      "transaction-ui-edit.js",
+      "transaction-ui-add.js",
+    ].forEach((f) => {
+      vm.runInThisContext(fs.readFileSync(path.join(jsDir, f), "utf8"));
+    });
     const s = new TransactionStore();
     s.resetData();
     const rm = new RecurringTransactionManager(s);
