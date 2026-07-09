@@ -1345,12 +1345,9 @@ class TransactionUI {
       const today = new Date();
       const todayString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
       if (date <= todayString) {
-        const reconAnchor = this.calculationService
-          ? this.calculationService.getReconciliationAnchor(date, { inclusive: true })
-          : null;
-        const unsettled = this.store.getUnsettledTransactions().filter(
-          (u) => u.date < date && (reconAnchor === null || u.date > reconAnchor)
-        );
+        const unsettled = this.calculationService
+          ? this.calculationService.getCarriedUnsettledList(date)
+          : [];
         if (unsettled.length > 0) {
           const header = document.createElement("div");
           header.className = "carried-forward-header";

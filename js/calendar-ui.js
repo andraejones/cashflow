@@ -274,24 +274,16 @@ class CalendarUI {
         calendarDays.appendChild(day);
       }
     }
-    let runningBalance = summary.startingBalance;
     // Captured while walking the agenda so the jump-to-today button can scroll
     // back to it; stays null in grid view or when off the current month.
     let currentDayRow = null;
-    // Pre-compute unsettled expense carryover from prior months. An Ending
-    // Balance reconciles everything dated on/before it, so only unsettled items
-    // after the most recent anchor before this month still carry in.
+    // Seed for the display walk: the month's starting balance plus the
+    // unsettled-expense carry from prior months (anchor-aware). The seeding
+    // rules live in CalculationService.getMonthSeed — see [[balance-walk-paths]].
     const monthStartStr = Utils.formatDateString(new Date(year, month, 1));
-    const allUnsettled = this.store.getUnsettledTransactions();
-    const carryAnchor = this.calculationService.getReconciliationAnchor(monthStartStr, { inclusive: false });
-    let runningUnsettledExpense = 0;
-    for (const u of allUnsettled) {
-      if (u.date < monthStartStr && (carryAnchor === null || u.date > carryAnchor)) {
-        runningUnsettledExpense = this.calculationService.roundToCents(
-          runningUnsettledExpense + u.transaction.amount
-        );
-      }
-    }
+    const monthSeed = this.calculationService.getMonthSeed(year, month, {
+      trackUnsettled: true,
+    });
 
     // Free-funds mode: when a recurring allocation series is designated as the
     // family's "free funds" bucket, the current day shows that bucket's
@@ -316,74 +308,62 @@ class CalendarUI {
     let negativeBalanceDates = [];
 
     // We need to track running balance starting from today
-    // First, calculate balance at end of today
+    // First, calculate balance at end of today via the shared walk, seeded
+    // from the same monthly summary calculateMinimum() uses — so the
+    // highlighted lowest day and the displayed Minimum agree structurally.
+    // (Replaces a raw monthlyBalances-map read whose `|| 0` fallback could
+    // disagree with the Minimum when today's month key was absent.)
     const todayStr = Utils.formatDateString(today);
-    const todayMonthKey = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, "0")}`;
-    const monthlyBalances = this.store.getMonthlyBalances();
-    let currentBalance = monthlyBalances[todayMonthKey]?.startingBalance || 0;
-
-    // Calculate balance up through today. An Ending Balance is shown as entered
-    // (reconciliation anchor); unsettled expenses reduce the balance only via
-    // normal expense subtraction, matching CalculationService.calculateMinimum.
-    for (let d = 1; d <= today.getDate(); d++) {
-      const dateStr = Utils.formatDateString(new Date(today.getFullYear(), today.getMonth(), d));
-      const dailyTotals = this.calculationService.calculateDailyTotals(dateStr);
-      if (dailyTotals.balance !== null) {
-        // Ending Balance = gross bank total; keep allocation reserves reserved
-        // by subtracting still-live reserves dated on/before this anchor.
-        currentBalance = this.calculationService.roundToCents(
-          dailyTotals.balance - this.calculationService.getReservedTotalOnOrBefore(dateStr)
-        );
-      } else {
-        currentBalance = this.calculationService.roundToCents(currentBalance + dailyTotals.income - dailyTotals.expense);
-      }
-    }
+    const todaySummary = this.calculationService.calculateMonthlySummary(
+      today.getFullYear(),
+      today.getMonth()
+    );
+    const todayMonthStart = Utils.formatDateString(
+      new Date(today.getFullYear(), today.getMonth(), 1)
+    );
+    const balanceToday = this.calculationService.walkDays(todayMonthStart, todayStr, {
+      seedBalance: todaySummary.startingBalance,
+    }).balance;
 
     // Seed the minimum/crisis tracking with today itself. calculateMinimum()
     // (the "Minimum" figure in the summary) measures from today through the
     // next 30 days, so today must be a candidate here too — otherwise an
     // already-negative today goes un-highlighted and the highlighted
     // lowest-balance day can disagree with the displayed Minimum value.
-    if (currentBalance <= 0) {
+    if (balanceToday <= 0) {
       firstCrisisDate = todayStr;
       negativeBalanceDates.push(todayStr);
     }
-    lowestBalance = currentBalance;
+    lowestBalance = balanceToday;
     lowestBalanceDates = [todayStr];
 
-    // Now iterate through the next 30 days to find the lowest
-    for (let d = 1; d <= 30; d++) {
-      const checkDate = new Date(today.getFullYear(), today.getMonth(), today.getDate() + d);
-      const dateStr = Utils.formatDateString(checkDate);
-      const dailyTotals = this.calculationService.calculateDailyTotals(dateStr);
-
-      if (dailyTotals.balance !== null) {
-        // Ending Balance = gross bank total; keep allocation reserves reserved
-        // by subtracting still-live reserves dated on/before this anchor.
-        currentBalance = this.calculationService.roundToCents(
-          dailyTotals.balance - this.calculationService.getReservedTotalOnOrBefore(dateStr)
-        );
-      } else {
-        currentBalance = this.calculationService.roundToCents(currentBalance + dailyTotals.income - dailyTotals.expense);
+    // Walk the next 30 days to find the lowest / crisis / negative days.
+    // Recurring expansion for this window already happened above via
+    // updateMonthlyBalances (and ensureSnowballPaymentsForHorizon), so the
+    // walk deliberately does not re-expand — matching the previous behavior.
+    this.calculationService.walkDays(
+      Utils.formatDateString(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1)),
+      Utils.formatDateString(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 30)),
+      {
+        seedBalance: balanceToday,
+        onDay: (r) => {
+          // Track first crisis date (first day with balance ≤0)
+          if (firstCrisisDate === null && r.balance <= 0) {
+            firstCrisisDate = r.dateString;
+          }
+          // Track all negative/zero balance dates
+          if (r.balance <= 0) {
+            negativeBalanceDates.push(r.dateString);
+          }
+          if (r.balance < lowestBalance) {
+            lowestBalance = r.balance;
+            lowestBalanceDates = [r.dateString];
+          } else if (r.balance === lowestBalance) {
+            lowestBalanceDates.push(r.dateString);
+          }
+        },
       }
-
-      // Track first crisis date (first day with balance ≤0)
-      if (firstCrisisDate === null && currentBalance <= 0) {
-        firstCrisisDate = dateStr;
-      }
-
-      // Track all negative/zero balance dates
-      if (currentBalance <= 0) {
-        negativeBalanceDates.push(dateStr);
-      }
-
-      if (currentBalance < lowestBalance) {
-        lowestBalance = currentBalance;
-        lowestBalanceDates = [dateStr];
-      } else if (currentBalance === lowestBalance) {
-        lowestBalanceDates.push(dateStr);
-      }
-    }
+    );
 
     // Free-funds shortfall cushion: the bucket is the family's shock
     // absorber. Its reserve is already subtracted from every projected
@@ -410,7 +390,16 @@ class CalendarUI {
     // be flagged at a glance.
     const payoffDates = this.debtSnowball ? this.debtSnowball.getPayoffDates() : null;
 
-    for (let i = 1; i <= daysInMonth; i++) {
+    // The per-day display walk. All balance math (anchor resets, unsettled
+    // accumulator) lives in CalculationService.walkDays; this loop only
+    // decorates each day record into a grid cell or agenda row.
+    const monthEndStr = Utils.formatDateString(new Date(year, month, daysInMonth));
+    this.calculationService.walkDays(monthStartStr, monthEndStr, {
+      seedBalance: monthSeed.balance,
+      seedUnsettled: monthSeed.unsettledCarry,
+      trackUnsettled: true,
+      onDay: (r) => {
+      const i = r.day;
       const isCurrentDay = year === today.getFullYear() && month === today.getMonth() && i === today.getDate();
       // Highlight the last day of the 30-day minimum range
       const isMinimumEnd =
@@ -418,7 +407,7 @@ class CalendarUI {
         month === minimumEndMonth &&
         i === minimumEndDay;
       // Highlight the day(s) with the lowest balance in the 30-day range
-      const currentDateString = Utils.formatDateString(new Date(year, month, i));
+      const currentDateString = r.dateString;
       const isLowestBalance = lowestBalanceDates.includes(currentDateString);
       // Highlight first crisis day (first day with balance ≤0)
       const isFirstCrisis = currentDateString === firstCrisisDate;
@@ -427,31 +416,14 @@ class CalendarUI {
       // Flag days where a debt gets fully paid off by the snowball plan.
       const isPayoffDay = payoffDates ? payoffDates.has(currentDateString) : false;
       const dateString = currentDateString;
-      const dailyTotals =
-        this.calculationService.calculateDailyTotals(dateString);
+      const dailyTotals = r.dailyTotals;
+      const runningBalance = r.balance;
       // Light-purple highlight for days containing an allocated expense.
       const hasAllocated = dailyTotals.hasAllocated;
       const transactions = this.store.getTransactions();
       const transactionCount = transactions[dateString]
         ? transactions[dateString].filter((t) => t.hidden !== true).length
         : 0;
-      if (dailyTotals.balance !== null) {
-        // Ending Balance = gross bank total. Unsettled items dated on/before are
-        // reconciled (accumulator resets to 0). Allocation reserves, though,
-        // stay reserved across the anchor: subtract every still-live reserve
-        // dated on/before it so .balance is available-after-reserves, and set
-        // the allocation accumulator to that same reserved total so the
-        // "excluding allocations" figure equals the entered gross exactly.
-        const reservedOnOrBefore =
-          this.calculationService.getReservedTotalOnOrBefore(dateString);
-        runningBalance = this.calculationService.roundToCents(
-          dailyTotals.balance - reservedOnOrBefore
-        );
-        runningUnsettledExpense = 0;
-      } else {
-        runningBalance = this.calculationService.roundToCents(runningBalance + dailyTotals.income - dailyTotals.expense);
-        runningUnsettledExpense = this.calculationService.roundToCents(runningUnsettledExpense + dailyTotals.unsettledExpense);
-      }
 
       // Check if this date has any moved transactions (from or to)
       const hasMoveAnomaly = this.store.hasMoveAnomaly(dateString);
@@ -462,23 +434,13 @@ class CalendarUI {
       // counts settled spend only — settling an item moves it to the day it
       // settled, so it then counts on that day's cell, never stranded on its
       // original date. Running balances above/below are intentionally left
-      // counting all expenses.
-      // (runningUnsettledExpense already includes today's own unsettled, so
-      // subtract it to isolate the carried-forward portion; clamp guards the
-      // reconciliation-anchor reset case.)
-      const carriedForwardUnsettled = Math.max(
-        0,
-        this.calculationService.roundToCents(
-          runningUnsettledExpense - dailyTotals.unsettledExpense
-        )
-      );
-      const cellExpense = isCurrentDay
-        ? this.calculationService.roundToCents(
-            dailyTotals.expense + carriedForwardUnsettled
-          )
-        : this.calculationService.roundToCents(
-            dailyTotals.expense - dailyTotals.unsettledExpense
-          );
+      // counting all expenses. (Fold rules live in getCellExpense.)
+      const { carriedForwardUnsettled, cellExpense } =
+        this.calculationService.getCellExpense(
+          dailyTotals,
+          r.unsettledCarry,
+          isCurrentDay
+        );
 
       // Event listener is handled via delegation in initEventListeners()
       if (isAgendaView) {
@@ -492,10 +454,7 @@ class CalendarUI {
         // "UNSETTLED (CARRIED FORWARD)" section).
         let carriedUnsettled = [];
         if (isCurrentDay && carriedForwardUnsettled > 0) {
-          const reconAnchor = this.calculationService.getReconciliationAnchor(dateString, { inclusive: true });
-          carriedUnsettled = allUnsettled.filter(
-            (u) => u.date < dateString && (reconAnchor === null || u.date > reconAnchor)
-          );
+          carriedUnsettled = this.calculationService.getCarriedUnsettledList(dateString);
         }
         const agendaRow = this._buildAgendaRow({
           dayNumber: i, dateString, year, month,
@@ -549,7 +508,8 @@ class CalendarUI {
         day.setAttribute('tabindex', '0');
         calendarDays.appendChild(day);
       }
-    }
+      },
+    });
     if (!isAgendaView) {
       const remainingDays = 42 - (firstDay + daysInMonth);
       for (let i = 1; i <= remainingDays; i++) {

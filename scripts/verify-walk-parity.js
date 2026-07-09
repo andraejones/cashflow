@@ -476,23 +476,22 @@ function runInvariants(world) {
   store.cancelPendingSave();
 }
 
-// ---- Post-refactor source guard ------------------------------------------------
-// Once the walk is unified, calendar-ui must CONSUME the shared walk rather
-// than re-implement it. Until then this only warns; flip STRICT once the
-// refactor lands (the harness fails if calendar-ui re-forks the walk).
+// ---- Source guard ----------------------------------------------------------------
+// The walk is unified: calendar-ui must CONSUME CalculationService.walkDays
+// rather than re-implement it. Re-implementing the anchor rule requires
+// subtracting reserves, so any getReservedTotalOnOrBefore call in calendar-ui
+// means the walk has been forked again. (`dailyTotals.balance !== null` alone
+// is a legitimate display check — "does this day carry an anchor" — so it is
+// not part of the guard.)
 function sourceGuard() {
   const src = fs.readFileSync(path.join(jsDir, 'calendar-ui.js'), 'utf8');
-  const usesSharedWalk = src.includes('walkDays(');
-  const hasOwnAnchorBranch = /dailyTotals\.balance !== null/.test(src);
-  const GUARD_STRICT = fs.existsSync(path.join(__dirname, '.walk-unified'));
-  if (GUARD_STRICT) {
-    if (!usesSharedWalk || hasOwnAnchorBranch) {
-      throw new Error('source guard: calendar-ui.js must delegate to CalculationService.walkDays and not re-implement the anchor branch');
-    }
-    console.log('Source guard: calendar-ui delegates to the shared walk ✅');
-  } else if (!usesSharedWalk) {
-    console.log('Source guard: pre-refactor mode (calendar-ui still owns its walk) — informational only');
+  if (!src.includes('walkDays(')) {
+    throw new Error('source guard: calendar-ui.js no longer delegates to CalculationService.walkDays');
   }
+  if (src.includes('getReservedTotalOnOrBefore(')) {
+    throw new Error('source guard: calendar-ui.js re-implements anchor math (getReservedTotalOnOrBefore call found) — use walkDays instead');
+  }
+  console.log('Source guard: calendar-ui delegates to the shared walk ✅');
 }
 
 // ---- Main -----------------------------------------------------------------------
