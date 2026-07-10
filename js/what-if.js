@@ -154,9 +154,9 @@ class WhatIfUI {
     const minClass = (v) => (v <= 0 ? "what-if-min-negative" : "");
     const minHtml =
       this._baselineMinimum !== null
-        ? `30-day minimum <span class="${minClass(this._baselineMinimum)}">$${this._baselineMinimum.toFixed(2)}</span>
-           → <span class="${minClass(currentMinimum)}">$${currentMinimum.toFixed(2)}</span>`
-        : `30-day minimum <span class="${minClass(currentMinimum)}">$${currentMinimum.toFixed(2)}</span>`;
+        ? `30-day minimum <span class="${minClass(this._baselineMinimum)}">$${Utils.formatAmount(this._baselineMinimum)}</span>
+           → <span class="${minClass(currentMinimum)}">$${Utils.formatAmount(currentMinimum)}</span>`
+        : `30-day minimum <span class="${minClass(currentMinimum)}">$${Utils.formatAmount(currentMinimum)}</span>`;
 
     const itemsHtml = drafts
       .map(({ date, transaction }) => {
@@ -164,7 +164,7 @@ class WhatIfUI {
         const desc = transaction.description
           ? Utils.escapeHtml(transaction.description)
           : transaction.type === "income" ? "Income" : "Expense";
-        return `<span class="what-if-chip">${desc} ${sign}$${transaction.amount.toFixed(2)} · ${Utils.formatDisplayDate(date)}</span>`;
+        return `<span class="what-if-chip">${desc} ${sign}$${Utils.formatAmount(transaction.amount)} · ${Utils.formatDisplayDate(date)}</span>`;
       })
       .join(" ");
 

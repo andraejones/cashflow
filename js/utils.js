@@ -80,6 +80,18 @@ const Utils = {
   },
 
 
+  // Format a number for money display: two decimals with thousands separators
+  // ("3438.56" → "3,438.56"). Display-only — never feed the result back into
+  // an input value or arithmetic; parseFloat stops at the first comma.
+  formatAmount: function (amount) {
+    const n = typeof amount === "number" && isFinite(amount) ? amount : 0;
+    return n.toLocaleString("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  },
+
+
   formatDateString: function (date) {
     const year = date.getFullYear();
     const month = (date.getMonth() + 1).toString().padStart(2, "0");

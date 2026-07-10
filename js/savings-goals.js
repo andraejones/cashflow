@@ -117,7 +117,7 @@ class SavingsGoalsUI {
       if (remaining === 0) {
         statusHtml = `<span class="savings-goal-status funded">Fully funded 🎉</span>`;
       } else if (!goal.targetDate || goal.targetDate <= todayStr) {
-        statusHtml = `<span class="savings-goal-status short">$${remaining.toFixed(2)} to go — target date ${goal.targetDate ? "passed" : "not set"}</span>`;
+        statusHtml = `<span class="savings-goal-status short">$${Utils.formatAmount(remaining)} to go — target date ${goal.targetDate ? "passed" : "not set"}</span>`;
       } else {
         const monthsLeft = Math.max(
           1,
@@ -135,11 +135,11 @@ class SavingsGoalsUI {
           const spare = Math.round((minThrough - floor) * 100) / 100;
           feasibilityHtml =
             spare >= remaining
-              ? `<span class="savings-goal-status ontrack">On track — projected spare through ${Utils.formatDisplayDate(goal.targetDate)} is $${spare.toFixed(2)}${floor > 0 ? ` (above your $${floor.toFixed(2)} floor)` : ""}</span>`
-              : `<span class="savings-goal-status short">Tight — projected spare through ${Utils.formatDisplayDate(goal.targetDate)} is $${Math.max(0, spare).toFixed(2)} of the $${remaining.toFixed(2)} still needed</span>`;
+              ? `<span class="savings-goal-status ontrack">On track — projected spare through ${Utils.formatDisplayDate(goal.targetDate)} is $${Utils.formatAmount(spare)}${floor > 0 ? ` (above your $${Utils.formatAmount(floor)} floor)` : ""}</span>`
+              : `<span class="savings-goal-status short">Tight — projected spare through ${Utils.formatDisplayDate(goal.targetDate)} is $${Utils.formatAmount(Math.max(0, spare))} of the $${Utils.formatAmount(remaining)} still needed</span>`;
         }
         statusHtml = `
-          <span class="savings-goal-need">$${remaining.toFixed(2)} to go · about $${perMonth.toFixed(2)}/month for ${monthsLeft} month${monthsLeft === 1 ? "" : "s"}</span>
+          <span class="savings-goal-need">$${Utils.formatAmount(remaining)} to go · about $${Utils.formatAmount(perMonth)}/month for ${monthsLeft} month${monthsLeft === 1 ? "" : "s"}</span>
           ${feasibilityHtml}`;
       }
 
@@ -149,7 +149,7 @@ class SavingsGoalsUI {
       row.innerHTML = `
         <div class="savings-goal-head">
           <span class="savings-goal-name">${Utils.escapeHtml(goal.name || "(unnamed goal)")}</span>
-          <span class="savings-goal-figures">$${goal.saved.toFixed(2)} of $${goal.targetAmount.toFixed(2)}${goal.targetDate ? ` by ${Utils.formatDisplayDate(goal.targetDate)}` : ""}</span>
+          <span class="savings-goal-figures">$${Utils.formatAmount(goal.saved)} of $${Utils.formatAmount(goal.targetAmount)}${goal.targetDate ? ` by ${Utils.formatDisplayDate(goal.targetDate)}` : ""}</span>
         </div>
         <div class="savings-goal-bar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100">
           <div class="savings-goal-bar-fill" style="width: ${pct}%"></div>

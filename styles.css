@@ -197,6 +197,30 @@ body.app-locked .fab-today {
   background-color: var(--surface-muted);
 }
 
+/* Weekday header cells at the top of the grid view (Sun–Sat). */
+.day-label {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted-color);
+  padding-top: 4px;
+  user-select: none;
+}
+
+/* First-run hint shown above the calendar when no data exists yet. */
+.calendar-empty-state {
+  margin: 14px 14px 0;
+  padding: 12px 16px;
+  background-color: rgba(246, 176, 66, 0.14);
+  border: 1px solid rgba(246, 176, 66, 0.45);
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--ink-color);
+}
+
 .day {
   aspect-ratio: 1;
   display: flex;

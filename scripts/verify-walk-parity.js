@@ -51,6 +51,13 @@ global.Utils = {
   },
   showNotification: () => {},
   formatDisplayDate: (str) => str,
+  formatAmount: (amount) => {
+    const n = typeof amount === "number" && isFinite(amount) ? amount : 0;
+    return n.toLocaleString("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  },
   escapeHtml: (str) => String(str)
 };
 global.ModalManager = { openModal: () => {}, closeModal: () => {}, topModal: () => null };

@@ -11,6 +11,8 @@
     href="https://fonts.googleapis.com/css2?family=Fraunces:wght@500;600;700&family=Source+Sans+3:wght@400;500;600&display=swap"
     rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
+  <link rel="icon"
+    href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230f7a6c'/%3E%3Crect x='10' y='16' width='44' height='38' rx='6' fill='%23fdf7ef'/%3E%3Crect x='10' y='16' width='44' height='12' rx='6' fill='%23f6b042'/%3E%3Ctext x='32' y='47' font-family='Georgia,serif' font-size='24' font-weight='bold' text-anchor='middle' fill='%230f7a6c'%3E%24%3C/text%3E%3C/svg%3E" />
   <meta name="description" content="Personal cashflow tracking and management calendar" />
   <meta name="theme-color" content="#0f7a6c" />
 </head>
@@ -247,7 +249,7 @@
       </p>
       <div class="what-if-form" role="form" aria-label="Add draft transaction">
         <input type="date" id="whatIfDate" aria-label="Draft date" />
-        <input type="text" inputmode="numeric" id="whatIfAmount" placeholder="Amount" aria-label="Draft amount" autocomplete="off" />
+        <input type="text" inputmode="decimal" id="whatIfAmount" placeholder="Amount" aria-label="Draft amount" autocomplete="off" />
         <select id="whatIfType" aria-label="Draft type">
           <option value="expense">Expense</option>
           <option value="income">Income</option>

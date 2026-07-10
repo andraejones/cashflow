@@ -231,7 +231,7 @@ Object.assign(TransactionUI.prototype, {
               ? "allocation"
               : "expense";
       Utils.showNotification(
-        `Successfully added ${typeText} of $${amount.toFixed(2)}`
+        `Successfully added ${typeText} of $${Utils.formatAmount(amount)}`
       );
 
       return true;

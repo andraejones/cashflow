@@ -263,7 +263,7 @@ class CashflowApp {
 
         const sign = transaction.type === "balance" ? "=" :
           transaction.type === "income" ? "+" : "-";
-        const amountText = `${sign}$${Number(transaction.amount).toFixed(2)}`;
+        const amountText = `${sign}$${Utils.formatAmount(Number(transaction.amount))}`;
 
         const meta = document.createElement("span");
         meta.className = "recent-transaction-meta";
@@ -465,7 +465,7 @@ class CashflowApp {
         // Amount held in the bucket, not a cash movement: no sign, and the
         // allocation purple (not expense red) to match 🔒/allocated styling
         // everywhere else.
-        const amountText = `$${Number(transaction.amount).toFixed(2)}`;
+        const amountText = `$${Utils.formatAmount(Number(transaction.amount))}`;
 
         const meta = document.createElement("span");
         meta.className = "recent-transaction-meta";

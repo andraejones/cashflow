@@ -1173,7 +1173,7 @@ class BankReconcileUI {
 
   _money(signed) {
     const sign = signed < 0 ? "-" : "+";
-    return `${sign}$${Math.abs(signed).toFixed(2)}`;
+    return `${sign}$${Utils.formatAmount(Math.abs(signed))}`;
   }
 
   _sectionMissing(rows) {
@@ -1216,7 +1216,7 @@ class BankReconcileUI {
           <span class="br-date">${this._shortDate(p.bank.date)}</span>
           <span class="br-amount">
             bank ${this._money(p.bank.signed)} · app ${this._money(p.app.signed)}
-            <em>(Δ$${p.diff.toFixed(2)})</em>
+            <em>(Δ$${Utils.formatAmount(p.diff)})</em>
           </span>
           <span class="br-desc" title="${this._attr(p.bank.description)}">${this._esc(name)} ↔ ${this._esc(p.app.description || "(no description)")}</span>
           ${action}
@@ -1701,7 +1701,7 @@ class BankReconcileUI {
         amount: newAmount,
       });
     }
-    Utils.showNotification(`Updated amount to $${newAmount.toFixed(2)}.`);
+    Utils.showNotification(`Updated amount to $${Utils.formatAmount(newAmount)}.`);
     this._afterMutation();
   }
 

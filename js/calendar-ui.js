@@ -267,7 +267,36 @@ class CalendarUI {
     calendarAgenda.innerHTML = "";
     calendarDays.hidden = isAgendaView;
     calendarAgenda.hidden = !isAgendaView;
+    // First-run hint: with no data at all, the month is a wall of 0.00 rows
+    // that gives a new user no clue where to start. One banner, gone after
+    // the first transaction (or a cloud/device load) exists. Lives as a
+    // sibling above the view containers (not inside .days, whose
+    // :nth-child column styling counts children).
+    const staleEmptyState = document.querySelector(".calendar-empty-state");
+    if (staleEmptyState) staleEmptyState.remove();
+    if (
+      Object.keys(this.store.getTransactions()).length === 0 &&
+      this.store.getRecurringTransactions().length === 0
+    ) {
+      const emptyState = document.createElement("div");
+      emptyState.className = "calendar-empty-state";
+      emptyState.innerHTML =
+        "<strong>Welcome!</strong> Tap any day to add income, expenses, or a starting balance — or open the ☰ menu to load your data from cloud or device.";
+      calendarDays.parentNode.insertBefore(
+        emptyState,
+        isAgendaView ? calendarAgenda : calendarDays
+      );
+    }
     if (!isAgendaView) {
+      // Weekday header row. Exactly 7 cells, so the .day:nth-child(7n+k)
+      // animation-delay column mapping below them is unchanged.
+      Utils.WEEKDAY_LABELS.forEach((label) => {
+        const headerCell = document.createElement("div");
+        headerCell.classList.add("day-label");
+        headerCell.setAttribute("aria-hidden", "true");
+        headerCell.textContent = label;
+        calendarDays.appendChild(headerCell);
+      });
       for (let i = 0; i < firstDay; i++) {
         const day = document.createElement("div");
         day.classList.add("day", "other-month");
@@ -478,24 +507,24 @@ class CalendarUI {
         if (hasAllocated) day.classList.add("allocated-day");
         day.innerHTML = `${i}<div class="day-content">
         ${dailyTotals.income > 0
-          ? `<div class="income">+${dailyTotals.income.toFixed(2)}</div>`
+          ? `<div class="income">+${Utils.formatAmount(dailyTotals.income)}</div>`
           : ""
         }
         ${cellExpense > 0
-          ? `<div class="expense">-${cellExpense.toFixed(2)}</div>`
+          ? `<div class="expense">-${Utils.formatAmount(cellExpense)}</div>`
           : ""
         }
         ${freeFundsMode
           ? (isCurrentDay
             ? (freeFundsBucket
-              ? `<div class="balance free-funds" title="${freeFundsCushion > 0 ? `Free funds ($${freeFundsCushion.toFixed(2)} held back to cover the 30-day low)` : "Free funds available"}">${freeFundsDisplay.toFixed(2)}</div>`
+              ? `<div class="balance free-funds" title="${freeFundsCushion > 0 ? `Free funds ($${Utils.formatAmount(freeFundsCushion)} held back to cover the 30-day low)` : "Free funds available"}">${Utils.formatAmount(freeFundsDisplay)}</div>`
               : "")
             : dateString > todayStr
               ? (freeFundsCushion > 0
-                ? `<div class="balance cushioned" title="Includes $${freeFundsCushion.toFixed(2)} held back from free funds">${this.calculationService.roundToCents(runningBalance + freeFundsCushion).toFixed(2)}</div>`
-                : `<div class="balance">${runningBalance.toFixed(2)}</div>`)
+                ? `<div class="balance cushioned" title="Includes $${Utils.formatAmount(freeFundsCushion)} held back from free funds">${Utils.formatAmount(this.calculationService.roundToCents(runningBalance + freeFundsCushion))}</div>`
+                : `<div class="balance">${Utils.formatAmount(runningBalance)}</div>`)
               : "")
-          : `<div class="balance">${runningBalance.toFixed(2)}</div>`
+          : `<div class="balance">${Utils.formatAmount(runningBalance)}</div>`
         }
         ${transactionCount > 0
           ? `<div class="transaction-count">(${transactionCount})</div>`
@@ -537,7 +566,7 @@ class CalendarUI {
     const isWithin30Days = viewedMonthStart <= thirtyDaysFromNow;
     const showMinimum = !isPastMonth && isWithin30Days;
 
-    let summaryHtml = `<span class="summary-segment">Monthly Summary:</span> <span class="summary-segment">Income: $${summary.income.toFixed(2)}</span> <span class="summary-segment">| Expenses: $${summary.expense.toFixed(2)}</span>`;
+    let summaryHtml = `<span class="summary-segment">Monthly Summary:</span> <span class="summary-segment">Income: $${Utils.formatAmount(summary.income)}</span> <span class="summary-segment">| Expenses: $${Utils.formatAmount(summary.expense)}</span>`;
 
     if (showMinimum) {
       let minimum = this.calculationService.calculateMinimum();
@@ -546,10 +575,10 @@ class CalendarUI {
         // Keep the summary Minimum coherent with the cushioned day balances:
         // the held-back free-funds slice lifts this walk's trough too.
         minimum = this.calculationService.roundToCents(minimum + freeFundsCushion);
-        minimumTitle = ` title="Includes $${freeFundsCushion.toFixed(2)} held back from free funds"`;
+        minimumTitle = ` title="Includes $${Utils.formatAmount(freeFundsCushion)} held back from free funds"`;
       }
       const minimumClass = minimum <= 0 ? 'minimum-negative' : '';
-      summaryHtml += ` <span class="summary-segment">| Minimum: <span class="${minimumClass}"${minimumTitle}>$${minimum.toFixed(2)}</span></span>`;
+      summaryHtml += ` <span class="summary-segment">| Minimum: <span class="${minimumClass}"${minimumTitle}>$${Utils.formatAmount(minimum)}</span></span>`;
     }
 
     // Add Notes link with star indicator if notes exist
@@ -784,7 +813,7 @@ class CalendarUI {
             return `<li class="agenda-item${isSkipped ? " skipped" : ""}">
               <span class="agenda-item-desc">${desc}</span>
               ${flags.length ? `<span class="agenda-item-flags">${flags.join("")}</span>` : ""}
-              <span class="agenda-item-amount ${amountClass}">${sign}${t.amount.toFixed(2)}</span>
+              <span class="agenda-item-amount ${amountClass}">${sign}${Utils.formatAmount(t.amount)}</span>
             </li>`;
           })
           .join("")}</ul>`
@@ -807,7 +836,7 @@ class CalendarUI {
               <span class="agenda-item-desc">${desc}</span>
               <span class="agenda-item-flags"><span class="agenda-item-flag" title="Unsettled, carried forward">⏳</span></span>
               <span class="agenda-item-from">${fromLabel}</span>
-              <span class="agenda-item-amount expense">-${t.amount.toFixed(2)}</span>
+              <span class="agenda-item-amount expense">-${Utils.formatAmount(t.amount)}</span>
             </li>`;
           })
           .join("")}</ul>`
@@ -821,24 +850,24 @@ class CalendarUI {
       <div class="agenda-main">
         <div class="agenda-figures">
           ${d.dailyTotals.income > 0
-            ? `<span class="income">+${d.dailyTotals.income.toFixed(2)}</span>`
+            ? `<span class="income">+${Utils.formatAmount(d.dailyTotals.income)}</span>`
             : ""
           }
           ${d.cellExpense > 0
-            ? `<span class="expense">-${d.cellExpense.toFixed(2)}</span>`
+            ? `<span class="expense">-${Utils.formatAmount(d.cellExpense)}</span>`
             : ""
           }
           ${d.freeFundsMode
             ? (d.isCurrentDay
               ? (d.freeFundsBucket
-                ? `<span class="balance free-funds" title="${d.freeFundsCushion > 0 ? `Free funds ($${d.freeFundsCushion.toFixed(2)} held back to cover the 30-day low)` : "Free funds available"}">${d.freeFundsDisplay.toFixed(2)}</span>`
+                ? `<span class="balance free-funds" title="${d.freeFundsCushion > 0 ? `Free funds ($${Utils.formatAmount(d.freeFundsCushion)} held back to cover the 30-day low)` : "Free funds available"}">${Utils.formatAmount(d.freeFundsDisplay)}</span>`
                 : "")
               : d.isFutureDay
                 ? (d.freeFundsCushion > 0
-                  ? `<span class="balance cushioned" title="Includes $${d.freeFundsCushion.toFixed(2)} held back from free funds">${this.calculationService.roundToCents(d.runningBalance + d.freeFundsCushion).toFixed(2)}</span>`
-                  : `<span class="balance">${d.runningBalance.toFixed(2)}</span>`)
+                  ? `<span class="balance cushioned" title="Includes $${Utils.formatAmount(d.freeFundsCushion)} held back from free funds">${Utils.formatAmount(this.calculationService.roundToCents(d.runningBalance + d.freeFundsCushion))}</span>`
+                  : `<span class="balance">${Utils.formatAmount(d.runningBalance)}</span>`)
                 : "")
-            : `<span class="balance">${d.runningBalance.toFixed(2)}</span>`
+            : `<span class="balance">${Utils.formatAmount(d.runningBalance)}</span>`
           }
         </div>
         ${itemsHtml}
@@ -897,7 +926,7 @@ class CalendarUI {
           amountSpan.className = t.type;
           const sign = t.type === "balance" ? "=" : t.type === "income" ? "+" : "-";
           const hiddenLabel = isHidden ? " (Hidden - Debt Snowball)" : "";
-          amountSpan.textContent = `${sign}$${t.amount.toFixed(2)}${hiddenLabel}`;
+          amountSpan.textContent = `${sign}$${Utils.formatAmount(t.amount)}${hiddenLabel}`;
           row.appendChild(amountSpan);
           if (typeof t.description === "string" && t.description) {
             row.appendChild(document.createTextNode(` - ${t.description}`));

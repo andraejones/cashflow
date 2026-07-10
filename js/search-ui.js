@@ -449,7 +449,7 @@ class SearchUI {
       const [year, month, day] = date.split("-");
       const formattedDate = `${month}/${day}/${year}`;
       const amountText = `${transaction.type === "income" ? "+" : transaction.type === "balance" ? "=" : "-"
-        }$${transaction.amount.toFixed(2)}`;
+        }$${Utils.formatAmount(transaction.amount)}`;
       const isRecurring = !!transaction.recurringId || isRecurringDef === true;
 
       resultDiv.className = "search-result-item";

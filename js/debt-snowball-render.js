@@ -52,11 +52,7 @@ Object.assign(DebtSnowballUI.prototype, {
         typeof debt.interestRate === "number" && debt.interestRate > 0
           ? ` • ${debt.interestRate.toFixed(2)}%`
           : "";
-      meta.textContent = `Balance $${balance.toFixed(
-        2
-      )} • Paid $${paid.toFixed(2)} • Min $${minPayment.toFixed(
-        2
-      )} • Due ${scheduleLabel}${interest}`;
+      meta.textContent = `Balance $${Utils.formatAmount(balance)} • Paid $${Utils.formatAmount(paid)} • Min $${Utils.formatAmount(minPayment)} • Due ${scheduleLabel}${interest}`;
       details.appendChild(meta);
 
       row.appendChild(details);
@@ -273,7 +269,7 @@ Object.assign(DebtSnowballUI.prototype, {
     summaryText.className = "debt-plan-summary";
     const viewLabel = this.formatMonthYear(viewYear, viewMonth);
     summaryText.textContent = `Current target${viewLabel ? ` (${viewLabel})` : ""}: ${target.debt.name
-      } (Projected $${target.remaining.toFixed(2)})`;
+      } (Projected $${Utils.formatAmount(target.remaining)})`;
     this.planSummary.appendChild(summaryText);
 
     const extraText = document.createElement("div");
@@ -289,12 +285,8 @@ Object.assign(DebtSnowballUI.prototype, {
     // applied straight to debt and shown separately in the cash-infusion list.
     extraText.textContent =
       sweptThisMonth > 0
-        ? `Daily floor $${dailyFloor.toFixed(
-          2
-        )} — $${sweptThisMonth.toFixed(2)} paid off this month from surplus above it`
-        : `Daily floor $${dailyFloor.toFixed(
-          2
-        )} — surplus above it funds the next payoff`;
+        ? `Daily floor $${Utils.formatAmount(dailyFloor)} — $${Utils.formatAmount(sweptThisMonth)} paid off this month from surplus above it`
+        : `Daily floor $${Utils.formatAmount(dailyFloor)} — surplus above it funds the next payoff`;
     this.planSummary.appendChild(extraText);
 
     const summariesByPayoff = [...summaries].sort(byClearanceOrder);
@@ -355,10 +347,8 @@ Object.assign(DebtSnowballUI.prototype, {
       figures.className = "debt-plan-figures";
       figures.textContent =
         original > 0
-          ? `$${summary.remaining.toFixed(2)} left of $${original.toFixed(
-              2
-            )} (${Math.round(paidFraction * 100)}% paid)`
-          : `$${summary.remaining.toFixed(2)} remaining`;
+          ? `$${Utils.formatAmount(summary.remaining)} left of $${Utils.formatAmount(original)} (${Math.round(paidFraction * 100)}% paid)`
+          : `$${Utils.formatAmount(summary.remaining)} remaining`;
       item.appendChild(figures);
 
       this.planList.appendChild(item);
@@ -557,7 +547,7 @@ Object.assign(DebtSnowballUI.prototype, {
 
       const meta = document.createElement("div");
       meta.className = "cash-infusion-meta";
-      meta.textContent = `$${amount.toFixed(2)} on ${Utils.formatDisplayDate(
+      meta.textContent = `$${Utils.formatAmount(amount)} on ${Utils.formatDisplayDate(
         infusion.date
       )} → ${targetLabel}`;
 
@@ -576,7 +566,7 @@ Object.assign(DebtSnowballUI.prototype, {
           const debtName = debt ? debt.name : "Unknown Debt";
           const allocatedAmount = Number(allocation[debtId]) || 0;
           if (allocatedAmount > 0) {
-            allocationParts.push(`${debtName}: $${allocatedAmount.toFixed(2)}`);
+            allocationParts.push(`${debtName}: $${Utils.formatAmount(allocatedAmount)}`);
           }
         });
 

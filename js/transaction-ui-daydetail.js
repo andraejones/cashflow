@@ -19,18 +19,18 @@ Object.assign(TransactionUI.prototype, {
     const b = this.calculationService.getDayBalanceBreakdown(date);
     const rows = [];
     if (b.income > 0) {
-      rows.push(`<div class="modal-balance-row"><span class="modal-balance-label">Income</span><span class="modal-balance-value income">+$${b.income.toFixed(2)}</span></div>`);
+      rows.push(`<div class="modal-balance-row"><span class="modal-balance-label">Income</span><span class="modal-balance-value income">+$${Utils.formatAmount(b.income)}</span></div>`);
     }
     if (b.expense > 0) {
-      rows.push(`<div class="modal-balance-row"><span class="modal-balance-label">Expenses</span><span class="modal-balance-value expense">-$${b.expense.toFixed(2)}</span></div>`);
+      rows.push(`<div class="modal-balance-row"><span class="modal-balance-label">Expenses</span><span class="modal-balance-value expense">-$${Utils.formatAmount(b.expense)}</span></div>`);
     }
     if (b.balanceWithoutUnsettled !== null) {
-      rows.push(`<div class="modal-balance-row"><span class="modal-balance-label">Balance without unsettled</span><span class="modal-balance-value">$${b.balanceWithoutUnsettled.toFixed(2)}</span></div>`);
+      rows.push(`<div class="modal-balance-row"><span class="modal-balance-label">Balance without unsettled</span><span class="modal-balance-value">$${Utils.formatAmount(b.balanceWithoutUnsettled)}</span></div>`);
     }
     if (b.balanceExcludingAllocations !== null) {
-      rows.push(`<div class="modal-balance-row"><span class="modal-balance-label">Balance excluding allocations</span><span class="modal-balance-value">$${b.balanceExcludingAllocations.toFixed(2)}</span></div>`);
+      rows.push(`<div class="modal-balance-row"><span class="modal-balance-label">Balance excluding allocations</span><span class="modal-balance-value">$${Utils.formatAmount(b.balanceExcludingAllocations)}</span></div>`);
     }
-    rows.push(`<div class="modal-balance-row modal-balance-total"><span class="modal-balance-label">Balance</span><span class="modal-balance-value">$${b.balance.toFixed(2)}</span></div>`);
+    rows.push(`<div class="modal-balance-row modal-balance-total"><span class="modal-balance-label">Balance</span><span class="modal-balance-value">$${Utils.formatAmount(b.balance)}</span></div>`);
     if (b.transactionCount > 0) {
       rows.push(`<div class="modal-balance-row"><span class="modal-balance-label">Transactions</span><span class="modal-balance-value">${b.transactionCount}</span></div>`);
     }
@@ -201,7 +201,7 @@ Object.assign(TransactionUI.prototype, {
                 ? ` (Allocated, closes ${this.formatShortDisplayDate(t.closeoutDate)})`
                 : " (Allocated)";
           }
-          amountSpan.textContent = `${sign}$${t.amount.toFixed(2)}${statusLabel}`;
+          amountSpan.textContent = `${sign}$${Utils.formatAmount(t.amount)}${statusLabel}`;
           transactionDiv.appendChild(amountSpan);
 
           if (descriptionText) {
@@ -241,7 +241,7 @@ Object.assign(TransactionUI.prototype, {
             const remaining = Number(debtRemainingByDebtId[t.debtId]) || 0;
             const remainingSpan = document.createElement("span");
             remainingSpan.className = "debt-remaining";
-            remainingSpan.textContent = ` (Remaining: $${remaining.toFixed(2)})`;
+            remainingSpan.textContent = ` (Remaining: $${Utils.formatAmount(remaining)})`;
             transactionDiv.appendChild(remainingSpan);
           }
 
@@ -260,7 +260,7 @@ Object.assign(TransactionUI.prototype, {
             editBtn.setAttribute("tabindex", "0");
             editBtn.setAttribute(
               "aria-label",
-              `Edit ${normalizedType} of $${t.amount.toFixed(2)}${descriptionText ? " " + descriptionText : ""
+              `Edit ${normalizedType} of $${Utils.formatAmount(t.amount)}${descriptionText ? " " + descriptionText : ""
               }`
             );
             editBtn.textContent = "Edit";
@@ -272,7 +272,7 @@ Object.assign(TransactionUI.prototype, {
             deleteBtn.setAttribute("tabindex", "0");
             deleteBtn.setAttribute(
               "aria-label",
-              `Delete ${normalizedType} of $${t.amount.toFixed(2)}${descriptionText ? " " + descriptionText : ""
+              `Delete ${normalizedType} of $${Utils.formatAmount(t.amount)}${descriptionText ? " " + descriptionText : ""
               }`
             );
             deleteBtn.textContent = "Delete";
@@ -495,9 +495,9 @@ Object.assign(TransactionUI.prototype, {
                 }
                 const text = document.createElement("span");
                 const recent = s.periods
-                  .map((p) => `$${p.demand.toFixed(2)}`)
+                  .map((p) => `$${Utils.formatAmount(p.demand)}`)
                   .join(", ");
-                text.textContent = `Suggested: $${s.suggested.toFixed(2)} — floor $${s.floor.toFixed(2)}, last ${s.periods.length} periods: ${recent} `;
+                text.textContent = `Suggested: $${Utils.formatAmount(s.suggested)} — floor $${Utils.formatAmount(s.floor)}, last ${s.periods.length} periods: ${recent} `;
                 suggestionRow.appendChild(text);
                 const applyBtn = document.createElement("button");
                 applyBtn.type = "button";
@@ -594,7 +594,7 @@ Object.assign(TransactionUI.prototype, {
             const closeOut = async () => {
               const descPart = closeOutDesc ? `${closeOutDesc} – ` : "";
               const shouldClose = await Utils.showModalConfirm(
-                `Close out this allocation?\n\n${descPart}-$${Number(closeOutAmount).toFixed(2)}\n\nThis removes the allocation.`,
+                `Close out this allocation?\n\n${descPart}-$${Utils.formatAmount(Number(closeOutAmount))}\n\nThis removes the allocation.`,
                 "Close Out Allocation",
                 { confirmText: "Close Out", cancelText: "Cancel" }
               );
@@ -688,7 +688,7 @@ Object.assign(TransactionUI.prototype, {
 
             const amountSpan = document.createElement("span");
             amountSpan.classList.add("expense");
-            amountSpan.textContent = `-$${u.transaction.amount.toFixed(2)}`;
+            amountSpan.textContent = `-$${Utils.formatAmount(u.transaction.amount)}`;
             div.appendChild(amountSpan);
 
             const desc = u.transaction.description || "";
@@ -820,12 +820,12 @@ Object.assign(TransactionUI.prototype, {
               deleteBtn.setAttribute("tabindex", "0");
               deleteBtn.setAttribute(
                 "aria-label",
-                `Delete expense of $${u.transaction.amount.toFixed(2)}${desc ? " " + desc : ""}`
+                `Delete expense of $${Utils.formatAmount(u.transaction.amount)}${desc ? " " + desc : ""}`
               );
               deleteBtn.textContent = "Delete";
               const doDelete = async () => {
                 const shouldDelete = await Utils.showModalConfirm(
-                  `Are you sure you want to delete this unsettled transaction?\n\n${desc ? desc + " – " : ""}-$${u.transaction.amount.toFixed(2)}`,
+                  `Are you sure you want to delete this unsettled transaction?\n\n${desc ? desc + " – " : ""}-$${Utils.formatAmount(u.transaction.amount)}`,
                   "Delete Transaction",
                   { confirmText: "Delete", cancelText: "Cancel" }
                 );
@@ -958,7 +958,7 @@ Object.assign(TransactionUI.prototype, {
             const row = document.createElement("div");
             const sign = t.type === "balance" ? "=" : t.type === "income" ? "+" : "-";
             row.appendChild(
-              document.createTextNode(`${sign}$${t.amount.toFixed(2)}`)
+              document.createTextNode(`${sign}$${Utils.formatAmount(t.amount)}`)
             );
             if (typeof t.description === "string" && t.description) {
               row.appendChild(document.createTextNode(` - ${t.description}`));

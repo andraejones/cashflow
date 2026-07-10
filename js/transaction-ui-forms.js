@@ -259,7 +259,7 @@ Object.assign(TransactionUI.prototype, {
       // Recurring buckets repeat, so tag them with their period date to tell
       // one month's bucket from the next.
       const period = a.recurring ? ` (${this.formatShortDisplayDate(a.date)})` : "";
-      option.textContent = `${a.description} — $${a.remaining.toFixed(2)} left${period}`;
+      option.textContent = `${a.description} — $${Utils.formatAmount(a.remaining)} left${period}`;
       select.appendChild(option);
     });
     select.value = previous && allocations.some((a) => a.id === previous) ? previous : "";
@@ -280,7 +280,7 @@ Object.assign(TransactionUI.prototype, {
       const period = a.recurring
         ? ` (${this.formatShortDisplayDate(a.date)})`
         : "";
-      option.textContent = `${a.description} — $${a.remaining.toFixed(2)} left${period}`;
+      option.textContent = `${a.description} — $${Utils.formatAmount(a.remaining)} left${period}`;
       select.appendChild(option);
     });
     if (currentDrawId && !allocations.some((a) => a.id === currentDrawId)) {
