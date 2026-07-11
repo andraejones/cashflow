@@ -48,8 +48,9 @@ Scripts must load in this order due to dependencies:
 files with no build step. The class file declares the class; each companion
 adds a cohesive method group via `Object.assign(ClassName.prototype, {...})`.
 Companions MUST load after their class file and before `app.js`. When adding
-or renaming a companion, update all three loaders: `index.html`,
-`scripts/verify-logic.js`, and `scripts/verify-walk-parity.js`.
+or renaming a companion, update all four loaders: `index.html`,
+`scripts/verify-logic.js`, `scripts/verify-walk-parity.js`, and the
+`CORE_ASSETS` precache list in `sw.js`.
 
 ### Initialization Flow
 
@@ -98,6 +99,20 @@ Settled/unsettled support: `setTransactionSettled(date, index, isSettled)` toggl
 - **Callback Pattern**: TransactionStore triggers save callbacks → CloudSync schedules syncs → CalendarUI re-renders
 - **Service Layer**: CalculationService and RecurringTransactionManager compute derived data consumed by UI classes
 - **Modal Pattern**: Utils.showModalDialog handles all modal interactions with Promise-based async results
+
+### PWA Shell
+
+The app installs as a standalone PWA: `manifest.webmanifest` (+ `icons/`) and
+the Apple meta tags in `index.html` give it a home-screen identity, and
+`sw.js` is a network-first service worker (registered inline at the bottom of
+`index.html`). Network-first means deploys are picked up immediately while
+online and the cache only serves when offline — there is no cache version to
+bump per deploy. `sw.js` precaches every script in `CORE_ASSETS`; keep that
+list in sync with the `index.html` script tags. Only same-origin assets and
+Google Fonts are intercepted — GitHub API sync traffic is never cached. Note:
+on iOS a standalone home-screen app has its own localStorage container,
+separate from Safari's; data moves between them via Gist sync, not
+automatically.
 
 ### localStorage Keys
 
