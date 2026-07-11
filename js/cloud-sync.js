@@ -454,16 +454,40 @@ class CloudSync {
     this.clearPendingMessage();
   }
 
-  // Whether there is local work that has not yet been pushed to the cloud:
-  // either a debounced save is still queued, a save was requested mid-sync, or
-  // the store has changes newer than the last successful sync. Used by the
-  // background/resume/startup handlers to decide between pushing and pulling.
+  // Whether there is local USER work that has not yet been pushed to the
+  // cloud: either a debounced save is still queued, a save was requested
+  // mid-sync, or a user-grade save landed after the last successful sync.
+  // Used by the background/resume/startup/unlock handlers to decide between
+  // pushing and pulling.
+  //
+  // Deliberately narrower than _hasLocalChangesSinceSync: store.lastUpdated
+  // is bumped exactly when saveData runs with isDataModified=true (every user
+  // mutation), while maintenance writes (snowball materialization, minimum-
+  // payment adjustments, orphan cleanup) save with false and stamp per-item
+  // _lastModified only. Counting those machine stamps here made every
+  // backgrounding/resume push to the gist with zero user edits. Machine
+  // changes are derived data — they ride the next real sync. loadFromCloud
+  // still uses the full per-item scan to decide merge-vs-replace, where
+  // machine writes MUST count (a straight replace would clobber local
+  // tombstones and materialized rows).
   hasPendingCloudSave() {
     if (this._pendingCloudSave || this._pendingSaveAfterSync) {
       return true;
     }
+    if (!this._lastSyncTime) {
+      // Never synced → nothing to protect; lifecycle handlers fall through to
+      // a pull (same semantics _hasLocalChangesSinceSync had here).
+      return false;
+    }
     try {
-      return this._hasLocalChangesSinceSync(this.store.exportData());
+      const lastUpdated = this.store.lastUpdated;
+      if (!lastUpdated) {
+        return false;
+      }
+      const lastUpdatedTime = new Date(lastUpdated).getTime();
+      return (
+        !isNaN(lastUpdatedTime) && lastUpdatedTime > this._lastSyncTime.getTime()
+      );
     } catch (e) {
       return false;
     }

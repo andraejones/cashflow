@@ -379,10 +379,17 @@ Object.assign(TransactionStore.prototype, {
       return false;
     }
 
-    // Cancel any pending debounced save since we're saving now
+    // Cancel any pending debounced save since we're saving now — but absorb
+    // its modified flag instead of discarding it. A maintenance saveData(false)
+    // (snowball materialization, allocation sweeps) can land while a user
+    // edit's debounced save is still queued; dropping the flag here would skip
+    // the lastUpdated bump and the cloud-sync scheduling for that edit.
     if (this._saveDebounceTimer) {
       clearTimeout(this._saveDebounceTimer);
       this._saveDebounceTimer = null;
+    }
+    if (this._pendingIsDataModified) {
+      isDataModified = true;
       this._pendingIsDataModified = false;
     }
 

@@ -631,16 +631,25 @@ Object.assign(DebtSnowballUI.prototype, {
           // maintenance sweep keeps them (see the !includeExtra branch above).
           transaction.snowballForced = true;
         }
-        this.store.addTransaction(expected.dateString, transaction);
+        // Insert directly rather than via store.addTransaction: that is a
+        // user-grade mutation (modified save → cloud push), and this runs on
+        // every calendar render — a payoff date drifting a day would push to
+        // the cloud on mere navigation. The id + _lastModified stamp keep the
+        // row mergeable (_mergeById) when it rides the next real sync. The
+        // caller (ensureSnowballPaymentForMonth) persists via saveData.
+        transaction.id = Utils.generateUniqueId();
+        transaction._lastModified = new Date().toISOString();
+        if (!transactions[expected.dateString]) {
+          transactions[expected.dateString] = [];
+        }
+        transactions[expected.dateString].push(transaction);
         snowballAdded = true;
       });
     }
 
-    if (changed && !snowballAdded) {
-      // Use saveData(false) for automatic maintenance - saves locally but doesn't trigger cloud sync
-      this.store.saveData(false);
-    }
-
+    // Persistence is the caller's job (single save point in
+    // ensureSnowballPaymentForMonth) so forced generation can save user-grade
+    // while routine maintenance stays quiet.
     return { changed, snowballAdded };
   },
 

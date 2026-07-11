@@ -3200,6 +3200,62 @@ console.log("TEST 45: Search Excludes Retired (endDate < startDate) Recurring De
   }
 }
 
+// TEST 46: Maintenance saves must not trip the lifecycle cloud push.
+// Render-time maintenance (snowball materialization, minimum-payment
+// adjustments) saves with saveData(false) but stamps per-item _lastModified;
+// hasPendingCloudSave() must ignore those machine stamps (it reads only
+// store.lastUpdated, bumped exclusively by modified saves) or every
+// backgrounding/resume PATCHes the gist with zero user edits. The full
+// per-item scan (_hasLocalChangesSinceSync) must STILL see them, so
+// loadFromCloud merges instead of replacing. Also pins the absorb rule: a
+// maintenance saveData(false) landing while a user edit's debounced save is
+// queued must inherit the modified flag, not swallow it.
+console.log("TEST 46: Maintenance Saves Don't Trip The Lifecycle Push; Queued User Flags Absorbed");
+{
+  const s46 = new TransactionStore();
+  s46.resetData();
+  s46.addTransaction("2026-07-01", {
+    amount: 25,
+    type: "expense",
+    description: "User edit",
+  });
+  s46.flushPendingSave();
+
+  const cs46 = new CloudSync(s46, () => {});
+  cs46.autoSyncEnabled = false; // keep scheduleCloudSave inert in this harness
+  // Simulate "synced just after that edit".
+  cs46._lastSyncTime = new Date(new Date(s46.lastUpdated).getTime() + 1);
+  if (cs46.hasPendingCloudSave()) {
+    throw new Error("Clean just-synced store reported pending cloud save");
+  }
+
+  // Machine write: stamp an item well past the sync time and save quiet —
+  // exactly what the snowball/allocation maintenance does on render.
+  const t46 = s46.getTransactions()["2026-07-01"][0];
+  t46._lastModified = new Date(Date.now() + 120000).toISOString();
+  s46.saveData(false);
+  if (cs46.hasPendingCloudSave()) {
+    throw new Error("Machine stamp + saveData(false) tripped the lifecycle push");
+  }
+  if (!cs46._hasLocalChangesSinceSync(s46.exportData())) {
+    throw new Error("Merge-path scan stopped seeing machine stamps (would replace, not merge)");
+  }
+
+  // Absorb rule: queued user-grade flag must survive a quiet maintenance save.
+  // Ensure the next lastUpdated stamp lands strictly after _lastSyncTime.
+  while (Date.now() <= cs46._lastSyncTime.getTime()) {}
+  s46.debouncedSave(true); // user edit queued, timer not yet fired
+  s46.saveData(false); // maintenance save lands first
+  if (new Date(s46.lastUpdated).getTime() <= cs46._lastSyncTime.getTime()) {
+    throw new Error("saveData(false) swallowed the queued user-modified flag");
+  }
+  if (!cs46.hasPendingCloudSave()) {
+    throw new Error("Absorbed user edit not reported as pending cloud save");
+  }
+  s46.cancelPendingSave();
+  console.log("✅ Quiet maintenance saves stay local; queued user flags absorbed and pushed");
+}
+
 // Run the async network tests sequentially (shared global.fetch mock): TEST 32
 // first, then TEST 30, which prints the final banner.
 runReplaceRemoteTest()

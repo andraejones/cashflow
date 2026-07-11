@@ -1003,9 +1003,13 @@ class DebtSnowballUI {
       if (syncResult.snowballAdded) {
         snowballAdded = true;
       }
-      if (changed && !snowballAdded && !syncResult.changed) {
-        // Use saveData(false) for automatic maintenance - saves locally but doesn't trigger cloud sync
-        this.store.saveData(false);
+      if (changed || snowballAdded) {
+        // Single save point for everything this pass touched (adjusted
+        // minimums, pruned/added snowball rows). force = the explicit
+        // Generate button → user-grade save that schedules a cloud push;
+        // routine render-time maintenance saves quiet and rides the next
+        // real sync instead of pushing on mere navigation.
+        this.store.saveData(force === true);
       }
     }
 
