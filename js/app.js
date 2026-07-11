@@ -782,7 +782,34 @@ document.addEventListener("DOMContentLoaded", async () => {
 // push the moment the page is backgrounded (the last reliable callback on
 // mobile) and re-sync on resume as a safety net for anything that didn't land.
 
+// Snap back to today when the user returns after a real absence. A quick app
+// switch keeps their place; a longer one — or one that crosses midnight, when
+// every balance shifts a day — resumes on the current date instead of
+// wherever they last navigated.
+const RETURN_TO_TODAY_AFTER_MS = 5 * 60 * 1000;
+let appHiddenAt = null;
+
+function maybeReturnToToday() {
+  const hiddenAt = appHiddenAt;
+  appHiddenAt = null;
+  if (!hiddenAt || !window.app || !window.app.calendarUI) return;
+  const awayLong = Date.now() - hiddenAt >= RETURN_TO_TODAY_AFTER_MS;
+  const dayChanged =
+    Utils.formatDateString(new Date(hiddenAt)) !==
+    Utils.formatDateString(new Date());
+  if (!awayLong && !dayChanged) return;
+  if (window.app.pinProtection && window.app.pinProtection.isLocked) {
+    // Don't render behind the lock screen — reset the viewed month and ask
+    // for the today-scroll so the unlock flow's updateUI() lands on today.
+    window.app.calendarUI.currentDate = new Date();
+    window.app.calendarUI._scrollTodayOnNextRender = true;
+    return;
+  }
+  window.app.calendarUI.returnToCurrentMonth();
+}
+
 function flushAppOnHide() {
+  appHiddenAt = Date.now();
   if (!window.app || !window.app._initialized || !window.app.store) return;
   // Always persist to localStorage first so nothing is lost locally.
   window.app.store.flushPendingSave();
@@ -799,6 +826,9 @@ function flushAppOnHide() {
 
 function resumeAppSync() {
   if (window.app && window.app._initialized && typeof window.app.syncOnResume === "function") {
+    // Before the resume sync's updateUI() renders: reposition first so that
+    // render (or the post-unlock one) already shows the current date.
+    maybeReturnToToday();
     window.app.syncOnResume();
   }
 }

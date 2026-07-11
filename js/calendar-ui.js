@@ -24,6 +24,9 @@ class CalendarUI {
     // and the observer that shows/hides the jump button as it scrolls in/out.
     this._todayRow = null;
     this._todayObserver = null;
+    // One-shot: the next render should bring today's agenda row into view
+    // (set when returning to the current month, incl. resume-after-absence).
+    this._scrollTodayOnNextRender = false;
 
     this.initEventListeners();
   }
@@ -735,6 +738,15 @@ class CalendarUI {
     }
     this._todayRow = currentDayRow || null;
 
+    // Consume the one-shot scroll request even when there's no row to scroll
+    // to (grid view, off-month) so it can't fire on an unrelated later render.
+    if (this._scrollTodayOnNextRender) {
+      this._scrollTodayOnNextRender = false;
+      if (currentDayRow) {
+        currentDayRow.scrollIntoView({ block: "center" });
+      }
+    }
+
     if (!currentDayRow || typeof IntersectionObserver === "undefined") {
       btn.classList.remove("is-visible");
       return;
@@ -959,6 +971,9 @@ class CalendarUI {
 
   returnToCurrentMonth() {
     this.currentDate = new Date();
+    // Landing on the current month should show today, not the top of the
+    // month — in agenda view today's row can be far below the fold.
+    this._scrollTodayOnNextRender = true;
     this.generateCalendar();
   }
 
