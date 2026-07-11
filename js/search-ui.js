@@ -358,6 +358,10 @@ class SearchUI {
 
     for (const rt of recurringTransactions) {
       if (foundRecurringIds.has(rt.id)) continue;
+      // "Delete this and future occurrences" on the first occurrence retires a
+      // series by setting endDate to the day before startDate — an empty
+      // window that never expands, so it must never surface in search either.
+      if (rt.endDate && rt.endDate < rt.startDate) continue;
       if (typeFilter && rt.type !== typeFilter) continue;
       if (hasMinAmount && rt.amount < minAmount) continue;
       if (hasMaxAmount && rt.amount > maxAmount) continue;

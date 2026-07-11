@@ -3105,6 +3105,101 @@ console.log("TEST 44: Snowball Projection Reserves Survive A Future Anchor");
   }
 }
 
+// TEST 45: Search must not surface retired recurring definitions. "Delete this
+// and future occurrences" on a series' first occurrence retires it by setting
+// endDate to the day before startDate — an empty window that never expands
+// onto the calendar, so it must not show up as a phantom (Recurring) result
+// dated at its startDate either. Ordinary ended series (endDate ≥ startDate)
+// must still appear.
+console.log("TEST 45: Search Excludes Retired (endDate < startDate) Recurring Definitions");
+{
+  const T45_elements = new Map();
+  const T45_makeElement = (id) => ({
+    id,
+    value: "",
+    checked: false,
+    disabled: false,
+    innerHTML: "",
+    textContent: "",
+    style: {},
+    classList: { add: () => {}, remove: () => {}, toggle: () => {} },
+    addEventListener: () => {},
+    setAttribute: () => {},
+    removeAttribute: () => {},
+    appendChild: () => {},
+    remove: () => {},
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    contains: () => false,
+  });
+  const T45_getEl = (id) => {
+    if (!T45_elements.has(id)) T45_elements.set(id, T45_makeElement(id));
+    return T45_elements.get(id);
+  };
+  const prevDoc = global.document;
+  global.document = {
+    addEventListener: () => {},
+    getElementById: T45_getEl,
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    createElement: () => T45_makeElement(null),
+    activeElement: null,
+  };
+  try {
+    vm.runInThisContext(fs.readFileSync(path.join(jsDir, "search-ui.js"), "utf8"));
+    const s = new TransactionStore();
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    const sui = new SearchUI(s, rm, null);
+
+    // Retired on its first occurrence: empty window, zero occurrences ever.
+    s.addRecurringTransaction({
+      id: "t45-retired",
+      startDate: "2026-07-10",
+      endDate: "2026-07-09",
+      amount: 300,
+      type: "expense",
+      description: "Hair - Dayra",
+      recurrence: "custom",
+      customInterval: { value: 4, unit: "months" },
+    });
+    // Live replacement series.
+    s.addRecurringTransaction({
+      id: "t45-live",
+      startDate: "2026-07-11",
+      amount: 300,
+      type: "expense",
+      description: "Hair - Dayra",
+      recurrence: "custom",
+      customInterval: { value: 3, unit: "months" },
+    });
+    // Normally ended series (endDate ≥ startDate) must still be searchable.
+    s.addRecurringTransaction({
+      id: "t45-ended",
+      startDate: "2026-01-01",
+      endDate: "2026-03-01",
+      amount: 60,
+      type: "expense",
+      description: "Hair - old salon",
+      recurrence: "monthly",
+    });
+
+    T45_getEl("searchInput").value = "hair";
+    sui.performSearch();
+    const ids = sui.searchResults.map((r) => r.transaction.id).sort();
+    if (ids.includes("t45-retired")) {
+      throw new Error("Retired (endDate < startDate) definition surfaced in search");
+    }
+    if (JSON.stringify(ids) !== JSON.stringify(["t45-ended", "t45-live"])) {
+      throw new Error(`Expected live + ended defs only, got ${JSON.stringify(ids)}`);
+    }
+    s.cancelPendingSave();
+    console.log("✅ Retired recurring definition hidden; live and normally-ended defs still found");
+  } finally {
+    global.document = prevDoc;
+  }
+}
+
 // Run the async network tests sequentially (shared global.fetch mock): TEST 32
 // first, then TEST 30, which prints the final banner.
 runReplaceRemoteTest()
