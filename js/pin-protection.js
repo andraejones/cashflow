@@ -176,6 +176,35 @@ class PinProtection {
     return bytes.buffer;
   }
 
+  // Reuse an existing passkey for this domain instead of registering a new
+  // one. An assertion with no allowCredentials list lets the platform offer
+  // any discoverable credential it (or a third-party provider like a
+  // password manager) already holds for this origin; the response's rawId is
+  // the credential ID we need to store. This matters on iOS standalone PWAs:
+  // their localStorage starts empty, so the credential ID saved under Safari
+  // is gone even though the passkey itself still exists — and re-registering
+  // can crash inside third-party passkey providers (Bitwarden 2026.6
+  // MakeCredential bug) whose assertion path works fine.
+  async discoverExistingCredential() {
+    try {
+      const challenge = crypto.getRandomValues(new Uint8Array(32));
+      const assertion = await navigator.credentials.get({
+        publicKey: {
+          challenge: challenge,
+          userVerification: "required",
+          timeout: 60000
+        }
+      });
+      if (!assertion || !assertion.rawId) return null;
+      return this.arrayBufferToBase64(assertion.rawId);
+    } catch (e) {
+      // No discoverable credential, provider error, or user dismissal —
+      // caller falls back to registering a brand-new credential.
+      console.log("No existing credential discovered:", e && e.name);
+      return null;
+    }
+  }
+
   // Register a new WebAuthn credential (FaceID/TouchID)
   async registerWebAuthn() {
     if (!this.webAuthnAvailable) {
@@ -394,7 +423,18 @@ class PinProtection {
     }
 
     try {
-      await this.registerWebAuthn();
+      // Prefer reusing a passkey that already exists for this domain (e.g.
+      // one registered under Safari before the standalone PWA got its own
+      // localStorage, possibly living in a third-party provider). Only
+      // register a brand-new credential when none is offered.
+      const existingId = await this.discoverExistingCredential();
+      if (existingId) {
+        localStorage.setItem("webauthn_credential_id", existingId);
+        this.credentialId = existingId;
+        this.webAuthnEnabled = true;
+      } else {
+        await this.registerWebAuthn();
+      }
       // Store PIN for future biometric unlocks
       await this.storePinForBiometrics(this.currentPin);
       await Utils.showModalAlert("FaceID/TouchID enabled successfully!", "Success");
@@ -403,7 +443,10 @@ class PinProtection {
       if (error.name === "NotAllowedError") {
         await Utils.showModalAlert("Biometric setup was cancelled.", "Cancelled");
       } else {
-        await Utils.showModalAlert("Failed to enable biometric authentication. Please try again.", "Error");
+        await Utils.showModalAlert(
+          "Failed to enable biometric authentication. If a password manager (e.g. Bitwarden) intercepted the prompt, try again and choose “Save on this iPhone” / iCloud Keychain instead.",
+          "Error"
+        );
       }
       return false;
     }
