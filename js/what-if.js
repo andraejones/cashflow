@@ -103,7 +103,10 @@ class WhatIfUI {
     const type = document.getElementById("whatIfType").value;
     const description = document.getElementById("whatIfDescription").value.trim();
 
-    if (!date || isNaN(amount) || amount <= 0) {
+    // Number.isFinite, not !isNaN: the amount field is a plain text input, so
+    // parseFloat turns "1e999"/"Infinity" into Infinity, which isNaN accepts.
+    // A non-finite draft poisons the shared walk (calculateMinimum → -Infinity).
+    if (!date || !Number.isFinite(amount) || amount <= 0) {
       Utils.showNotification("Please enter a valid date and amount", "error");
       return;
     }

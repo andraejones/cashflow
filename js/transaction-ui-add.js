@@ -29,7 +29,7 @@ Object.assign(TransactionUI.prototype, {
       const allocated = rawType === "allocation";
       const description = descriptionElement.value;
       const recurrence = recurrenceElement.value;
-      if (!date || isNaN(amount)) {
+      if (!date || !Number.isFinite(amount)) {
         Utils.showNotification(
           "Please enter a valid date and amount",
           "error"

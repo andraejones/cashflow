@@ -13,17 +13,29 @@ global.localStorage = {
 global.window = {
   localStorage: global.localStorage
 };
+// Form fields the tests want a UI method to read. Empty by default, so
+// getElementById keeps returning null for every test that predates it; TEST 48
+// fills it in to drive a real form-submit path headlessly.
+global.__domFields = {};
 global.document = {
   addEventListener: () => {},
-  getElementById: () => null
+  getElementById: (id) =>
+    Object.prototype.hasOwnProperty.call(global.__domFields, id)
+      ? { value: global.__domFields[id], focus() {}, style: {}, setAttribute() {} }
+      : null
 };
 global.Utils = {
   generateUniqueId: () => Math.random().toString(36).substr(2, 9),
   formatDateString: (date) => {
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
   },
+  // Mirrors js/utils.js exactly: null for empty/malformed input, and the date
+  // part of an ISO date-time ("2026-06-28T00:00") is kept. A looser stub here
+  // lets code that would throw or misparse in the browser pass the tests.
   parseDateString: (str) => {
-    const [y, m, d] = str.split('-').map(Number);
+    if (!str || typeof str !== 'string') return null;
+    const [y, m, d] = str.split('T')[0].split('-').map(Number);
+    if (isNaN(y) || isNaN(m) || isNaN(d)) return null;
     return new Date(y, m - 1, d, 12, 0, 0);
   },
   isLastCalendarDayOfMonth: (str) => {
@@ -77,7 +89,9 @@ const files = [
   'debt-snowball-engine.js',
   'debt-snowball-payments.js',
   'debt-snowball-render.js',
-  'bank-reconcile.js'
+  'bank-reconcile.js',
+  'what-if.js',
+  'savings-goals.js'
 ];
 
 files.forEach(file => {
@@ -3332,9 +3346,151 @@ console.log("TEST 47: Tombstone Shape Survives Every Construction Path");
   console.log("✅ Every construction path yields a complete tombstone record; delete sticks after reload");
 }
 
+// TEST 48: Amount validation must reject ±Infinity, not just NaN.
+//
+// parseFloat("1e999") === Infinity, and isNaN(Infinity) is false — so every
+// `if (isNaN(amount))` guard let a non-finite amount straight through. It was
+// reachable wherever the amount comes from a *text* field (the number inputs
+// are protected by the browser, and the add form's cents formatter strips
+// non-digits), which meant two live paths:
+//   - what-if drafts (#whatIfAmount is type=text): the draft joins the shared
+//     balance walk, so calculateMinimum() went to -Infinity and the calendar's
+//     30-day Minimum and the what-if banner rendered garbage.
+//   - savings-goal "Add saved" (a text modal prompt): goal.saved became
+//     Infinity, which JSON.stringify writes as null — so the goal silently
+//     reloaded with saved = 0, erasing real recorded progress.
+// Guards are Number.isFinite now. This test pins both, and that ordinary
+// amounts still go through.
+console.log("TEST 48: Amount Guards Reject Non-Finite Input");
+{
+  const NON_FINITE = ["1e999", "-1e999", "Infinity", "-Infinity"];
+
+  // --- what-if drafts: must never reach the walk ---------------------------
+  NON_FINITE.concat(["abc", ""]).forEach((raw) => {
+    const s = new TransactionStore();
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    const calc = new CalculationService(s, rm);
+    s.addTransaction("2026-08-10", { amount: 1000, type: "income", description: "Pay" });
+
+    global.__domFields = {
+      whatIfDate: "2026-08-20",
+      whatIfAmount: raw,
+      whatIfType: "expense",
+      whatIfDescription: "draft",
+    };
+    const wi = new WhatIfUI(s, calc, () => {});
+    wi.hideForm = () => {};
+    wi.addDraft();
+    global.__domFields = {};
+
+    if (s.getWhatIfTransactions().length !== 0) {
+      throw new Error(`what-if accepted a non-finite/invalid amount ${JSON.stringify(raw)}`);
+    }
+    const min = calc.calculateMinimum();
+    if (!Number.isFinite(min)) {
+      throw new Error(`calculateMinimum() went non-finite (${min}) after amount ${JSON.stringify(raw)}`);
+    }
+    s.cancelPendingSave();
+  });
+
+  // A valid draft still lands and still moves the walk.
+  {
+    const s = new TransactionStore();
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    const calc = new CalculationService(s, rm);
+    s.addTransaction("2026-08-10", { amount: 1000, type: "income", description: "Pay" });
+    global.__domFields = {
+      whatIfDate: "2026-08-20",
+      whatIfAmount: "250.75",
+      whatIfType: "expense",
+      whatIfDescription: "draft",
+    };
+    const wi = new WhatIfUI(s, calc, () => {});
+    wi.hideForm = () => {};
+    wi.addDraft();
+    global.__domFields = {};
+    if (s.getWhatIfTransactions().length !== 1) {
+      throw new Error("a valid what-if draft was rejected");
+    }
+    if (!Number.isFinite(calc.calculateMinimum())) {
+      throw new Error("valid draft produced a non-finite minimum");
+    }
+    s.cancelPendingSave();
+  }
+
+  console.log("✅ What-if drafts reject non-finite amounts; the walk stays finite");
+}
+
+// The savings-goal half of TEST 48. _contribute is async, so this is awaited in
+// the runner chain at the bottom — returning promises into a forEach would let
+// a failure surface as an unhandled rejection *after* the ✅ line.
+async function runTest48Savings() {
+  console.log("TEST 48b: Savings-Goal Contribution Rejects Non-Finite Input");
+  const NON_FINITE = ["1e999", "-1e999", "Infinity", "-Infinity"];
+  const originalPrompt = Utils.showModalPrompt;
+
+  try {
+    for (const raw of NON_FINITE) {
+      const s = new TransactionStore();
+      s.resetData();
+      s.addSavingsGoal({
+        name: "Roof", targetAmount: 5000, saved: 100, targetDate: "2027-01-01",
+      });
+      const goalId = s.getSavingsGoals()[0].id;
+
+      Utils.showModalPrompt = async () => raw;
+      const ui = new SavingsGoalsUI(s, null, () => {});
+      ui._renderList = () => {};
+      await ui._contribute(goalId);
+
+      const after = s.getSavingsGoals()[0].saved;
+      if (after !== 100) {
+        throw new Error(
+          `savings goal accepted ${JSON.stringify(raw)}: saved became ${after}`
+        );
+      }
+      s.cancelPendingSave();
+    }
+
+    // A normal contribution still works, and survives a save/load round-trip.
+    const s = new TransactionStore();
+    s.resetData();
+    s.addSavingsGoal({
+      name: "Roof", targetAmount: 5000, saved: 100, targetDate: "2027-01-01",
+    });
+    const goalId = s.getSavingsGoals()[0].id;
+    Utils.showModalPrompt = async () => "250.50";
+    const ui = new SavingsGoalsUI(s, null, () => {});
+    ui._renderList = () => {};
+    await ui._contribute(goalId);
+    if (s.getSavingsGoals()[0].saved !== 350.5) {
+      throw new Error(
+        `a valid contribution was mishandled: saved = ${s.getSavingsGoals()[0].saved}`
+      );
+    }
+    s.saveData(true);
+    const reloaded = new TransactionStore();
+    reloaded.loadData();
+    if (reloaded.getSavingsGoals()[0].saved !== 350.5) {
+      throw new Error(
+        `goal progress did not survive a reload: ${reloaded.getSavingsGoals()[0].saved}`
+      );
+    }
+    s.cancelPendingSave();
+    reloaded.cancelPendingSave();
+  } finally {
+    Utils.showModalPrompt = originalPrompt;
+  }
+
+  console.log("✅ Non-finite contributions rejected; real progress persists across a reload");
+}
+
 // Run the async network tests sequentially (shared global.fetch mock): TEST 32
 // first, then TEST 30, which prints the final banner.
-runReplaceRemoteTest()
+runTest48Savings()
+  .then(runReplaceRemoteTest)
   .then(runTest30Final)
   .catch((err) => {
     console.error(err);

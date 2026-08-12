@@ -38,8 +38,13 @@ global.Utils = {
   formatDateString: (date) => {
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
   },
+  // Mirrors js/utils.js exactly: null for empty/malformed input, and the date
+  // part of an ISO date-time ("2026-06-28T00:00") is kept. A looser stub here
+  // lets code that would throw or misparse in the browser pass the tests.
   parseDateString: (str) => {
-    const [y, m, d] = str.split('-').map(Number);
+    if (!str || typeof str !== 'string') return null;
+    const [y, m, d] = str.split('T')[0].split('-').map(Number);
+    if (isNaN(y) || isNaN(m) || isNaN(d)) return null;
     return new Date(y, m - 1, d, 12, 0, 0);
   },
   isLastCalendarDayOfMonth: (str) => {

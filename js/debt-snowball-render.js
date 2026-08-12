@@ -444,7 +444,7 @@ Object.assign(DebtSnowballUI.prototype, {
       Utils.showNotification("Please enter a description", "error");
       return;
     }
-    if (isNaN(amount) || amount <= 0) {
+    if (!Number.isFinite(amount) || amount <= 0) {
       Utils.showNotification("Please enter a valid amount greater than 0", "error");
       return;
     }

@@ -188,7 +188,10 @@ class SavingsGoalsUI {
     );
     if (raw === null) return;
     const amount = parseFloat(raw);
-    if (isNaN(amount) || amount === 0) {
+    // Number.isFinite, not !isNaN: this prompt is a text input, so parseFloat
+    // yields Infinity for "1e999". isNaN lets it through and the goal's saved
+    // total round-trips through JSON as null → 0, silently erasing progress.
+    if (!Number.isFinite(amount) || amount === 0) {
       Utils.showNotification("Please enter a valid amount", "error");
       return;
     }
@@ -261,7 +264,7 @@ class SavingsGoalsUI {
       Utils.showNotification("Please give the goal a name", "error");
       return;
     }
-    if (isNaN(targetAmount) || targetAmount <= 0) {
+    if (!Number.isFinite(targetAmount) || targetAmount <= 0) {
       Utils.showNotification("Target amount must be greater than 0", "error");
       return;
     }
@@ -274,7 +277,7 @@ class SavingsGoalsUI {
       name,
       targetAmount,
       targetDate,
-      saved: isNaN(saved) ? 0 : Math.max(0, saved),
+      saved: Number.isFinite(saved) ? Math.max(0, saved) : 0,
     };
     if (this._editingId) {
       this.store.updateSavingsGoal(this._editingId, payload);

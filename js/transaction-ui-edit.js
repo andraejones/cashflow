@@ -42,7 +42,7 @@ Object.assign(TransactionUI.prototype, {
     const description = descriptionElement.value;
     const newDate = document.getElementById(`edit-date-${date}-${index}`)?.value || date;
 
-    if (isNaN(amount)) {
+    if (!Number.isFinite(amount)) {
       Utils.showNotification("Please enter a valid amount", "error");
       return;
     }

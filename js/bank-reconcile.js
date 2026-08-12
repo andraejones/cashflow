@@ -300,7 +300,9 @@ class BankReconcileUI {
     s = s.replace(/[$,()\s]/g, "");
     if (s === "") return null;
     const num = parseFloat(s);
-    if (isNaN(num)) return null;
+    // Reject ±Infinity too ("1e999" in a statement column): isNaN alone would
+    // let it through into match scoring and settled amounts.
+    if (!Number.isFinite(num)) return null;
     return negative ? -num : num;
   }
 
