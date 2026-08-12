@@ -830,7 +830,15 @@ function resumeAppSync() {
     // render (or the post-unlock one) already shows the current date.
     maybeReturnToToday();
     window.app.syncOnResume();
+    return;
   }
+  // Not ready to reposition (still initializing, or backgrounded before the
+  // app was ever built). Drop the hide timestamp anyway: startup already
+  // renders the current month, so nothing is lost — but leaving it set means
+  // the next resume-ish event, including an "online" blip fired while the user
+  // is browsing some other month, reads it as a fresh absence and yanks the
+  // calendar back to today.
+  appHiddenAt = null;
 }
 
 document.addEventListener("visibilitychange", () => {
