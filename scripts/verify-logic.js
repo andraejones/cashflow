@@ -3256,6 +3256,82 @@ console.log("TEST 46: Maintenance Saves Don't Trip The Lifecycle Push; Queued Us
   console.log("✅ Quiet maintenance saves stay local; queued user flags absorbed and pushed");
 }
 
+// TEST 47: The tombstone record must carry every synced collection on ALL four
+// construction paths (constructor, loadData, importData, resetData). loadData
+// hand-maintained its own key list and omitted `savingsGoals`, so after any
+// reload — and saveData writes the `deletedItems` key on every save, so the
+// stored blob is always there — deleteSavingsGoal's unguarded push threw. The
+// UI's async _delete() swallowed it as an unhandled rejection: the Delete
+// button did nothing, and an untombstoned goal would resurrect on the next
+// merge. TEST 39 missed it by calling resetData() (which rebuilt the key)
+// before deleting, so the load path was never exercised.
+console.log("TEST 47: Tombstone Shape Survives Every Construction Path");
+{
+  // Spelled out here rather than read off the store, so this test pins the
+  // invariant independently of the implementation that satisfies it. Adding a
+  // synced collection should mean updating this list too.
+  const EXPECTED_TOMBSTONE_KEYS = [
+    "transactions", "recurringTransactions", "debts",
+    "cashInfusions", "savingsGoals", "skips",
+  ];
+  const assertShape = (store, path) => {
+    EXPECTED_TOMBSTONE_KEYS.forEach((key) => {
+      if (!Array.isArray(store._deletedItems[key])) {
+        throw new Error(`${path} dropped the "${key}" tombstone collection`);
+      }
+    });
+  };
+
+  const s = new TransactionStore();
+  s.resetData();
+  const goalId = s.addSavingsGoal({
+    name: "New Roof", targetAmount: 8000, targetDate: "2027-09-01", saved: 500,
+  });
+  s.flushPendingSave(); // writes the "deletedItems" blob to storage
+
+  // Simulate the pre-fix on-disk shape every existing install carries: a
+  // tombstone blob with the savingsGoals key absent.
+  const onDisk = JSON.parse(localStorage.getItem("deletedItems"));
+  delete onDisk.savingsGoals;
+  localStorage.setItem("deletedItems", JSON.stringify(onDisk));
+
+  // Reload — the state every real session actually starts in.
+  const reloaded = new TransactionStore();
+  assertShape(reloaded, "loadData");
+
+  // The delete must actually take effect and leave a tombstone behind.
+  if (!reloaded.deleteSavingsGoal(goalId)) {
+    throw new Error("deleteSavingsGoal failed on a store built by loadData");
+  }
+  if (reloaded.getSavingsGoals().length !== 0) {
+    throw new Error("Savings goal survived its own delete");
+  }
+  if (!reloaded._deletedItems.savingsGoals.some((d) => d.id === goalId)) {
+    throw new Error("Delete recorded no tombstone — a merge would resurrect it");
+  }
+
+  // importData must normalize a partial blob the same way.
+  const partialExport = s.exportData();
+  partialExport._deletedItems = { transactions: [] }; // missing everything else
+  const imported = new TransactionStore();
+  imported.resetData();
+  if (!imported.importData(JSON.parse(JSON.stringify(partialExport)))) {
+    throw new Error("importData rejected an export with a partial tombstone blob");
+  }
+  assertShape(imported, "importData");
+
+  // resetData and a bare constructor agree with the canonical key set too.
+  const fresh = new TransactionStore();
+  fresh.resetData();
+  assertShape(fresh, "resetData");
+
+  reloaded.cancelPendingSave();
+  imported.cancelPendingSave();
+  fresh.cancelPendingSave();
+  s.cancelPendingSave();
+  console.log("✅ Every construction path yields a complete tombstone record; delete sticks after reload");
+}
+
 // Run the async network tests sequentially (shared global.fetch mock): TEST 32
 // first, then TEST 30, which prints the final banner.
 runReplaceRemoteTest()

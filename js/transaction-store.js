@@ -24,14 +24,9 @@ class TransactionStore {
     // timestamped skip-toggle events ({date, recurringId, skipped, at}) so the
     // cloud merge can apply last-write-wins — a plain union of skip lists can
     // never propagate an unskip (the other device's stale skip resurrects it).
-    this._deletedItems = {
-      transactions: [],
-      recurringTransactions: [],
-      debts: [],
-      cashInfusions: [],
-      savingsGoals: [],
-      skips: []
-    };
+    // Shape comes from _TOMBSTONE_KEYS (persistence companion) so every
+    // construction site agrees; loadData() below may replace this wholesale.
+    this._deletedItems = this._emptyDeletedItems();
     this.onSaveCallbacks = [];
 
     // Debounce settings for batching rapid saves

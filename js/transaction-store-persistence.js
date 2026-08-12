@@ -7,6 +7,45 @@
 
 Object.assign(TransactionStore.prototype, {
 
+  // The tombstone collections tracked for merge conflict resolution: one key
+  // per synced collection, plus `skips` for timestamped skip-toggle events.
+  // Every construction site (constructor, loadData, importData, resetData)
+  // derives its object from this one list, so adding a synced collection means
+  // adding its key here and nowhere else. Sites used to hand-maintain their own
+  // copies and drifted: loadData omitted `savingsGoals`, so after any reload
+  // (saveData writes the `deletedItems` key on every save, so the stored blob
+  // is always present) deleteSavingsGoal's unguarded push threw, the delete
+  // silently failed, and an untombstoned goal would resurrect on the next merge.
+  _TOMBSTONE_KEYS: [
+    "transactions",
+    "recurringTransactions",
+    "debts",
+    "cashInfusions",
+    "savingsGoals",
+    "skips",
+  ],
+
+  // A fresh tombstone record with every collection present and empty.
+  _emptyDeletedItems() {
+    const empty = {};
+    this._TOMBSTONE_KEYS.forEach((key) => {
+      empty[key] = [];
+    });
+    return empty;
+  },
+
+  // Coerce a persisted or imported tombstone record into the canonical shape.
+  // Anything missing or malformed becomes an empty array, so every later
+  // trackDeleted* push lands on a real array.
+  _normalizeDeletedItems(raw) {
+    const source = raw && typeof raw === "object" ? raw : {};
+    const normalized = {};
+    this._TOMBSTONE_KEYS.forEach((key) => {
+      normalized[key] = Array.isArray(source[key]) ? source[key] : [];
+    });
+    return normalized;
+  },
+
   // Debounced save method - batches multiple rapid changes into a single save
   debouncedSave(isDataModified = true) {
     // Track if any pending save has data modification
@@ -258,23 +297,12 @@ Object.assign(TransactionStore.prototype, {
       }
 
       // Load deleted items tracking for merge conflict resolution. Normalize
-      // the shape — a legacy/partial object missing any of the four keys would
-      // make every later tombstone push throw.
+      // the shape — a legacy/partial object missing any key would make that
+      // collection's later tombstone push throw.
       if (storedDeletedItems) {
-        const parsedDeleted = JSON.parse(storedDeletedItems);
-        this._deletedItems = {
-          transactions: Array.isArray(parsedDeleted.transactions)
-            ? parsedDeleted.transactions
-            : [],
-          recurringTransactions: Array.isArray(parsedDeleted.recurringTransactions)
-            ? parsedDeleted.recurringTransactions
-            : [],
-          debts: Array.isArray(parsedDeleted.debts) ? parsedDeleted.debts : [],
-          cashInfusions: Array.isArray(parsedDeleted.cashInfusions)
-            ? parsedDeleted.cashInfusions
-            : [],
-          skips: Array.isArray(parsedDeleted.skips) ? parsedDeleted.skips : [],
-        };
+        this._deletedItems = this._normalizeDeletedItems(
+          JSON.parse(storedDeletedItems)
+        );
       }
 
       if (this.debts.length > 0 && this.recurringTransactions.length > 0) {
@@ -328,7 +356,9 @@ Object.assign(TransactionStore.prototype, {
 
   _pruneDeletedItems() {
     const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
-    const keys = ['transactions', 'recurringTransactions', 'debts', 'cashInfusions', 'savingsGoals'];
+    // Every id-tombstone collection ages out the same way; `skips` holds a
+    // different shape ({date, recurringId, skipped, at}) and is pruned below.
+    const keys = this._TOMBSTONE_KEYS.filter((key) => key !== "skips");
 
     keys.forEach(key => {
       if (Array.isArray(this._deletedItems[key])) {
@@ -489,14 +519,7 @@ Object.assign(TransactionStore.prototype, {
       extraPaymentStartMonth: "",
       autoGenerate: false,
     };
-    this._deletedItems = {
-      transactions: [],
-      recurringTransactions: [],
-      debts: [],
-      cashInfusions: [],
-      savingsGoals: [],
-      skips: []
-    };
+    this._deletedItems = this._emptyDeletedItems();
     // Reset replaces in-memory state with a known-good empty state, so any
     // prior load-integrity failure no longer applies — clear it (as importData
     // does) or saveData refuses to persist and the corrupt on-disk data that
@@ -598,23 +621,7 @@ Object.assign(TransactionStore.prototype, {
 
       // Import deleted items tracking for merge conflict resolution
       // (normalized per-key — a partial object would break tombstone pushes).
-      const importedDeleted = data._deletedItems || {};
-      this._deletedItems = {
-        transactions: Array.isArray(importedDeleted.transactions)
-          ? importedDeleted.transactions
-          : [],
-        recurringTransactions: Array.isArray(importedDeleted.recurringTransactions)
-          ? importedDeleted.recurringTransactions
-          : [],
-        debts: Array.isArray(importedDeleted.debts) ? importedDeleted.debts : [],
-        cashInfusions: Array.isArray(importedDeleted.cashInfusions)
-          ? importedDeleted.cashInfusions
-          : [],
-        savingsGoals: Array.isArray(importedDeleted.savingsGoals)
-          ? importedDeleted.savingsGoals
-          : [],
-        skips: Array.isArray(importedDeleted.skips) ? importedDeleted.skips : [],
-      };
+      this._deletedItems = this._normalizeDeletedItems(data._deletedItems);
 
       // Clean up stale movedTransactions entries where fromDate equals toDate
       Object.keys(this.movedTransactions).forEach(key => {
