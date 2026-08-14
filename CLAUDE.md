@@ -11,7 +11,7 @@ CashFlow Calendar is an offline-first, single-page personal finance application 
 **No build process required.** Open `index.html` directly in a browser or serve via any static server.
 
 **Tests:** `npm test` (or run the two scripts directly with Node) — it must pass before every commit:
-- `node scripts/verify-logic.js` — 49 numbered integration tests over vm-loaded sources.
+- `node scripts/verify-logic.js` — 53 numbered integration tests over vm-loaded sources.
 - `node scripts/verify-walk-parity.js` — randomized cross-path invariants for the balance walk (~140k assertions; reproduce failures with `node scripts/verify-walk-parity.js <seed>`). Includes a source guard: calendar-ui must consume `CalculationService.walkDays` and never re-implement anchor math.
 
 No linting exists. UI testing is manual.
@@ -76,6 +76,8 @@ DOMContentLoaded
 
 Settled/unsettled support: `setTransactionSettled(date, index, isSettled)` toggles expense settlement status. `getUnsettledTransactions()` returns expenses marked `settled: false` that carry forward until resolved.
 
+Money entering the store is normalized, never trusted: the domain collections go through `_normalizeDebt` / `_normalizeSavingsGoal` / `_normalizeCashInfusion` (all built on `_finiteNumber`), and the three inputs the balance walk steps through — the transactions map, the recurring definitions, and the monthly anchors — are swept by `_repairWalkAmounts()` in both `loadData` and `importData`. That sweep is the only guard covering data that never passed a form: `"1e999"` is valid JSON that parses to `Infinity`, so an imported backup can otherwise put a non-finite amount straight into the walk. It rewrites non-finite values only, so finite money is never re-rounded. Use `Number.isFinite`, never bare `isNaN`, on any amount that gets persisted.
+
 **RecurringTransactionManager** (`recurring-manager.js`) - Expands recurring transactions into specific dates. Handles complex recurrence patterns: standard intervals, custom intervals, day-specific rules, business day adjustments, and variable amounts.
 
 **CalculationService** (`calculation-service.js`) - Computes daily running balances and monthly summaries with caching. `walkDays(start, end, opts)` is THE single day-by-day balance walk (anchor resets to entered − reserves, unsettled/allocation accumulators); every balance path — monthly balances, running balance, day breakdown, 30-day minimum, and both calendar loops — steps through it. Companion helpers: `getMonthSeed`, `getCellExpense`, `getCarriedUnsettledList`. Never re-implement the walk; the parity harness fails if calendar-ui forks it.
@@ -86,7 +88,7 @@ Settled/unsettled support: `setTransactionSettled(date, index, isSettled)` toggl
 
 **DebtSnowballUI** (`debt-snowball.js`) - Debt entry management, snowball payment generation, and plan timeline.
 
-**WhatIfUI** (`what-if.js`) - What-if preview: draft transactions flagged `whatIf: true` ride in the in-memory transactions map so every balance walk sees them, but `_filterPersistedTransactions` keeps them out of localStorage/exports/sync. Banner above the calendar shows the 30-day-minimum swing with Apply/Discard.
+**WhatIfUI** (`what-if.js`) - What-if preview: draft transactions flagged `whatIf: true` ride in the in-memory transactions map so every balance walk sees them, but `_filterPersistedTransactions` keeps them out of localStorage/exports/sync. Banner above the calendar shows the 30-day-minimum swing with Apply/Discard. **Because drafts sit in the shared map, every new read surface must opt out or mark them** — search excludes them in `performSearch` (which also covers the CSV export, built from `searchResults`), bank reconciliation excludes them in `_buildAppItems` and `_appPayeeVocabulary` (a draft matched to a bank line hides a genuinely missing transaction, and Settle/Fix-date would persist the draft via `_relocateEntry`), the agenda flags them 🔮, and the day-detail modal labels them.
 
 **SavingsGoalsUI** (`savings-goals.js`) - Savings goals (`store.savingsGoals`, synced like cashInfusions). Feasibility line reuses the balance walk via `CalculationService.getMinimumBalanceThrough(targetDate)` minus the snowball daily floor.
 
@@ -128,5 +130,5 @@ local_last_sync, _backup_before_merge, calendar_view_mode
 
 - `styles.css` - CSS variables for theming (primary, accent, error colors)
 - `README.md` - Project documentation and feature overview
-- `scripts/verify-logic.js` - Standalone logic verification utility (49 tests)
+- `scripts/verify-logic.js` - Standalone logic verification utility (53 tests)
 - `scripts/verify-walk-parity.js` - Randomized balance-walk parity harness + source guard

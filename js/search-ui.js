@@ -299,6 +299,18 @@ class SearchUI {
       }
 
       for (const transaction of transactions[date]) {
+        // What-if drafts ride in the in-memory transactions map so the balance
+        // walks see them, but they are not records of anything — they exist
+        // only until Applied or Discarded. Every other surface either hides
+        // them (exports, sync, localStorage via _filterPersistedTransactions;
+        // Recent Transactions, which requires a _lastModified stamp) or marks
+        // them (the agenda's 🔮, the day-detail modal's label). Search had
+        // neither, so a draft listed as an ordinary expense — and since the
+        // CSV export walks this.searchResults, it was written into
+        // search_results.csv indistinguishable from real spending.
+        if (transaction.whatIf === true) {
+          continue;
+        }
         if (
           transaction.recurringId &&
           this.recurringManager.isTransactionSkipped(

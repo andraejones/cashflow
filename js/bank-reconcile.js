@@ -349,6 +349,16 @@ class BankReconcileUI {
       const list = transactions[dateIso] || [];
       list.forEach((t, index) => {
         if (t.hidden === true) return;
+        // What-if drafts ride in the shared transactions map so the balance
+        // walks see them, but they are hypotheticals — no money moved, so no
+        // bank line can correspond to one. Matching against a draft is worse
+        // than cosmetic: the real statement line is counted as reconciled and
+        // never reported "missing from app", and Settle/Fix date run
+        // _relocateEntry, which rebuilds the row WITHOUT the whatIf flag and
+        // re-adds it via addTransaction — silently promoting a preview into a
+        // real, persisted, synced transaction that Discard can no longer
+        // remove.
+        if (t.whatIf === true) return;
         if (t.type === "balance") return; // anchor, not a cashflow line
         // Allocations (`allocated:true`) are set-aside buckets — funds reserved
         // for a purpose, not money that has left the account — so they never
@@ -1075,7 +1085,15 @@ class BankReconcileUI {
     const transactions = this.store.getTransactions();
     Object.keys(transactions).forEach((date) => {
       const list = transactions[date];
-      if (Array.isArray(list)) list.forEach((t) => addDesc(t.description));
+      if (Array.isArray(list)) {
+        // Drafts are excluded here too: this vocabulary feeds the hard block in
+        // _blockMatch, so a draft's description could tip a real bank payee into
+        // "known to the app" and block a legitimate match between two real
+        // entries. A hypothesis must not change how real lines reconcile.
+        list.forEach((t) => {
+          if (t.whatIf !== true) addDesc(t.description);
+        });
+      }
     });
     (this.store.getRecurringTransactions() || []).forEach((r) => {
       if (!r) return;

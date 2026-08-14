@@ -21,6 +21,49 @@ Object.assign(TransactionStore.prototype, {
     return Number.isFinite(num) ? num : fallback;
   },
 
+  // The domain collections (debts, infusions, goals, dailyFloor) normalize
+  // their money on the way in. The three inputs the balance walk actually
+  // steps through — the transactions map, the recurring definitions, and the
+  // monthly anchors — never did: loadData and importData assign them straight
+  // from JSON.parse. The form guards can't cover that, because the value never
+  // passes through a form: "1e999" is valid JSON that parses to Infinity, so
+  // restoring a backup puts a non-finite amount directly into the walk. The
+  // 30-day Minimum then reads -Infinity and every balance after that day is
+  // garbage; saving writes the amount back as null (JSON.stringify's rendering
+  // of Infinity), so the next load quietly shows a third set of numbers.
+  //
+  // Only non-finite values are rewritten. A finite amount is left exactly as
+  // it was, so sweeping an existing dataset can never move a balance — this
+  // repairs corruption, it does not re-round anyone's data.
+  // See [[finite-amount-guards]].
+  _repairWalkAmounts() {
+    let repaired = 0;
+    const fix = (obj, key) => {
+      if (!obj || obj[key] === undefined) return;
+      if (Number.isFinite(obj[key])) return;
+      obj[key] = this._finiteNumber(obj[key]);
+      repaired++;
+    };
+
+    Object.keys(this.transactions || {}).forEach((date) => {
+      const list = this.transactions[date];
+      if (Array.isArray(list)) list.forEach((t) => fix(t, "amount"));
+    });
+    (this.recurringTransactions || []).forEach((rt) => fix(rt, "amount"));
+    Object.keys(this.monthlyBalances || {}).forEach((monthKey) => {
+      const entry = this.monthlyBalances[monthKey];
+      fix(entry, "startingBalance");
+      fix(entry, "endingBalance");
+    });
+
+    if (repaired > 0) {
+      console.warn(
+        `Repaired ${repaired} non-finite amount(s) — they were reset to 0.`
+      );
+    }
+    return repaired;
+  },
+
   _normalizeDebt(debt) {
     return {
       ...debt,
@@ -72,6 +115,26 @@ Object.assign(TransactionStore.prototype, {
     };
   },
 
+  // Cash infusions were the last domain collection still coercing with
+  // `Number(x) || 0` — the exact pattern _finiteNumber exists to replace, and
+  // the one loadData/importData applied by hand at two sites that drifted from
+  // their siblings. An infinite infusion clears every debt in the snowball
+  // projection (Math.min(balance, Infinity) pays each one in full), then
+  // JSON.stringify writes it as null so the next load reads 0 and the plan
+  // changes again. Normalizing on the way in matches _normalizeDebt /
+  // _normalizeSavingsGoal, so add/update, load, and import all agree.
+  _normalizeCashInfusion(infusion) {
+    return {
+      ...infusion,
+      id: infusion.id || Utils.generateUniqueId(),
+      _lastModified: infusion._lastModified || new Date().toISOString(),
+      name: typeof infusion.name === "string" ? infusion.name : "",
+      amount: Math.round(this._finiteNumber(infusion.amount) * 100) / 100,
+      date: typeof infusion.date === "string" ? infusion.date : "",
+      targetDebtId: infusion.targetDebtId || null,
+    };
+  },
+
   getCashInfusions() {
     return this.cashInfusions;
   },
@@ -81,13 +144,11 @@ Object.assign(TransactionStore.prototype, {
       console.error("Invalid cash infusion data");
       return null;
     }
-    if (!infusion.id) {
-      infusion.id = Utils.generateUniqueId();
-    }
-    infusion._lastModified = new Date().toISOString();
-    this.cashInfusions.push(infusion);
+    const normalized = this._normalizeCashInfusion(infusion);
+    normalized._lastModified = new Date().toISOString();
+    this.cashInfusions.push(normalized);
     this.debouncedSave();
-    return infusion.id;
+    return normalized.id;
   },
 
   updateCashInfusion(id, updates) {
@@ -99,11 +160,12 @@ Object.assign(TransactionStore.prototype, {
     if (index === -1) {
       return false;
     }
-    this.cashInfusions[index] = {
+    this.cashInfusions[index] = this._normalizeCashInfusion({
       ...this.cashInfusions[index],
       ...updates,
+      id,
       _lastModified: new Date().toISOString(),
-    };
+    });
     this.debouncedSave();
     return true;
   },

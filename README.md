@@ -70,7 +70,7 @@ In addition, a day holding an allocation bucket gets a light-purple background h
 
 ## Data format
 
-The exported JSON schema includes: `transactions`, `monthlyBalances`, `recurringTransactions`, `skippedTransactions`, `movedTransactions`, `debts`, `cashInfusions`, `debtSnowballSettings`, `monthlyNotes`, `_deletedItems`, and metadata fields (`lastUpdated`, `lastExported`, `appVersion`). See `CLAUDE.md` for localStorage key details.
+The exported JSON schema includes: `transactions`, `monthlyBalances`, `recurringTransactions`, `skippedTransactions`, `movedTransactions`, `debts`, `cashInfusions`, `savingsGoals`, `debtSnowballSettings`, `monthlyNotes`, `_deletedItems`, and metadata fields (`lastUpdated`, `lastExported`, `appVersion`). See `CLAUDE.md` for localStorage key details.
 
 ## Project structure
 

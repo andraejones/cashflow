@@ -3554,6 +3554,272 @@ console.log("TEST 49: Debt/Goal Money Guards Reject Non-Finite Input");
   console.log("✅ Debt/goal money rejects non-finite input at the form and on import");
 }
 
+// TEST 50: the non-finite class, third pass — the collection TEST 49 missed.
+//
+// TEST 49's own comment names "the domain normalizers" as the choke point for
+// imports and cloud merges, but only debts and savings goals were converted.
+// Cash infusions and debtSnowballSettings.dailyFloor kept `Number(x) || 0` at
+// four hand-written sites (loadData ×2, importData ×2), and cash infusions had
+// no normalizer at all — addCashInfusion/updateCashInfusion stored whatever the
+// caller passed, the same asymmetry TEST 49 closed for addDebt/updateDebt.
+//
+// It matters because importData is what loadFromCloud feeds every merged gist
+// through, and "1e999" is valid JSON. An infinite infusion clears every debt in
+// the snowball projection (each debt is paid min(balance, Infinity)), so the
+// plan reports everything paid off; then JSON.stringify writes it as null and
+// the next load reads 0, so the plan changes again with no user action. An
+// infinite dailyFloor is the mirror image — no surplus ever clears the floor,
+// so no debt is ever paid off.
+console.log("TEST 50: Cash-Infusion / Daily-Floor Money Rejects Non-Finite Input");
+{
+  const BAD = [Infinity, -Infinity, NaN];
+
+  // --- the normalizer itself ------------------------------------------------
+  BAD.forEach((bad) => {
+    const s = new TransactionStore();
+    s.resetData();
+    const inf = s._normalizeCashInfusion({ name: "Bonus", amount: bad, date: "2026-09-01" });
+    if (!Number.isFinite(inf.amount)) {
+      throw new Error(`_normalizeCashInfusion passed ${bad} through`);
+    }
+    s.cancelPendingSave();
+  });
+
+  // --- add/update normalize on the way in, like addDebt/addSavingsGoal ------
+  {
+    const s = new TransactionStore();
+    s.resetData();
+    const id = s.addCashInfusion({ name: "Bonus", amount: 1e999, date: "2026-09-01" });
+    if (!Number.isFinite(s.getCashInfusions()[0].amount)) {
+      throw new Error("addCashInfusion stored a non-finite amount");
+    }
+    s.updateCashInfusion(id, { amount: -1e999 });
+    if (!Number.isFinite(s.getCashInfusions()[0].amount)) {
+      throw new Error("updateCashInfusion stored a non-finite amount");
+    }
+    if (s.getCashInfusions()[0].id !== id) {
+      throw new Error("updateCashInfusion changed the infusion's id");
+    }
+    s.cancelPendingSave();
+  }
+
+  // --- the import path: what JSON.parse hands the store on a cloud merge ----
+  {
+    const s = new TransactionStore();
+    s.resetData();
+    // 1e999 written as JSON *text*, i.e. exactly what a gist body can contain.
+    const imported = JSON.parse(
+      '{"transactions":{},"monthlyBalances":{},"recurringTransactions":[],' +
+      '"cashInfusions":[{"id":"c1","name":"Bonus","amount":1e999,"date":"2026-09-01"}],' +
+      '"debtSnowballSettings":{"dailyFloor":1e999,"autoGenerate":false}}'
+    );
+    if (Number.isFinite(imported.cashInfusions[0].amount)) {
+      throw new Error("test setup is wrong: 1e999 did not parse to Infinity");
+    }
+    s.importData(imported);
+    if (!Number.isFinite(s.getCashInfusions()[0].amount)) {
+      throw new Error("importData passed a non-finite cash infusion amount through");
+    }
+    if (!Number.isFinite(s.getDebtSnowballSettings().dailyFloor)) {
+      throw new Error("importData passed a non-finite dailyFloor through");
+    }
+    s.cancelPendingSave();
+  }
+
+  // --- the localStorage load path, for both collections ---------------------
+  {
+    const s = new TransactionStore();
+    s.resetData();
+    s.cancelPendingSave();
+    // Hand-written stored blobs: saveData would have serialized Infinity to
+    // null, so this is the shape a foreign/legacy writer leaves behind.
+    localStorage.setItem(
+      "cashInfusions",
+      '[{"id":"c1","name":"Bonus","amount":1e999,"date":"2026-09-01"}]'
+    );
+    localStorage.setItem(
+      "debtSnowballSettings",
+      '{"dailyFloor":1e999,"autoGenerate":false}'
+    );
+    const reloaded = new TransactionStore();
+    reloaded.loadData();
+    if (!Number.isFinite(reloaded.getCashInfusions()[0].amount)) {
+      throw new Error("loadData passed a non-finite cash infusion amount through");
+    }
+    if (!Number.isFinite(reloaded.getDebtSnowballSettings().dailyFloor)) {
+      throw new Error("loadData passed a non-finite dailyFloor through");
+    }
+    reloaded.cancelPendingSave();
+    localStorage.removeItem("cashInfusions");
+    localStorage.removeItem("debtSnowballSettings");
+  }
+
+  // --- ordinary money still round-trips untouched ---------------------------
+  {
+    const s = new TransactionStore();
+    s.resetData();
+    const id = s.addCashInfusion({
+      name: "Tax refund", amount: 1250.5, date: "2026-09-01", targetDebtId: "d1",
+    });
+    s.setDebtSnowballSettings({ dailyFloor: 75.25, autoGenerate: false });
+    s.saveData(true);
+
+    const reloaded = new TransactionStore();
+    reloaded.loadData();
+    const inf = reloaded.getCashInfusions().find((i) => i.id === id);
+    if (!inf || inf.amount !== 1250.5 || inf.name !== "Tax refund" ||
+        inf.date !== "2026-09-01" || inf.targetDebtId !== "d1") {
+      throw new Error(`a real cash infusion was mangled: ${JSON.stringify(inf)}`);
+    }
+    if (reloaded.getDebtSnowballSettings().dailyFloor !== 75.25) {
+      throw new Error("a real dailyFloor was mangled by the reload");
+    }
+    s.cancelPendingSave();
+    reloaded.cancelPendingSave();
+  }
+
+  console.log("✅ Cash infusions and the daily floor reject non-finite input on add, import, and load");
+}
+
+// TEST 51: what-if drafts must not surface in search, and must never reach the
+// exported CSV.
+//
+// Drafts ride in the in-memory transactions map on purpose — that is how every
+// balance walk sees them with no second implementation — so every read surface
+// has to opt out or mark them. All of them did except search:
+// _filterPersistedTransactions keeps drafts out of localStorage/exports/sync,
+// Recent Transactions drops them for want of a _lastModified stamp, the agenda
+// flags them 🔮 and the day-detail modal labels them. performSearch listed a
+// draft as an ordinary expense with no marker, and because exportSearchResults
+// walks this.searchResults, "Export" then wrote the hypothetical into
+// search_results.csv indistinguishable from real spending — a record of money
+// that was never committed, surviving the Discard that removed the draft.
+//
+// The filter lives in performSearch (one choke point) rather than in both the
+// list renderer and the exporter, so the two can't drift apart.
+console.log("TEST 51: What-If Drafts Stay Out Of Search Results And The CSV Export");
+{
+  const T51_elements = new Map();
+  const T51_makeElement = (id) => ({
+    id,
+    value: "",
+    checked: false,
+    disabled: false,
+    innerHTML: "",
+    textContent: "",
+    style: {},
+    classList: { add: () => {}, remove: () => {}, toggle: () => {} },
+    addEventListener: () => {},
+    setAttribute: () => {},
+    removeAttribute: () => {},
+    appendChild: () => {},
+    removeChild: () => {},
+    remove: () => {},
+    click: () => {},
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    contains: () => false,
+  });
+  const T51_getEl = (id) => {
+    if (!T51_elements.has(id)) T51_elements.set(id, T51_makeElement(id));
+    return T51_elements.get(id);
+  };
+  const prevDoc = global.document;
+  const prevBlob = global.Blob;
+  const prevURL = global.URL;
+  let exportedCsv = null;
+
+  global.document = {
+    addEventListener: () => {},
+    getElementById: T51_getEl,
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    createElement: () => T51_makeElement(null),
+    body: T51_makeElement("body"),
+    activeElement: null,
+  };
+  // Capture what the export would hand the browser, instead of downloading it.
+  global.Blob = function (parts) { exportedCsv = parts.join(""); };
+  global.URL = {
+    createObjectURL: () => "blob:test",
+    revokeObjectURL: () => {},
+  };
+
+  try {
+    const s = new TransactionStore();
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    // SearchUI is already declared in this context by TEST 45; re-running the
+    // source would throw "Identifier 'SearchUI' has already been declared".
+    const sui = new SearchUI(s, rm, null);
+
+    s.addTransaction("2026-09-05", {
+      amount: 120,
+      type: "expense",
+      description: "Kitchen supplies",
+    });
+    s.addWhatIfTransaction("2026-09-05", {
+      amount: 2400,
+      type: "expense",
+      description: "Kitchen reno",
+      settled: true,
+    });
+
+    T51_getEl("searchInput").value = "kitchen";
+    sui.performSearch();
+
+    const drafts = sui.searchResults.filter((r) => r.transaction.whatIf === true);
+    if (drafts.length !== 0) {
+      throw new Error(
+        `a what-if draft surfaced in search results: ${JSON.stringify(
+          drafts.map((d) => d.transaction.description)
+        )}`
+      );
+    }
+    // The real transaction must still be found — the filter is targeted, not a
+    // blanket exclusion of the date.
+    if (sui.searchResults.length !== 1 ||
+        sui.searchResults[0].transaction.description !== "Kitchen supplies") {
+      throw new Error(
+        `the real transaction was lost: ${JSON.stringify(
+          sui.searchResults.map((r) => r.transaction.description)
+        )}`
+      );
+    }
+
+    sui.exportSearchResults();
+    if (exportedCsv === null) {
+      throw new Error("test setup is wrong: the CSV export produced nothing");
+    }
+    if (exportedCsv.includes("Kitchen reno") || exportedCsv.includes("2400")) {
+      throw new Error(`a what-if draft was written to the CSV export:\n${exportedCsv}`);
+    }
+    if (!exportedCsv.includes("Kitchen supplies")) {
+      throw new Error(`the real transaction is missing from the CSV export:\n${exportedCsv}`);
+    }
+
+    // Applying the drafts commits them as real transactions, which SHOULD then
+    // be searchable — the filter keys on the draft flag, not on the row.
+    s.applyWhatIfTransactions();
+    sui.performSearch();
+    const descriptions = sui.searchResults
+      .map((r) => r.transaction.description)
+      .sort();
+    if (JSON.stringify(descriptions) !== JSON.stringify(["Kitchen reno", "Kitchen supplies"])) {
+      throw new Error(
+        `applied drafts did not become searchable: ${JSON.stringify(descriptions)}`
+      );
+    }
+
+    s.cancelPendingSave();
+    console.log("✅ Drafts hidden from search and the CSV; real and applied transactions still found");
+  } finally {
+    global.document = prevDoc;
+    global.Blob = prevBlob;
+    global.URL = prevURL;
+  }
+}
+
 // The savings-goal half of TEST 48. _contribute is async, so this is awaited in
 // the runner chain at the bottom — returning promises into a forEach would let
 // a failure surface as an unhandled rejection *after* the ✅ line.
@@ -3616,6 +3882,253 @@ async function runTest48Savings() {
   }
 
   console.log("✅ Non-finite contributions rejected; real progress persists across a reload");
+}
+
+// TEST 52: what-if drafts must be invisible to bank reconciliation.
+//
+// Same root as TEST 51 — drafts ride in the shared transactions map so the
+// balance walks see them, so every read surface must opt out or mark them — but
+// the bank reconciler's failure is destructive, not merely cosmetic.
+// _buildAppItems filtered hidden rows, balance anchors, allocations and
+// skipped recurring instances, but not drafts, so a hypothetical was a live
+// match candidate:
+//
+//   1. The real bank line matches the draft, is counted as reconciled, and is
+//      never reported "missing from app" — the transaction the user actually
+//      needs to log stays invisible, and the statement looks balanced.
+//   2. Worse, acting on that pair promotes the hypothetical into real money.
+//      _settle/_fixDate call _relocateEntry, which rebuilds the row field by
+//      field (amount/type/description/settled/debt*/allocated/drawsFrom*) and
+//      re-adds it with store.addTransaction. The rebuild never copies `whatIf`,
+//      so the row lands as an ordinary persisted transaction — written to
+//      localStorage, pushed to the Gist, and beyond the reach of Discard, which
+//      only removes rows still flagged whatIf.
+//
+// _appPayeeVocabulary is fixed for the same reason: it feeds the hard block in
+// _blockMatch, so a draft description could tip a real bank payee into "known
+// to the app" and block a match between two genuine entries.
+console.log("TEST 52: What-If Drafts Are Invisible To Bank Reconciliation");
+{
+  const csv =
+    "Posted Date,Transaction Date,Description,Deposit,Withdrawal,Balance\n" +
+    "7/6/2026,7/6/2026,Withdrawal ACH CAPITAL ONE,,($73.00),$1295.81\n" +
+    "6/29/2026,6/29/2026,Withdrawal Debit Card JASON'S DELI FORT MYERS FL,,($53.25),$2073.30\n";
+  const addAnchor = (s) =>
+    s.addTransaction("2026-06-29", {
+      amount: 53.25, type: "expense",
+      description: "Jasons Deli", settled: true,
+    });
+
+  // A draft standing exactly where a matching real entry would stand: same
+  // amount, same payee word, 3 days out (the window pass 1 stretches to on a
+  // shared name). Nothing about it may reach the reconciler.
+  {
+    const s = new TransactionStore();
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    const ui = new BankReconcileUI(s, rm, () => {}, () => {});
+    addAnchor(s);
+    s.addWhatIfTransaction("2026-07-03", {
+      amount: 73, type: "expense",
+      description: "Debt Payment: Capital One", settled: true,
+    });
+
+    const parsed = ui._parseSuncoastCsv(csv);
+    if (parsed.error) throw new Error("Parse error: " + parsed.error);
+    ui._run(parsed.rows);
+    const r = ui.result;
+
+    // The real bank line has no real counterpart, so it must be reported.
+    if (r.missingFromApp.length !== 1) {
+      throw new Error(
+        `A draft absorbed the real bank line: missingFromApp=${r.missingFromApp.length}`
+      );
+    }
+    // Only the anchor may match; the draft must not appear in any bucket.
+    if (r.matchedCount !== 1) {
+      throw new Error(`Draft was matched against a bank line: matched=${r.matchedCount}`);
+    }
+    if (r.dateDrifted.length !== 0) {
+      throw new Error(
+        `Draft surfaced as a date-drift pair (Settle/Fix would persist it): ${JSON.stringify(r.dateDrifted)}`
+      );
+    }
+    if (r.appOnlyUnmatched.length !== 0) {
+      throw new Error(
+        `Draft reported as an unmatched app entry: ${JSON.stringify(r.appOnlyUnmatched)}`
+      );
+    }
+
+    // The draft is still a draft: one whatIf row, and nothing persistable on
+    // either the draft's date or the bank's date.
+    if (s.getWhatIfTransactions().length !== 1) {
+      throw new Error("Reconciliation altered the draft set");
+    }
+    const persisted = s._filterPersistedTransactions(s.getTransactions());
+    if (persisted["2026-07-03"] || persisted["2026-07-06"]) {
+      throw new Error(
+        `A draft was promoted to a persisted transaction: ${JSON.stringify(persisted)}`
+      );
+    }
+
+    // The draft's payee words must not enter the matching vocabulary.
+    // _nameTokens upper-cases and strips the "Debt Payment:" label, so the
+    // draft's distinctive word would enter the vocabulary as "CAPITAL".
+    const vocab = ui._appPayeeVocabulary();
+    if (vocab.has("CAPITAL")) {
+      throw new Error("Draft description leaked into the payee vocabulary");
+    }
+    s.cancelPendingSave();
+  }
+
+  // Positive control: the identical entry as a REAL transaction still matches
+  // and still surfaces as date drift, so the guard filters drafts only.
+  {
+    const s = new TransactionStore();
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    const ui = new BankReconcileUI(s, rm, () => {}, () => {});
+    addAnchor(s);
+    s.addTransaction("2026-07-03", {
+      amount: 73, type: "expense",
+      description: "Debt Payment: Capital One", settled: true,
+    });
+
+    const parsed = ui._parseSuncoastCsv(csv);
+    if (parsed.error) throw new Error("Parse error: " + parsed.error);
+    ui._run(parsed.rows);
+    const r = ui.result;
+    if (r.matchedCount !== 2 || r.missingFromApp.length !== 0) {
+      throw new Error(
+        `Real entry must still match: matched=${r.matchedCount}, missing=${r.missingFromApp.length}`
+      );
+    }
+    if (r.dateDrifted.length !== 1) {
+      throw new Error("Real drifted entry must still surface as date drift");
+    }
+    if (!ui._appPayeeVocabulary().has("CAPITAL")) {
+      throw new Error("Real descriptions must still feed the payee vocabulary");
+    }
+    s.cancelPendingSave();
+  }
+  console.log("✅ Drafts never match, never report, and never get promoted; real entries unaffected");
+}
+
+// TEST 53: the non-finite class, fourth pass — the walk's own inputs.
+//
+// TESTs 48/49/50 worked outward from the forms: transaction amounts, debt and
+// goal money, cash infusions and the daily floor. Every one of those guards
+// sits on a path where a human typed the number. The three inputs the balance
+// walk actually steps through — the transactions map, the recurring
+// definitions, and the monthly anchors — are assigned straight from
+// JSON.parse by both loadData and importData and were never guarded at all,
+// so no form guard could reach them.
+//
+// "1e999" is valid JSON and parses to Infinity, so restoring an export (or a
+// gist body) is enough. What the user sees: the 30-day Minimum reads
+// -Infinity and every balance from that day on is meaningless; then the next
+// save writes the amount back as null, because that is how JSON.stringify
+// renders Infinity, so the reload after that shows a *third* set of numbers
+// with no action taken in between.
+//
+// The repair only rewrites non-finite values, so an ordinary dataset passes
+// through byte-identical — asserted below, because a normalizer that re-rounds
+// live money would be a worse bug than the one it fixes.
+console.log("TEST 53: Walk Inputs Reject Non-Finite Money On Import And Load");
+{
+  const badJson =
+    '{"transactions":{"2026-09-10":[' +
+    '{"id":"t1","amount":1e999,"type":"expense","description":"Rent","settled":true},' +
+    '{"id":"t2","amount":-1e999,"type":"income","description":"Refund"}]},' +
+    '"monthlyBalances":{"2026-9":{"startingBalance":1e999,"endingBalance":-1e999}},' +
+    '"recurringTransactions":[{"id":"r1","amount":1e999,"type":"expense",' +
+    '"description":"Gym","recurrence":"monthly","startDate":"2026-09-01"}]}';
+
+  const assertAllFinite = (s, where) => {
+    Object.keys(s.getTransactions()).forEach((date) => {
+      s.getTransactions()[date].forEach((t) => {
+        if (!Number.isFinite(t.amount)) {
+          throw new Error(`${where}: transaction amount is ${t.amount}`);
+        }
+      });
+    });
+    s.getRecurringTransactions().forEach((rt) => {
+      if (!Number.isFinite(rt.amount)) {
+        throw new Error(`${where}: recurring amount is ${rt.amount}`);
+      }
+    });
+    const balances = s.getMonthlyBalances();
+    Object.keys(balances).forEach((key) => {
+      if (
+        !Number.isFinite(balances[key].startingBalance) ||
+        !Number.isFinite(balances[key].endingBalance)
+      ) {
+        throw new Error(`${where}: monthly anchor is non-finite`);
+      }
+    });
+  };
+
+  // --- the import path: restoring a backup ---------------------------------
+  {
+    const s = new TransactionStore();
+    s.resetData();
+    const imported = JSON.parse(badJson);
+    if (Number.isFinite(imported.transactions["2026-09-10"][0].amount)) {
+      throw new Error("test setup is wrong: 1e999 did not parse to Infinity");
+    }
+    s.importData(imported);
+    assertAllFinite(s, "importData");
+
+    // ...and the walk that reads them stays finite.
+    const calc = new CalculationService(s, new RecurringTransactionManager(s));
+    const walked = calc.walkDays("2026-09-01", "2026-09-30", { seedBalance: 0 });
+    if (!Number.isFinite(walked.balance)) {
+      throw new Error(`walk produced a non-finite balance: ${walked.balance}`);
+    }
+    s.cancelPendingSave();
+  }
+
+  // --- the localStorage load path ------------------------------------------
+  {
+    const s = new TransactionStore();
+    s.resetData();
+    s.cancelPendingSave();
+    const bad = JSON.parse(badJson);
+    localStorage.setItem("transactions", JSON.stringify(bad.transactions));
+    localStorage.setItem("monthlyBalances", JSON.stringify(bad.monthlyBalances));
+    localStorage.setItem(
+      "recurringTransactions",
+      JSON.stringify(bad.recurringTransactions)
+    );
+    // JSON.stringify renders Infinity as null — exactly the residue a dataset
+    // corrupted before this guard existed leaves in storage.
+    const reloaded = new TransactionStore();
+    reloaded.loadData();
+    assertAllFinite(reloaded, "loadData");
+    reloaded.cancelPendingSave();
+  }
+
+  // --- finite money must survive untouched ---------------------------------
+  {
+    const s = new TransactionStore();
+    s.resetData();
+    s.addTransaction("2026-09-10", {
+      amount: 10.005, type: "expense", description: "Odd cents", settled: true,
+    });
+    s.addTransaction("2026-09-11", {
+      amount: 1234.56, type: "income", description: "Paycheck",
+    });
+    const before = JSON.stringify(s.getTransactions());
+    const repaired = s._repairWalkAmounts();
+    if (repaired !== 0) {
+      throw new Error(`clean data reported ${repaired} repair(s)`);
+    }
+    if (JSON.stringify(s.getTransactions()) !== before) {
+      throw new Error("repair altered finite amounts");
+    }
+    s.cancelPendingSave();
+  }
+  console.log("✅ Non-finite walk inputs repaired on import and load; finite money untouched");
 }
 
 // Run the async network tests sequentially (shared global.fetch mock): TEST 32

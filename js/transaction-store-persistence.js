@@ -228,6 +228,14 @@ Object.assign(TransactionStore.prototype, {
         });
       }
 
+      // Transactions, recurring definitions and monthly anchors are all parsed
+      // straight from storage above. Repair any non-finite money before the
+      // first walk reads it — a stored `null` (how JSON.stringify renders an
+      // Infinity that got in before this guard existed) lands here too. No
+      // migration save is forced: the repair is idempotent, so it rides the
+      // next ordinary save instead of pushing on load.
+      this._repairWalkAmounts();
+
       if (storedSkippedTransactions) {
         this.skippedTransactions = JSON.parse(storedSkippedTransactions);
       }
@@ -239,15 +247,9 @@ Object.assign(TransactionStore.prototype, {
 
       if (storedCashInfusions) {
         const parsedInfusions = JSON.parse(storedCashInfusions);
-        this.cashInfusions = parsedInfusions.map((infusion) => ({
-          ...infusion,
-          id: infusion.id || Utils.generateUniqueId(),
-          _lastModified: infusion._lastModified || new Date().toISOString(),
-          name: typeof infusion.name === "string" ? infusion.name : "",
-          amount: Number(infusion.amount) || 0,
-          date: typeof infusion.date === "string" ? infusion.date : "",
-          targetDebtId: infusion.targetDebtId || null,
-        }));
+        this.cashInfusions = parsedInfusions.map((infusion) =>
+          this._normalizeCashInfusion(infusion)
+        );
       }
 
       if (storedSavingsGoals) {
@@ -260,7 +262,7 @@ Object.assign(TransactionStore.prototype, {
       if (storedSnowballSettings) {
         const parsedSettings = JSON.parse(storedSnowballSettings);
         this.debtSnowballSettings = {
-          dailyFloor: Number(parsedSettings.dailyFloor) || 0,
+          dailyFloor: this._finiteNumber(parsedSettings.dailyFloor),
           extraPaymentStartMonth: this.normalizeExtraStartMonth(
             parsedSettings.extraPaymentStartMonth
           ),
@@ -594,21 +596,20 @@ Object.assign(TransactionStore.prototype, {
       this.transactions = data.transactions;
       this.monthlyBalances = data.monthlyBalances;
       this.recurringTransactions = data.recurringTransactions;
+      // These three are assigned raw from the parsed file — the only inputs to
+      // the balance walk that no form guard ever sees. Repair them before
+      // anything walks them (see _repairWalkAmounts).
+      this._repairWalkAmounts();
       this.skippedTransactions = data.skippedTransactions || {};
       this.debts = (data.debts || []).map((debt) => this._normalizeDebt(debt));
-      this.cashInfusions = (data.cashInfusions || []).map((infusion) => ({
-        ...infusion,
-        id: infusion.id || Utils.generateUniqueId(),
-        name: typeof infusion.name === "string" ? infusion.name : "",
-        amount: Number(infusion.amount) || 0,
-        date: typeof infusion.date === "string" ? infusion.date : "",
-        targetDebtId: infusion.targetDebtId || null,
-      }));
+      this.cashInfusions = (data.cashInfusions || []).map((infusion) =>
+        this._normalizeCashInfusion(infusion)
+      );
       this.savingsGoals = (data.savingsGoals || []).map((goal) =>
         this._normalizeSavingsGoal(goal)
       );
       this.debtSnowballSettings = {
-        dailyFloor: Number(data.debtSnowballSettings?.dailyFloor) || 0,
+        dailyFloor: this._finiteNumber(data.debtSnowballSettings?.dailyFloor),
         extraPaymentStartMonth: this.normalizeExtraStartMonth(
           data.debtSnowballSettings?.extraPaymentStartMonth
         ),
