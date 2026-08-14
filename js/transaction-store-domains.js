@@ -8,14 +8,27 @@
 
 Object.assign(TransactionStore.prototype, {
 
+  // Numeric coercion choke point for the domain collections. `Number(x) || 0`
+  // was the intent at every site below, but it passes ±Infinity straight
+  // through — and JSON.stringify writes Infinity as null, so the value comes
+  // back as 0 on the next load: a debt balance silently reads as paid off, a
+  // savings goal loses recorded progress. "1e999" is valid JSON, so this
+  // arrives from imports and cloud merges, not only from a form (see
+  // [[finite-amount-guards]]; dd93807 fixed the form paths it could reach).
+  // Rounding stays at the call sites so finite values behave exactly as before.
+  _finiteNumber(value, fallback = 0) {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : fallback;
+  },
+
   _normalizeDebt(debt) {
     return {
       ...debt,
       id: debt.id || Utils.generateUniqueId(),
       _lastModified: debt._lastModified || new Date().toISOString(),
-      balance: Math.round((Number(debt.balance) || 0) * 100) / 100,
-      minPayment: Math.round((Number(debt.minPayment) || 0) * 100) / 100,
-      dueDay: Number(debt.dueDay) || 1,
+      balance: Math.round(this._finiteNumber(debt.balance) * 100) / 100,
+      minPayment: Math.round(this._finiteNumber(debt.minPayment) * 100) / 100,
+      dueDay: this._finiteNumber(debt.dueDay) || 1,
       dueDayPattern:
         typeof debt.dueDayPattern === "string" ? debt.dueDayPattern : "",
       recurrence:
@@ -27,13 +40,13 @@ Object.assign(TransactionStore.prototype, {
           ? debt.businessDayAdjustment
           : "none",
       semiMonthlyDays: Array.isArray(debt.semiMonthlyDays)
-        ? debt.semiMonthlyDays.map((day) => Number(day) || 1)
+        ? debt.semiMonthlyDays.map((day) => this._finiteNumber(day) || 1)
         : null,
       semiMonthlyLastDay: debt.semiMonthlyLastDay === true,
       customInterval:
         debt.customInterval && typeof debt.customInterval === "object"
           ? {
-            value: Number(debt.customInterval.value) || 1,
+            value: this._finiteNumber(debt.customInterval.value) || 1,
             unit:
               debt.customInterval.unit === "weeks" ||
                 debt.customInterval.unit === "months"
@@ -42,8 +55,8 @@ Object.assign(TransactionStore.prototype, {
           }
           : null,
       endDate: typeof debt.endDate === "string" ? debt.endDate : "",
-      maxOccurrences: Number(debt.maxOccurrences) || null,
-      interestRate: Number(debt.interestRate) || 0,
+      maxOccurrences: this._finiteNumber(debt.maxOccurrences) || null,
+      interestRate: this._finiteNumber(debt.interestRate),
     };
   },
 
@@ -53,9 +66,9 @@ Object.assign(TransactionStore.prototype, {
       id: goal.id || Utils.generateUniqueId(),
       _lastModified: goal._lastModified || new Date().toISOString(),
       name: typeof goal.name === "string" ? goal.name : "",
-      targetAmount: Math.round((Number(goal.targetAmount) || 0) * 100) / 100,
+      targetAmount: Math.round(this._finiteNumber(goal.targetAmount) * 100) / 100,
       targetDate: typeof goal.targetDate === "string" ? goal.targetDate : "",
-      saved: Math.round((Number(goal.saved) || 0) * 100) / 100,
+      saved: Math.round(this._finiteNumber(goal.saved) * 100) / 100,
     };
   },
 
@@ -312,7 +325,11 @@ Object.assign(TransactionStore.prototype, {
       debt.id = Utils.generateUniqueId();
     }
     debt._lastModified = new Date().toISOString();
-    this.debts.push(debt);
+    // Normalize on the way in, as addSavingsGoal does. Debts used to be
+    // normalized only on load, so an in-session debt kept whatever the caller
+    // passed — and a non-finite balance was "normalized" only after
+    // JSON.stringify had already turned it into null, i.e. into 0.
+    this.debts.push(this._normalizeDebt(debt));
     this.debouncedSave();
     return debt.id;
   },
@@ -326,11 +343,11 @@ Object.assign(TransactionStore.prototype, {
     if (index === -1) {
       return false;
     }
-    this.debts[index] = {
+    this.debts[index] = this._normalizeDebt({
       ...this.debts[index],
       ...updates,
       _lastModified: new Date().toISOString(),
-    };
+    });
     this.debouncedSave();
     return true;
   },
@@ -365,7 +382,7 @@ Object.assign(TransactionStore.prototype, {
     }
     this.debtSnowballSettings = {
       ...this.debtSnowballSettings,
-      dailyFloor: Number(settings.dailyFloor) || 0,
+      dailyFloor: this._finiteNumber(settings.dailyFloor),
       extraPaymentStartMonth: this.normalizeExtraStartMonth(
         settings.extraPaymentStartMonth
       ),

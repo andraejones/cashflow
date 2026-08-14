@@ -31,7 +31,10 @@ global.localStorage = {
 global.window = { localStorage: global.localStorage };
 global.document = {
   addEventListener: () => {},
-  getElementById: () => null
+  getElementById: () => null,
+  // Kept in step with verify-logic.js's stub: a stub that is looser or thinner
+  // than the other lets code pass in one harness and throw in the other.
+  querySelectorAll: () => []
 };
 global.Utils = {
   generateUniqueId: () => Math.random().toString(36).substr(2, 9),

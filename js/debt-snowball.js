@@ -745,11 +745,14 @@ class DebtSnowballUI {
       Utils.showNotification("Please enter a debt name", "error");
       return;
     }
-    if (isNaN(balance) || balance < 0) {
+    // Reject ±Infinity too ("1e999" survives a number input's sanitization):
+    // an infinite balance persists as null and reloads as 0, so the debt reads
+    // as paid off. Same idiom as the transaction amount guards.
+    if (!Number.isFinite(balance) || balance < 0) {
       Utils.showNotification("Please enter a valid balance", "error");
       return;
     }
-    if (isNaN(minPayment) || minPayment < 0) {
+    if (!Number.isFinite(minPayment) || minPayment < 0) {
       Utils.showNotification("Please enter a valid minimum payment", "error");
       return;
     }
@@ -769,7 +772,7 @@ class DebtSnowballUI {
         recurrence,
         dueStartDate: normalizedStartDate,
         ...advancedOptions,
-        interestRate: isNaN(interestRate) ? 0 : interestRate,
+        interestRate: Number.isFinite(interestRate) ? interestRate : 0,
       });
       const updatedDebt = {
         ...debt,
@@ -781,7 +784,7 @@ class DebtSnowballUI {
         recurrence,
         dueStartDate: normalizedStartDate,
         ...advancedOptions,
-        interestRate: isNaN(interestRate) ? 0 : interestRate,
+        interestRate: Number.isFinite(interestRate) ? interestRate : 0,
       };
       this.ensureMinimumPaymentRecurring(updatedDebt);
       Utils.showNotification("Debt updated");
@@ -795,7 +798,7 @@ class DebtSnowballUI {
         recurrence,
         dueStartDate: normalizedStartDate,
         ...advancedOptions,
-        interestRate: isNaN(interestRate) ? 0 : interestRate,
+        interestRate: Number.isFinite(interestRate) ? interestRate : 0,
       };
       const debtId = this.store.addDebt(debt);
       const createdDebt = this.store.getDebts().find((d) => d.id === debtId);
@@ -864,7 +867,7 @@ class DebtSnowballUI {
     const extraPaymentStartMonth = (
       this.snowballExtraStartInput?.value || ""
     ).trim();
-    if (isNaN(dailyFloor) || dailyFloor < 0) {
+    if (!Number.isFinite(dailyFloor) || dailyFloor < 0) {
       Utils.showNotification("Minimum daily cashflow must be 0 or greater", "error");
       return;
     }

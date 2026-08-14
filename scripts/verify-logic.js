@@ -22,7 +22,10 @@ global.document = {
   getElementById: (id) =>
     Object.prototype.hasOwnProperty.call(global.__domFields, id)
       ? { value: global.__domFields[id], focus() {}, style: {}, setAttribute() {} }
-      : null
+      : null,
+  // Empty NodeList, the same "nothing is on the page" answer getElementById
+  // gives. TEST 49 drives saveDebt, which reads the end-condition radios.
+  querySelectorAll: () => []
 };
 global.Utils = {
   generateUniqueId: () => Math.random().toString(36).substr(2, 9),
@@ -3421,6 +3424,134 @@ console.log("TEST 48: Amount Guards Reject Non-Finite Input");
   }
 
   console.log("✅ What-if drafts reject non-finite amounts; the walk stays finite");
+}
+
+// TEST 49: the non-finite class again, at the two places TEST 48 did not reach.
+//
+// dd93807 tightened the amount guards it could find, on the stated assumption
+// that "the browser blocks this on number inputs". Two holes were left:
+//
+//   - js/debt-snowball.js kept `isNaN` on balance / minPayment / interestRate /
+//     dailyFloor. A number input's sanitization keeps "1e999" (it is a valid
+//     floating-point number per the HTML grammar), so parseFloat returns
+//     Infinity and the debt is stored with an infinite balance.
+//   - The domain normalizers used `Number(x) || 0`, which passes ±Infinity
+//     through. That is the choke point for *imports and cloud merges*, and
+//     1e999 is valid JSON — so this never needed a form at all.
+//
+// Either way the value dies the same quiet death: JSON.stringify writes
+// Infinity as null, so the next load reads 0. A debt balance reads as PAID
+// OFF, and a savings goal loses recorded progress. Guards are Number.isFinite
+// now, and the normalizers coerce through _finiteNumber.
+console.log("TEST 49: Debt/Goal Money Guards Reject Non-Finite Input");
+{
+  const NON_FINITE = ["1e999", "-1e999", "Infinity", "-Infinity"];
+
+  // --- the form path: saveDebt must refuse to store a non-finite balance ---
+  NON_FINITE.forEach((raw) => {
+    const s = new TransactionStore();
+    s.resetData();
+    const ui = Object.create(DebtSnowballUI.prototype);
+    ui.store = s;
+    ui.recurringManager = new RecurringTransactionManager(s);
+    ui.editingDebtId = null;
+    ui.convertingFromRecurringId = null;
+    ui.debtNameInput = { value: "Card" };
+    ui.debtBalanceInput = { value: raw };
+    ui.debtMinPaymentInput = { value: "50" };
+    ui.debtRecurrenceInput = { value: "monthly" };
+    ui.debtStartDateInput = { value: "2026-09-01" };
+    ui.debtDueDayInput = { value: "1" };
+    ui.debtDueDayPatternInput = { value: "" };
+    ui.debtInterestInput = { value: "0" };
+    ui.hideDebtForm = () => {};
+    ui.refresh = () => {};
+    ui.onUpdate = () => {};
+    ui.saveDebt();
+
+    if (s.getDebts().length !== 0) {
+      throw new Error(`saveDebt stored a non-finite balance ${JSON.stringify(raw)}`);
+    }
+    s.cancelPendingSave();
+  });
+
+  // A real balance still saves, so the guard did not just refuse everything.
+  {
+    const s = new TransactionStore();
+    s.resetData();
+    const ui = Object.create(DebtSnowballUI.prototype);
+    ui.store = s;
+    ui.recurringManager = new RecurringTransactionManager(s);
+    ui.editingDebtId = null;
+    ui.convertingFromRecurringId = null;
+    ui.debtNameInput = { value: "Card" };
+    ui.debtBalanceInput = { value: "1250.50" };
+    ui.debtMinPaymentInput = { value: "50" };
+    ui.debtRecurrenceInput = { value: "monthly" };
+    ui.debtStartDateInput = { value: "2026-09-01" };
+    ui.debtDueDayInput = { value: "1" };
+    ui.debtDueDayPatternInput = { value: "" };
+    ui.debtInterestInput = { value: "19.99" };
+    ui.hideDebtForm = () => {};
+    ui.refresh = () => {};
+    ui.onUpdate = () => {};
+    ui.saveDebt();
+
+    const debts = s.getDebts();
+    if (debts.length !== 1 || debts[0].balance !== 1250.5) {
+      throw new Error("saveDebt rejected or mangled an ordinary balance");
+    }
+    if (debts[0].interestRate !== 19.99) {
+      throw new Error("saveDebt mangled an ordinary interest rate");
+    }
+    s.cancelPendingSave();
+  }
+
+  // --- the import/merge path: normalization is the choke point -------------
+  // No form involved: this is what JSON.parse hands the store.
+  [Infinity, -Infinity, NaN].forEach((bad) => {
+    const s = new TransactionStore();
+    s.resetData();
+
+    const debt = s._normalizeDebt({ name: "Imported", balance: bad, minPayment: bad, interestRate: bad, dueDay: bad });
+    if (!Number.isFinite(debt.balance) || !Number.isFinite(debt.minPayment) ||
+        !Number.isFinite(debt.interestRate) || !Number.isFinite(debt.dueDay)) {
+      throw new Error(`_normalizeDebt passed ${bad} through`);
+    }
+
+    const goal = s._normalizeSavingsGoal({ name: "Imported", targetAmount: bad, saved: bad });
+    if (!Number.isFinite(goal.targetAmount) || !Number.isFinite(goal.saved)) {
+      throw new Error(`_normalizeSavingsGoal passed ${bad} through`);
+    }
+
+    s.setDebtSnowballSettings({ dailyFloor: bad, autoGenerate: false });
+    if (!Number.isFinite(s.getDebtSnowballSettings().dailyFloor)) {
+      throw new Error(`setDebtSnowballSettings passed a ${bad} dailyFloor through`);
+    }
+    s.cancelPendingSave();
+  });
+
+  // The failure mode itself: a stored value must survive the JSON round-trip
+  // that localStorage/gist sync performs. Infinity would come back as null.
+  {
+    const s = new TransactionStore();
+    s.resetData();
+    s.addDebt({ name: "Card", balance: 1e999, minPayment: 50, dueDay: 1, recurrence: "monthly" });
+    const roundTripped = JSON.parse(JSON.stringify(s.getDebts()));
+    const reloaded = new TransactionStore();
+    reloaded.resetData();
+    const restored = reloaded._normalizeDebt(roundTripped[0]);
+    if (!Number.isFinite(restored.balance)) {
+      throw new Error("a debt balance survived the round-trip non-finite");
+    }
+    if (roundTripped[0].balance === null) {
+      throw new Error("Infinity reached storage and serialized to null — the guard did not hold");
+    }
+    s.cancelPendingSave();
+    reloaded.cancelPendingSave();
+  }
+
+  console.log("✅ Debt/goal money rejects non-finite input at the form and on import");
 }
 
 // The savings-goal half of TEST 48. _contribute is async, so this is awaited in

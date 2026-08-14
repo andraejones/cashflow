@@ -41,3 +41,7 @@ cashflow_backup*.json
 # Temp / scratch
 temp/
 tmp/
+
+# Local development scratch — experiments, throwaway scripts, sample data.
+# Never committed; nothing the app loads may live here.
+dev/
