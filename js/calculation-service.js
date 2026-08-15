@@ -457,7 +457,10 @@ class CalculationService {
   // calendar cell renders (see CalendarUI.generateCalendar): running balance,
   // the day's income, the cell's expense figure (which on the current day folds
   // in unsettled items carried forward from earlier days), the transaction
-  // count, and the "without unsettled" / "excluding allocations" variants.
+  // count, and the two holdback-release variants. `balanceWithoutUnsettled`
+  // releases BOTH holdbacks (unsettled + allocation reserves) — the modal
+  // labels it "Balance before holdbacks" for that reason; the field name is
+  // historical. `balanceExcludingAllocations` releases only the reserves.
   // Kept here so the day-detail modal reuses the same walk instead of
   // re-deriving it. See [[balance-walk-paths]].
   getDayBalanceBreakdown(dateString) {

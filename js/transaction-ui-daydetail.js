@@ -9,7 +9,7 @@ Object.assign(TransactionUI.prototype, {
 
   // Render the day-detail modal's balance summary. Shows the running balance
   // plus the same supporting figures the calendar cell surfaces (day expense,
-  // balance without unsettled, balance excluding allocations, transaction
+  // balance before holdbacks, balance excluding allocations, transaction
   // count), each labeled. Figures come from CalculationService.getDayBalanceBreakdown
   // so the modal reuses the calendar's balance walk instead of re-deriving it.
   renderModalBalance(date) {
@@ -25,7 +25,7 @@ Object.assign(TransactionUI.prototype, {
       rows.push(`<div class="modal-balance-row"><span class="modal-balance-label">Expenses</span><span class="modal-balance-value expense">-$${Utils.formatAmount(b.expense)}</span></div>`);
     }
     if (b.balanceWithoutUnsettled !== null) {
-      rows.push(`<div class="modal-balance-row"><span class="modal-balance-label">Balance without unsettled</span><span class="modal-balance-value">$${Utils.formatAmount(b.balanceWithoutUnsettled)}</span></div>`);
+      rows.push(`<div class="modal-balance-row"><span class="modal-balance-label">Balance before holdbacks</span><span class="modal-balance-value">$${Utils.formatAmount(b.balanceWithoutUnsettled)}</span></div>`);
     }
     if (b.balanceExcludingAllocations !== null) {
       rows.push(`<div class="modal-balance-row"><span class="modal-balance-label">Balance excluding allocations</span><span class="modal-balance-value">$${Utils.formatAmount(b.balanceExcludingAllocations)}</span></div>`);
@@ -332,7 +332,13 @@ Object.assign(TransactionUI.prototype, {
           amountInput.id = `edit-amount-${date}-${index}`;
           amountInput.value = t.amount;
           amountInput.step = "0.01";
-          amountInput.min = "0";
+          // An Ending Balance may legitimately be negative (overdrawn account),
+          // which saveEdit accepts — only income/expense are floored above zero.
+          // A blanket min="0" marked those rows :invalid and told the user the
+          // opposite of what the app actually allows.
+          if (normalizedType !== "balance") {
+            amountInput.min = "0";
+          }
           amountInput.setAttribute("aria-label", "Amount");
           editForm.appendChild(amountInput);
 

@@ -2255,6 +2255,156 @@ function runReplaceRemoteTest() {
   });
 }
 
+// TEST 58: saveToCloud's pre-merge shadow backup is a data-safety guard — if it
+// can't be written, the merge must not proceed and the PATCH must not fire.
+// The guard threw "Aborting to prevent data loss", but the surrounding
+// `catch (parseError)` (meant only for an unreadable remote FILE) swallowed it
+// and execution fell through to the PATCH, overwriting the remote copy with
+// unmerged local data. The backup is a full copy of the dataset, so the trigger
+// is an over-quota localStorage — precisely the situation the guard exists for.
+console.log("TEST 58: A Merge That Can't Complete Aborts The Push, Not The Guard");
+function runBackupAbortTest() {
+  const remoteData = {
+    transactions: {}, monthlyBalances: {}, recurringTransactions: [],
+    skippedTransactions: {}, movedTransactions: {},
+    debts: [{ id: "R", name: "Remote Card", balance: 200, _lastModified: new Date().toISOString() }],
+    cashInfusions: [], savingsGoals: [], monthlyNotes: {},
+    debtSnowballSettings: { dailyFloor: 0, autoGenerate: false },
+    _deletedItems: {}, lastUpdated: new Date().toISOString(),
+  };
+
+  const prevFetch = global.fetch;
+  const prevDoc = global.document;
+  const prevHide = Utils.hideLoading, prevShow = Utils.showLoading;
+  const prevSetItem = global.localStorage.setItem;
+  Utils.hideLoading = () => {};
+  Utils.showLoading = () => {};
+  global.document = {
+    addEventListener: () => {},
+    querySelector: () => null,
+    getElementById: () => null,
+  };
+
+  let patchBody = null;
+  const etagHeaders = { get: () => '"etag-x"' };
+  global.fetch = async (url, opts) => {
+    if (opts && opts.method === "PATCH") {
+      patchBody = JSON.parse(opts.body);
+      return { ok: true, status: 200, headers: etagHeaders };
+    }
+    return {
+      ok: true,
+      status: 200,
+      headers: etagHeaders,
+      json: async () => ({
+        files: { "cashflow_data.json": { content: JSON.stringify(remoteData), truncated: false } },
+      }),
+    };
+  };
+
+  const restore = () => {
+    global.fetch = prevFetch;
+    global.document = prevDoc;
+    Utils.hideLoading = prevHide;
+    Utils.showLoading = prevShow;
+    global.localStorage.setItem = prevSetItem;
+  };
+
+  const makeSync = () => {
+    const s = new TransactionStore();
+    s.resetData();
+    s.debts = [{ id: "L", name: "Local Card", balance: 100, _lastModified: new Date().toISOString() }];
+    const sync = new CloudSync(s, () => {});
+    sync.getCloudCredentialsAsync = async () => ({ token: "tok", gistId: "gid" });
+    return { s, sync };
+  };
+
+  // --- backup write fails (quota) -> no PATCH at all ------------------------
+  const failing = makeSync();
+  global.localStorage.setItem = (key, val) => {
+    if (key === "_backup_before_merge") {
+      throw new Error("QuotaExceededError");
+    }
+    return prevSetItem(key, val);
+  };
+
+  return failing.sync
+    .saveToCloud(true)
+    .then(() => {
+      global.localStorage.setItem = prevSetItem;
+      failing.s.cancelPendingSave();
+      if (patchBody !== null) {
+        const pushed = JSON.parse(patchBody.files["cashflow_data.json"].content);
+        throw new Error(
+          "push proceeded after the backup guard fired; it would have overwritten remote with " +
+            JSON.stringify((pushed.debts || []).map((d) => d.id))
+        );
+      }
+
+      // --- remote file exists but can't be READ -> also no PATCH -------------
+      // A truncated gist is fetched via raw_url; if that fetch fails we have not
+      // seen the remote data, so overwriting it would discard a peer's edits.
+      // (An unparseable payload is different — there is genuinely nothing to
+      // merge — and still falls through to the local push.)
+      const unreadable = makeSync();
+      const withMerge = global.fetch;
+      global.fetch = async (url, opts) => {
+        if (opts && opts.method === "PATCH") {
+          patchBody = JSON.parse(opts.body);
+          return { ok: true, status: 200, headers: etagHeaders };
+        }
+        if (String(url).includes("raw")) {
+          return { ok: false, status: 500, text: async () => "" };
+        }
+        return {
+          ok: true,
+          status: 200,
+          headers: etagHeaders,
+          json: async () => ({
+            files: {
+              "cashflow_data.json": {
+                content: "",
+                truncated: true,
+                raw_url: "https://gist.githubusercontent.com/raw/x",
+              },
+            },
+          }),
+        };
+      };
+      return unreadable.sync.saveToCloud(true).then(() => {
+        global.fetch = withMerge;
+        unreadable.s.cancelPendingSave();
+        if (patchBody !== null) {
+          throw new Error("push proceeded although the remote file could not be read");
+        }
+
+        // --- control: with a working backup the same setup DOES push a merge ---
+        const ok = makeSync();
+        return ok.sync.saveToCloud(true).then(() => {
+          ok.s.cancelPendingSave();
+          if (!patchBody) {
+            throw new Error("control run issued no PATCH — the abort is not specific to the failure cases");
+          }
+          const pushed = JSON.parse(patchBody.files["cashflow_data.json"].content);
+          const ids = (pushed.debts || []).map((d) => d.id).sort().join(",");
+          if (ids !== "L,R") {
+            throw new Error("control run should push the merged set (L,R), got: " + ids);
+          }
+        });
+      });
+    })
+    .then(
+      () => {
+        restore();
+        console.log("✅ Backup/read failure aborts the push; the cloud copy is left intact");
+      },
+      (err) => {
+        restore();
+        throw err;
+      }
+    );
+}
+
 // TEST 30: saveToCloud merges with an existing remote gist even when this
 // device has never synced it (no stored ETag). Gating the fetch-and-merge on
 // _lastKnownETag meant a fresh device pointed at a populated gist blind-
@@ -4131,10 +4281,228 @@ console.log("TEST 53: Walk Inputs Reject Non-Finite Money On Import And Load");
   console.log("✅ Non-finite walk inputs repaired on import and load; finite money untouched");
 }
 
+// A holiday's OBSERVED date can land in the previous calendar year: when Jan 1
+// falls on a Saturday the federal observance moves to Dec 31. getUSBankingHolidays
+// files that date under the JANUARY year, so isUSBankingHoliday — which only ever
+// consulted the date's own year — never matched it, and a business-day-adjusted
+// payment was scheduled onto a day the banks are closed.
+console.log("TEST 54: Observed New Year's Day Lands In The Previous Year");
+{
+  const s = new TransactionStore();
+  s.resetData();
+  const rm = new RecurringTransactionManager(s);
+
+  // Jan 1 2028 is a Saturday -> observed Friday Dec 31 2027.
+  if (new Date(2028, 0, 1).getDay() !== 6) {
+    throw new Error("test premise is wrong: Jan 1 2028 is not a Saturday");
+  }
+  const dec31 = new Date(2027, 11, 31, 12, 0, 0);
+  if (!rm.isUSBankingHoliday(dec31)) {
+    throw new Error("Dec 31 2027 not recognized as the observed New Year holiday");
+  }
+  if (rm.isBusinessDay(dec31)) {
+    throw new Error("Dec 31 2027 counted as a business day");
+  }
+
+  // Same-year observances must be unaffected, and an ordinary December weekday
+  // must not become a holiday just because December now checks two years.
+  if (!rm.isUSBankingHoliday(new Date(2026, 6, 3, 12, 0, 0))) {
+    throw new Error("July 4 2026 (Sat) observed Fri Jul 3 was lost");
+  }
+  if (rm.isUSBankingHoliday(new Date(2027, 11, 30, 12, 0, 0))) {
+    throw new Error("Dec 30 2027 wrongly reported as a holiday");
+  }
+  if (rm.isUSBankingHoliday(new Date(2026, 11, 31, 12, 0, 0))) {
+    throw new Error("Dec 31 2026 wrongly reported as a holiday");
+  }
+
+  // ...and the expansion actually moves the payment off it.
+  s.addRecurringTransaction({
+    id: "nye-bill",
+    amount: 40,
+    type: "expense",
+    description: "Month-end bill",
+    recurrence: "monthly",
+    startDate: "2027-12-31",
+    lastDayOfMonth: true,
+    businessDayAdjustment: "previous",
+  });
+  rm.applyRecurringTransactions(2027, 11);
+  const placed = Object.keys(s.getTransactions()).filter((d) =>
+    (s.getTransactions()[d] || []).some((t) => t.recurringId === "nye-bill")
+  );
+  if (placed.length !== 1 || placed[0] !== "2027-12-30") {
+    throw new Error(
+      `expected the bill on 2027-12-30, got ${JSON.stringify(placed)}`
+    );
+  }
+  s.cancelPendingSave();
+  console.log("✅ Cross-year observed holiday recognized; payment adjusts off it");
+}
+
+// _pruneDeletedItems runs inside saveData's try, immediately before
+// triggerSaveCallbacks. A malformed tombstone entry (typeof null === "object",
+// so it passed the object check and then threw on .deletedAt) took the callbacks
+// down with it — and those callbacks are what schedule the cloud push. The save
+// "succeeded" from the user's point of view while sync silently stopped for the
+// rest of the session. Only external data can carry such an entry, so the fix is
+// at the shared normalize choke point plus a defensive read in the prune.
+console.log("TEST 55: Malformed Tombstones Can't Silence The Save Callbacks");
+{
+  const s = new TransactionStore();
+  s.resetData();
+  s.cancelPendingSave();
+
+  let callbackFired = false;
+  s.registerSaveCallback(() => { callbackFired = true; });
+  // Straight into the array, the way a legacy in-memory writer could.
+  s._deletedItems.transactions.push(null);
+  s._deletedItems.transactions.push({ id: "keep-me", deletedAt: Date.now() });
+  s.saveData(true);
+  if (!callbackFired) {
+    throw new Error("save callbacks did not fire — cloud sync would stop being scheduled");
+  }
+  if (localStorage.getItem("deletedItems") === null) {
+    throw new Error("deletedItems was never written");
+  }
+  const written = JSON.parse(localStorage.getItem("deletedItems"));
+  if (!written.transactions.some((d) => d && d.id === "keep-me")) {
+    throw new Error("a good tombstone was lost alongside the malformed one");
+  }
+
+  // The load and import paths drop unusable entries outright, so nothing
+  // downstream (prune, merge) ever sees them again.
+  const junk = {
+    transactions: [null, 42, [], { deletedAt: 1 }, "legacy-id", { id: "ok", deletedAt: Date.now() }],
+    savingsGoals: "not-an-array",
+    skips: [null, { date: "2026-09-01", recurringId: "r1", skipped: true, at: Date.now() }],
+  };
+  const normalized = s._normalizeDeletedItems(junk);
+  if (normalized.transactions.length !== 2) {
+    throw new Error(
+      `expected the legacy string + the valid record to survive, got ${JSON.stringify(normalized.transactions)}`
+    );
+  }
+  if (!Array.isArray(normalized.savingsGoals) || normalized.savingsGoals.length !== 0) {
+    throw new Error("a non-array collection was not reset to an empty array");
+  }
+  if (normalized.skips.length !== 1) {
+    throw new Error(`expected one usable skip event, got ${normalized.skips.length}`);
+  }
+  s._TOMBSTONE_KEYS.forEach((key) => {
+    if (!Array.isArray(normalized[key])) {
+      throw new Error(`tombstone key ${key} is not an array`);
+    }
+  });
+
+  // The cloud merge reads remote tombstones straight from gist JSON, so it has
+  // to tolerate the same junk rather than throwing mid-merge.
+  const sync = new CloudSync(s, () => {});
+  const merged = sync._mergeData(
+    { transactions: {}, _deletedItems: { transactions: [null, { id: "a", deletedAt: 1 }] } },
+    { transactions: {}, _deletedItems: { transactions: "nope", debts: [null] } }
+  );
+  if (merged._deletedItems.transactions.length !== 1) {
+    throw new Error("merge did not drop the malformed remote tombstones cleanly");
+  }
+  s.cancelPendingSave();
+  console.log("✅ Malformed tombstones are dropped; saves still notify cloud sync");
+}
+
+// The add form's amount field is type="text" with a numeric inputmode, and its
+// input handler re-reads the raw digits as cents. It stripped every non-digit,
+// so a leading minus vanished: an overdrawn Ending Balance typed as -42.10 was
+// stored as +42.10 and the reconciliation anchor was wrong by twice the
+// overdraft, with nothing on screen to say so.
+console.log("TEST 56: Cents Formatter Keeps A Negative Ending Balance Negative");
+{
+  const format = (raw) => {
+    const el = { value: raw };
+    TransactionUI.prototype.formatAmountAsCents(el);
+    return el.value;
+  };
+  const cases = [
+    ["4210", "42.10"],
+    ["-4210", "-42.10"],
+    ["-$1,234.56", "-1234.56"],
+    ["-", "-"],          // sign typed before any digit
+    ["-0", "0.00"],      // never render or store -0.00
+    ["", ""],
+    ["0", "0.00"],
+  ];
+  cases.forEach(([raw, expected]) => {
+    const got = format(raw);
+    if (got !== expected) {
+      throw new Error(`formatAmountAsCents("${raw}") = "${got}", expected "${expected}"`);
+    }
+  });
+  // The formatted value must stay parseable, and a lone sign must not slip
+  // through addTransaction's finite-amount guard as a number.
+  if (Number.parseFloat(format("-4210")) !== -42.1) {
+    throw new Error("negative amount does not parse back to a negative number");
+  }
+  if (Number.isFinite(Number.parseFloat(format("-")))) {
+    throw new Error("a lone minus parsed as a finite amount");
+  }
+  console.log("✅ Negative amounts survive the cents formatter; -0 never appears");
+}
+
+// calculateInfusionAllocations picked its projection window off the first
+// infusion after sorting by date. An undated infusion ("" from an import or a
+// cloud merge, per _normalizeCashInfusion) sorts first, so the window read as
+// null and the method bailed with {} — silently dropping the "Applied: …"
+// breakdown for every OTHER infusion. The projection walk already skips undated
+// infusions; this path now agrees with it.
+console.log("TEST 57: An Undated Infusion Doesn't Erase The Allocation Breakdown");
+{
+  const s = new TransactionStore();
+  s.resetData();
+  const rm = new RecurringTransactionManager(s);
+  const ui = Object.create(DebtSnowballUI.prototype);
+  ui.store = s;
+  ui.recurringManager = rm;
+  ui.daySpecificOptions = [];
+
+  const debtId = s.addDebt({
+    name: "Card A",
+    balance: 500,
+    minPayment: 25,
+    dueDay: 1,
+    recurrence: "monthly",
+    dueStartDate: "2026-09-01",
+  });
+  const goodId = s.addCashInfusion({ name: "Bonus", amount: 300, date: "2026-09-15" });
+  const allocationsBefore = ui.calculateInfusionAllocations();
+  const appliedBefore = allocationsBefore[goodId] || {};
+  if (!(Number(appliedBefore[debtId]) > 0)) {
+    throw new Error("test setup is wrong: the dated infusion had no allocation");
+  }
+
+  // Now add one the user could never enter through the form, but an import can.
+  const undatedId = s.addCashInfusion({ name: "Legacy", amount: 100 });
+  if (s.getCashInfusions().find((i) => i.id === undatedId).date !== "") {
+    throw new Error("test setup is wrong: the undated infusion kept a date");
+  }
+  const allocationsAfter = ui.calculateInfusionAllocations();
+  const appliedAfter = allocationsAfter[goodId] || {};
+  if (!(Number(appliedAfter[debtId]) > 0)) {
+    throw new Error("the dated infusion lost its breakdown because of an undated sibling");
+  }
+  if (Number(appliedAfter[debtId]) !== Number(appliedBefore[debtId])) {
+    throw new Error("the undated infusion changed the dated one's allocation");
+  }
+  if (Object.keys(allocationsAfter[undatedId] || {}).length !== 0) {
+    throw new Error("an undated infusion was allocated to a debt");
+  }
+  s.cancelPendingSave();
+  console.log("✅ Undated infusions are ignored; dated breakdowns are unchanged");
+}
+
 // Run the async network tests sequentially (shared global.fetch mock): TEST 32
 // first, then TEST 30, which prints the final banner.
 runTest48Savings()
   .then(runReplaceRemoteTest)
+  .then(runBackupAbortTest)
   .then(runTest30Final)
   .catch((err) => {
     console.error(err);

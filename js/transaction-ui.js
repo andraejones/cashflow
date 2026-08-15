@@ -105,13 +105,23 @@ class TransactionUI {
   // digits as a cents value ("1424" → "14.24"). The displayed value stays a
   // plain parseable number (no thousands separators) so addTransaction's
   // parseFloat keeps working. Clears to empty when no digits remain.
+  //
+  // A leading "-" is preserved. Stripping it (the field is type="text", so the
+  // browser doesn't) silently flipped the sign of an overdrawn Ending Balance:
+  // typing -42.10 recorded +42.10 and the reconciliation anchor was off by
+  // twice the overdraft with nothing to show for it. Income/expense still
+  // reject negatives in addTransaction, which is the right place to say so.
   formatAmountAsCents(el) {
+    const negative = el.value.trim().startsWith("-");
     const digits = el.value.replace(/\D/g, "");
     if (!digits) {
-      el.value = "";
+      // Keep a lone "-" so the user can type the sign before the digits.
+      el.value = negative ? "-" : "";
       return;
     }
-    el.value = (parseInt(digits, 10) / 100).toFixed(2);
+    const cents = parseInt(digits, 10) / 100;
+    // `cents !== 0` keeps "-0.00" out of the field (and out of the store).
+    el.value = (negative && cents !== 0 ? -cents : cents).toFixed(2);
     // Keep the caret at the end so each new digit keeps shifting into cents.
     const end = el.value.length;
     try {

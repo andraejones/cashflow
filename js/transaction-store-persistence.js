@@ -34,14 +34,41 @@ Object.assign(TransactionStore.prototype, {
     return empty;
   },
 
+  // True for a tombstone entry the rest of the code can actually read: either
+  // the legacy bare-id string or an object carrying an id. `skips` events are a
+  // different shape ({date, recurringId, skipped, at}) and are kept as long as
+  // they are objects. Everything else (null, numbers, nested arrays) is dropped.
+  // `typeof null === "object"`, so a null entry passed every `typeof d ===
+  // "object"` guard and then threw on `.id` — see _normalizeDeletedItems.
+  _isUsableTombstone(entry, key) {
+    if (key === "skips") {
+      return !!entry && typeof entry === "object" && !Array.isArray(entry);
+    }
+    if (typeof entry === "string") return entry !== "";
+    return (
+      !!entry &&
+      typeof entry === "object" &&
+      !Array.isArray(entry) &&
+      !!entry.id
+    );
+  },
+
   // Coerce a persisted or imported tombstone record into the canonical shape.
   // Anything missing or malformed becomes an empty array, so every later
-  // trackDeleted* push lands on a real array.
+  // trackDeleted* push lands on a real array — and unusable ENTRIES are dropped
+  // too, not just unusable collections. A single null in the list used to throw
+  // inside _pruneDeletedItems, which runs inside saveData's try: the throw
+  // skipped triggerSaveCallbacks, so CloudSync stopped scheduling pushes for the
+  // rest of the session with nothing shown to the user. Only external data can
+  // carry such an entry (a hand-edited export, a truncated gist) — every
+  // in-app writer pushes a complete record.
   _normalizeDeletedItems(raw) {
     const source = raw && typeof raw === "object" ? raw : {};
     const normalized = {};
     this._TOMBSTONE_KEYS.forEach((key) => {
-      normalized[key] = Array.isArray(source[key]) ? source[key] : [];
+      normalized[key] = Array.isArray(source[key])
+        ? source[key].filter((entry) => this._isUsableTombstone(entry, key))
+        : [];
     });
     return normalized;
   },
@@ -365,8 +392,10 @@ Object.assign(TransactionStore.prototype, {
     keys.forEach(key => {
       if (Array.isArray(this._deletedItems[key])) {
         this._deletedItems[key] = this._deletedItems[key].filter(item => {
-          // New format: object with id and deletedAt
-          if (typeof item === 'object' && item.deletedAt) {
+          // New format: object with id and deletedAt. `item &&` matters —
+          // typeof null is "object", and reading .deletedAt off it threw here,
+          // inside saveData's try, before triggerSaveCallbacks could run.
+          if (item && typeof item === 'object' && item.deletedAt) {
             return item.deletedAt > thirtyDaysAgo;
           }
           // Old format: just keep (will be replaced on next delete)

@@ -1050,10 +1050,16 @@ Object.assign(DebtSnowballUI.prototype, {
       infusionsByMonthKey[key].push(infusion);
     });
 
-    // Find the earliest infusion date to start projection from
-    const sortedInfusions = [...infusions].sort((a, b) =>
-      a.date.localeCompare(b.date)
-    );
+    // Find the earliest infusion date to start projection from. Only dated
+    // infusions count: an undated one (possible from an import or a cloud
+    // merge — _normalizeCashInfusion defaults `date` to "") sorts first, and
+    // reading the window off it made getDateFromString return null and this
+    // method bail with an empty result — dropping the allocation breakdown for
+    // every OTHER infusion too. The grouping pass above already ignores them.
+    const sortedInfusions = infusions
+      .filter((inf) => this.isValidDateString(inf.date))
+      .sort((a, b) => a.date.localeCompare(b.date));
+    if (sortedInfusions.length === 0) return {};
     const earliestDate = this.getDateFromString(sortedInfusions[0].date);
     const latestDate = this.getDateFromString(sortedInfusions[sortedInfusions.length - 1].date);
 

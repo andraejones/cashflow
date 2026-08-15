@@ -9,6 +9,9 @@ Desktop.ini
 # Editor / IDE
 .vscode/
 .idea/
+# Per-machine Claude Code state (local permission allowlist, locks) — the repo
+# is public, so this must never be committed.
+.claude/
 *.swp
 *.swo
 *~

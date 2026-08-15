@@ -795,8 +795,15 @@ class CloudSync {
     const localDeleted = localData._deletedItems || {};
     const remoteDeleted = remoteData._deletedItems || {};
 
-    // Extract plain IDs from deleted item objects ({ id, deletedAt } or plain strings)
-    const extractIds = (items) => (items || []).map(d => typeof d === 'string' ? d : d.id).filter(Boolean);
+    // Extract plain IDs from deleted item objects ({ id, deletedAt } or plain
+    // strings). Remote tombstones arrive as raw gist JSON, so the shape is not
+    // guaranteed: a null entry passes `typeof d === 'object'` and then throws on
+    // `.id`, and a non-array collection has no .map at all. Either would abort
+    // the merge (and, before the fallback was narrowed above, silently overwrite
+    // the remote copy). Read defensively and drop what can't be used.
+    const asList = (items) => (Array.isArray(items) ? items : []);
+    const idOf = (d) => (typeof d === 'string' ? d : (d && d.id) || null);
+    const extractIds = (items) => asList(items).map(idOf).filter(Boolean);
     const deletedTransactionIds = [...new Set([...extractIds(localDeleted.transactions), ...extractIds(remoteDeleted.transactions)])];
     const deletedRecurringIds = [...new Set([...extractIds(localDeleted.recurringTransactions), ...extractIds(remoteDeleted.recurringTransactions)])];
     const deletedDebtIds = [...new Set([...extractIds(localDeleted.debts), ...extractIds(remoteDeleted.debts)])];
@@ -806,8 +813,8 @@ class CloudSync {
     // Deduplicate full deleted item objects (preserving deletedAt for pruning)
     const dedupeDeletedItems = (items) => {
       const seen = new Set();
-      return (items || []).filter(d => {
-        const id = typeof d === 'string' ? d : d.id;
+      return asList(items).filter(d => {
+        const id = idOf(d);
         if (!id || seen.has(id)) return false;
         seen.add(id);
         return true;
@@ -817,7 +824,7 @@ class CloudSync {
     // across both sides. Applied on top of the skip-list union so an unskip
     // can beat the other side's stale skip (and a newer re-skip wins back).
     const skipEventByKey = new Map();
-    [...(localDeleted.skips || []), ...(remoteDeleted.skips || [])].forEach((e) => {
+    [...asList(localDeleted.skips), ...asList(remoteDeleted.skips)].forEach((e) => {
       if (!e || !e.date || !e.recurringId) return;
       const key = `${e.date}|${e.recurringId}`;
       const prev = skipEventByKey.get(key);
@@ -826,11 +833,11 @@ class CloudSync {
     const mergedSkipEvents = Array.from(skipEventByKey.values());
 
     const deletedItems = {
-      transactions: dedupeDeletedItems([...(localDeleted.transactions || []), ...(remoteDeleted.transactions || [])]),
-      recurringTransactions: dedupeDeletedItems([...(localDeleted.recurringTransactions || []), ...(remoteDeleted.recurringTransactions || [])]),
-      debts: dedupeDeletedItems([...(localDeleted.debts || []), ...(remoteDeleted.debts || [])]),
-      cashInfusions: dedupeDeletedItems([...(localDeleted.cashInfusions || []), ...(remoteDeleted.cashInfusions || [])]),
-      savingsGoals: dedupeDeletedItems([...(localDeleted.savingsGoals || []), ...(remoteDeleted.savingsGoals || [])]),
+      transactions: dedupeDeletedItems([...asList(localDeleted.transactions), ...asList(remoteDeleted.transactions)]),
+      recurringTransactions: dedupeDeletedItems([...asList(localDeleted.recurringTransactions), ...asList(remoteDeleted.recurringTransactions)]),
+      debts: dedupeDeletedItems([...asList(localDeleted.debts), ...asList(remoteDeleted.debts)]),
+      cashInfusions: dedupeDeletedItems([...asList(localDeleted.cashInfusions), ...asList(remoteDeleted.cashInfusions)]),
+      savingsGoals: dedupeDeletedItems([...asList(localDeleted.savingsGoals), ...asList(remoteDeleted.savingsGoals)]),
       skips: mergedSkipEvents
     };
 
@@ -1161,9 +1168,28 @@ class CloudSync {
           const gist = await checkResponse.json();
 
           if (gist.files && gist.files["cashflow_data.json"]) {
+            // Scope the "proceed with local data" fallback to a remote payload
+            // that genuinely cannot be merged — i.e. one that does not parse.
+            // A wider catch here silently defeated every guard below it: the
+            // failed shadow backup threw "Aborting to prevent data loss" and was
+            // swallowed, after which the PATCH overwrote the remote copy with
+            // unmerged local data. The backup is a full copy of the dataset, so
+            // an over-quota localStorage is exactly when that fires — the case
+            // the guard exists for.
+            //
+            // A file we could not READ is likewise not a file we may overwrite:
+            // _getGistFileContent stays outside the catch, so a failed raw_url
+            // fetch for a truncated gist propagates to the outer catch, which
+            // reports the error and leaves the cloud copy intact.
+            const fileContent = await this._getGistFileContent(gist.files["cashflow_data.json"], token);
+            let remoteData = null;
             try {
-              const fileContent = await this._getGistFileContent(gist.files["cashflow_data.json"], token);
-              const remoteData = JSON.parse(fileContent);
+              remoteData = JSON.parse(fileContent);
+            } catch (parseError) {
+              console.warn("Could not parse remote data for merge, proceeding with local data");
+            }
+
+            if (remoteData && typeof remoteData === "object") {
               const localData = dataToSave;
 
               // Create shadow copy of local data before merge for recovery
@@ -1171,7 +1197,7 @@ class CloudSync {
                 localStorage.setItem('_backup_before_merge', JSON.stringify(localData));
               } catch (backupError) {
                 console.warn("Could not create backup before merge:", backupError);
-                // Abort merge if we can't create backup - data safety first
+                // Abort the whole save if we can't create a backup - data safety first
                 throw new Error("Cannot create backup before merge. Aborting to prevent data loss.");
               }
 
@@ -1198,8 +1224,6 @@ class CloudSync {
               if (this.onUpdate) {
                 this.onUpdate();
               }
-            } catch (parseError) {
-              console.warn("Could not parse remote data for merge, proceeding with local data");
             }
           }
         } else if (!notModified && !checkResponse.ok) {

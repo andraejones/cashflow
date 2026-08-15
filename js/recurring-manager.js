@@ -201,15 +201,29 @@ class RecurringTransactionManager {
     return validHolidays;
   }
 
-  // Check if a date is a US banking holiday
+  // Check if a date is a US banking holiday.
+  //
+  // A holiday's OBSERVED date can fall in the previous calendar year: when
+  // Jan 1 lands on a Saturday, New Year's Day is observed on Dec 31 — which
+  // getUSBankingHolidays files under the January year, not December's. Looking
+  // only at the date's own year therefore missed it, and a business-day
+  // adjustment happily scheduled a payment on a day the banks are closed
+  // (Dec 31 2027, Dec 31 2032, …). December dates also consult the next year's
+  // list; that list is cached, so the extra lookup happens once per year.
   isUSBankingHoliday(date) {
     const year = date.getFullYear();
-    const holidays = this.getUSBankingHolidays(year);
-
-    return holidays.some(holiday =>
+    const sameDay = (holiday) =>
       holiday.getFullYear() === date.getFullYear() &&
       holiday.getMonth() === date.getMonth() &&
-      holiday.getDate() === date.getDate()
+      holiday.getDate() === date.getDate();
+
+    if (this.getUSBankingHolidays(year).some(sameDay)) {
+      return true;
+    }
+    // December is the only month that can carry a next-year observance.
+    return (
+      date.getMonth() === 11 &&
+      this.getUSBankingHolidays(year + 1).some(sameDay)
     );
   }
 
