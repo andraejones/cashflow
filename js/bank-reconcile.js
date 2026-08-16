@@ -572,6 +572,16 @@ class BankReconcileUI {
     // display-only pendingMatched section covers those). No drift when the app
     // date agrees with EITHER bank date: entries may be logged by transaction
     // date or by posted date, and both are legitimate.
+    //
+    // EXCEPT when an Ending Balance anchor sits between the two bank dates.
+    // Normally the choice of convention is cosmetic: dating a card purchase on
+    // the swipe day rather than the posting day just shifts it between two
+    // adjacent days, and every balance after both dates is identical. An
+    // anchor breaks that. It hard-resets the running balance and absorbs
+    // everything dated on or before it, so an entry parked on the pre-anchor
+    // side of the anchor is written off entirely while the bank still takes
+    // the money on the post-anchor side. The difference stops being cosmetic
+    // and never self-corrects, so report it and re-date to the posted day.
     const recurringById = new Map(
       (this.store.getRecurringTransactions() || [])
         .filter((r) => r && r.id)
@@ -582,11 +592,24 @@ class BankReconcileUI {
       if (!(b.matched && b._match && !b.pending)) return;
       const a = b._match;
       if (a.type === "expense" && a.settled === false) return; // clearedUnsettled
-      if (a.date === b.date || a.date === (b.postedDate || b.date)) return;
+      const posted = b.postedDate || b.date;
+      const crossedAnchor = this._anchorBetween(a.date, posted);
+      if (!crossedAnchor && (a.date === b.date || a.date === posted)) return;
+      // An ordinary drift disagrees with both bank dates; re-dating to the
+      // transaction date is the long-standing behavior. An anchor-crossing
+      // pair must land on the POSTED date instead — the transaction date is
+      // the absorbed side of the anchor, which is where it already sits.
+      const ordinaryDrift = a.date !== b.date && a.date !== posted;
       dateDrifted.push({
         bank: b,
         app: a,
-        seriesShiftable: this._seriesShiftable(a, recurringById),
+        crossedAnchor,
+        targetDate: crossedAnchor ? posted : b.date,
+        // A series shift moves the whole schedule, which can only express a
+        // transaction-date change — it has no way to say "posts a day later".
+        // A pure anchor crossing is a posting lag, not a mis-scheduled series,
+        // so offer only the per-instance move there.
+        seriesShiftable: ordinaryDrift && this._seriesShiftable(a, recurringById),
       });
     });
 
@@ -1151,6 +1174,29 @@ class BankReconcileUI {
     return Utils.formatDateString(d);
   }
 
+  // Latest Ending Balance anchor in [appDate, postedDate), or null when none.
+  // An anchor is a `type: "balance"` row — the same rows _buildAppItems skips
+  // and CalculationService.getReconciliationAnchor scans for.
+  //
+  // The interval is half-open by design. An anchor ON the posted date already
+  // reflects the charge (the figure is the bank's balance at the close of that
+  // day, after everything posted that day), so both sides absorb it and there
+  // is nothing to report. Only an anchor at or after the entry's own date but
+  // strictly before the posting day splits the two.
+  _anchorBetween(appDate, postedDate) {
+    if (!appDate || !postedDate || appDate >= postedDate) return null;
+    const transactions = this.store.getTransactions();
+    let found = null;
+    for (const date in transactions) {
+      if (date < appDate || date >= postedDate) continue;
+      const list = transactions[date];
+      if (!Array.isArray(list)) continue;
+      if (!list.some((t) => t && t.type === "balance")) continue;
+      if (found === null || date > found) found = date;
+    }
+    return found;
+  }
+
   // ---- Report rendering --------------------------------------------------
 
   _renderReport() {
@@ -1294,13 +1340,20 @@ class BankReconcileUI {
         const seriesBtn = p.seriesShiftable
           ? `<button type="button" class="br-action" data-act="shift-series" data-i="${i}">Move series</button>`
           : "";
+        const target = p.targetDate || p.bank.date;
+        // An anchor-crossing row agrees with the bank's transaction date, so
+        // "→ scheduled 8/14" next to "Move to 8/15" would read as a mistake.
+        // Name the posting day and the anchor it lands behind instead.
+        const note = p.crossedAnchor
+          ? `<em class="br-move">posted ${this._shortDate(p.bank.postedDate || p.bank.date)}, after the ${this._shortDate(p.crossedAnchor)} Ending Balance</em>`
+          : `<em class="br-move">→ scheduled ${this._shortDate(p.app.date)}</em>`;
         return `
         <div class="bank-reconcile-row" data-open-date="${p.app.date}">
           <span class="br-date">${this._shortDate(p.bank.date)}</span>
           <span class="br-amount ${p.bank.signed < 0 ? "expense" : "income"}">${this._money(p.bank.signed)}</span>
-          <span class="br-desc" title="${this._attr(p.bank.description)}">${this._esc(name)} ↔ ${this._esc(p.app.description || "(no description)")}${recurTag} <em class="br-move">→ scheduled ${this._shortDate(p.app.date)}</em></span>
+          <span class="br-desc" title="${this._attr(p.bank.description)}">${this._esc(name)} ↔ ${this._esc(p.app.description || "(no description)")}${recurTag} ${note}</span>
           <span class="br-actions">
-            <button type="button" class="br-action" data-act="fix-date" data-i="${i}">Move to ${this._shortDate(p.bank.date)}</button>
+            <button type="button" class="br-action" data-act="fix-date" data-i="${i}">Move to ${this._shortDate(target)}</button>
             ${seriesBtn}
           </span>
         </div>`;
@@ -1542,7 +1595,10 @@ class BankReconcileUI {
   }
 
   // Re-date a matched-but-drifted entry to the bank's transaction date (how
-  // app entries are dated; for an ACH draft, the day the money left).
+  // app entries are dated; for an ACH draft, the day the money left) — or to
+  // the posted date for an anchor-crossing pair, where the transaction date is
+  // the side of the Ending Balance the entry already sits on. The builder
+  // picks which via `targetDate`; the fallback keeps older callers working.
   _fixDate(pair) {
     if (!pair || !pair.app || !pair.bank) return;
     const appItem = pair.app;
@@ -1551,9 +1607,10 @@ class BankReconcileUI {
       Utils.showNotification("Could not locate that entry to move.", "error");
       return;
     }
-    if (pair.bank.date === appItem.date) return;
-    this._relocateEntry(appItem, index, pair.bank.date, false);
-    Utils.showNotification(`Moved to ${this._shortDate(pair.bank.date)}.`);
+    const target = pair.targetDate || pair.bank.date;
+    if (target === appItem.date) return;
+    this._relocateEntry(appItem, index, target, false);
+    Utils.showNotification(`Moved to ${this._shortDate(target)}.`);
     this._afterMutation();
   }
 

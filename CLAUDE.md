@@ -11,7 +11,7 @@ CashFlow Calendar is an offline-first, single-page personal finance application 
 **No build process required.** Open `index.html` directly in a browser or serve via any static server.
 
 **Tests:** `npm test` (or run the two scripts directly with Node) — it must pass before every commit:
-- `node scripts/verify-logic.js` — 53 numbered integration tests over vm-loaded sources.
+- `node scripts/verify-logic.js` — 58 numbered integration tests over vm-loaded sources.
 - `node scripts/verify-walk-parity.js` — randomized cross-path invariants for the balance walk (~140k assertions; reproduce failures with `node scripts/verify-walk-parity.js <seed>`). Includes a source guard: calendar-ui must consume `CalculationService.walkDays` and never re-implement anchor math.
 
 No linting exists. UI testing is manual.

@@ -4498,6 +4498,168 @@ console.log("TEST 57: An Undated Infusion Doesn't Erase The Allocation Breakdown
   console.log("✅ Undated infusions are ignored; dated breakdowns are unchanged");
 }
 
+// TEST 59: An Ending Balance Between The Bank's Two Dates Is Reported As Drift
+//
+// A card purchase swiped one day and posted the next may legitimately be
+// logged under either date, so _run normally stays quiet when the app agrees
+// with EITHER bank date — the two conventions differ only cosmetically, and
+// every balance after both dates is identical.
+//
+// An Ending Balance anchor between them breaks that symmetry. The anchor hard-
+// resets the running balance and absorbs everything dated on or before it, so
+// an entry parked on the pre-anchor side is written off while the bank still
+// takes the money on the post-anchor side. That error never self-corrects, so
+// the pair must be reported AND must re-date to the POSTED day — moving to the
+// transaction date would leave it on the absorbed side, where it already sits.
+console.log("TEST 59: An Ending Balance Between The Bank's Two Dates Is Reported As Drift");
+{
+  // SAMS SUBS: transacted 7/2, posted 7/3. JASONS DELI anchors the window.
+  const csv = [
+    "Posted Date,Transaction Date,Description,Deposit,Withdrawal,Balance",
+    "7/03/2026,7/02/2026,Withdrawal Debit Card SAMS SUBS OF PORT CHARL,,($15.57),$1000.00",
+    "7/01/2026,7/01/2026,Withdrawal Debit Card JASONS DELI,,($53.25),$1015.57",
+  ].join("\n");
+
+  // Store with the two purchases logged on their TRANSACTION dates, plus an
+  // optional Ending Balance on `anchorDate`.
+  const build = (anchorDate) => {
+    const s = new TransactionStore();
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    const ui = new BankReconcileUI(s, rm, () => {}, () => {});
+    s.addTransaction("2026-07-01", {
+      amount: 53.25, type: "expense", description: "Jasons Deli", settled: true,
+    });
+    s.addTransaction("2026-07-02", {
+      amount: 15.57, type: "expense", description: "Sams Subs", settled: true,
+    });
+    if (anchorDate) {
+      s.addTransaction(anchorDate, {
+        amount: 1000, type: "balance", description: "Ending Balance",
+      });
+    }
+    const parsed = ui._parseSuncoastCsv(csv);
+    if (parsed.error) throw new Error("Parse error: " + parsed.error);
+    ui._run(parsed.rows);
+    return { s, rm, ui };
+  };
+
+  // (a) Anchor on the transaction date -> the split straddles it. Report it,
+  //     target the posted date, and don't offer a series shift (a schedule
+  //     move cannot express "posts a day later").
+  {
+    const { s, ui } = build("2026-07-02");
+    const r = ui.result;
+    if (r.matchedCount !== 2) {
+      throw new Error(`Both lines must still match: matched=${r.matchedCount}`);
+    }
+    if (r.dateDrifted.length !== 1) {
+      throw new Error(
+        `Anchor-crossing pair must be reported: ${JSON.stringify(r.dateDrifted)}`
+      );
+    }
+    const p = r.dateDrifted[0];
+    if (p.app.date !== "2026-07-02" || p.crossedAnchor !== "2026-07-02") {
+      throw new Error(
+        `Wrong pair/anchor: app=${p.app.date} anchor=${p.crossedAnchor}`
+      );
+    }
+    if (p.targetDate !== "2026-07-03") {
+      throw new Error(
+        `Must re-date to the POSTED day, not the transaction day: ${p.targetDate}`
+      );
+    }
+    if (p.seriesShiftable !== false) {
+      throw new Error("A posting lag must not offer a series shift");
+    }
+    s.cancelPendingSave();
+  }
+
+  // (b) No anchor at all -> the same split is cosmetic. Stay quiet, or every
+  //     next-day-posting card purchase becomes a false alarm.
+  {
+    const { s, ui } = build(null);
+    if (ui.result.dateDrifted.length !== 0) {
+      throw new Error(
+        `Split with no anchor must stay quiet: ${JSON.stringify(ui.result.dateDrifted)}`
+      );
+    }
+    s.cancelPendingSave();
+  }
+
+  // (c) Anchor ON the posted date -> the figure is the balance at the close of
+  //     that day, so it already reflects the charge. Both sides absorb it;
+  //     nothing to report. (Guards the half-open interval in _anchorBetween.)
+  {
+    const { s, ui } = build("2026-07-03");
+    if (ui.result.dateDrifted.length !== 0) {
+      throw new Error(
+        `Anchor on the posted date must stay quiet: ${JSON.stringify(ui.result.dateDrifted)}`
+      );
+    }
+    s.cancelPendingSave();
+  }
+
+  // (d) Move actually relocates to the posted date and clears the finding.
+  //     Before the _fixDate fix this was a silent no-op: it targeted
+  //     bank.date, which equals the entry's own date on an anchor-crossing
+  //     pair, so the early return fired and the row nagged forever.
+  {
+    const { s, ui } = build("2026-07-02");
+    ui._fixDate(ui.result.dateDrifted[0]);
+    const has = (date) =>
+      (s.getTransactions()[date] || []).some((t) => t.description === "Sams Subs");
+    if (has("2026-07-02")) {
+      throw new Error("Entry was not moved off the pre-anchor date");
+    }
+    if (!has("2026-07-03")) {
+      throw new Error("Entry did not land on the posted date");
+    }
+    // _fixDate re-runs the report; the finding must not come back.
+    if (ui.result.dateDrifted.length !== 0) {
+      throw new Error(
+        `Move must clear the finding: ${JSON.stringify(ui.result.dateDrifted)}`
+      );
+    }
+    s.cancelPendingSave();
+  }
+
+  // (e) An ordinary drift — the entry agrees with NEITHER bank date — keeps
+  //     targeting the transaction date, the long-standing behavior.
+  {
+    const s = new TransactionStore();
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    const ui = new BankReconcileUI(s, rm, () => {}, () => {});
+    s.addTransaction("2026-07-01", {
+      amount: 53.25, type: "expense", description: "Jasons Deli", settled: true,
+    });
+    s.addTransaction("2026-07-04", {
+      amount: 15.57, type: "expense", description: "Sams Subs", settled: true,
+    });
+    const parsed = ui._parseSuncoastCsv(csv);
+    if (parsed.error) throw new Error("Parse error: " + parsed.error);
+    ui._run(parsed.rows);
+    const r = ui.result;
+    if (r.dateDrifted.length !== 1) {
+      throw new Error(
+        `Ordinary drift must still be reported: ${JSON.stringify(r.dateDrifted)}`
+      );
+    }
+    const p = r.dateDrifted[0];
+    if (p.crossedAnchor !== null || p.targetDate !== "2026-07-02") {
+      throw new Error(
+        `Ordinary drift must target the transaction date: anchor=${p.crossedAnchor} target=${p.targetDate}`
+      );
+    }
+    s.cancelPendingSave();
+  }
+
+  console.log(
+    "✅ Anchor-crossing splits reported and re-dated to the posted day; cosmetic splits stay quiet"
+  );
+}
+
 // Run the async network tests sequentially (shared global.fetch mock): TEST 32
 // first, then TEST 30, which prints the final banner.
 runTest48Savings()
