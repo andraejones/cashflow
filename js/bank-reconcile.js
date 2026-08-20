@@ -385,6 +385,12 @@ class BankReconcileUI {
           type: t.type,
           description: typeof t.description === "string" ? t.description : "",
           settled: t.settled,
+          // Engine-generated snowball payoff rows are real money leaving the
+          // account, so they stay in the comparison set (or the bank line reads
+          // as "missing from app") — but they are derived data the projection
+          // re-materializes every render, so they must not be offered for
+          // re-dating or re-amounting. See _relocateEntry / _fixAmount.
+          snowballGenerated: t.snowballGenerated === true,
           matched: false,
         });
       });
@@ -592,6 +598,12 @@ class BankReconcileUI {
       if (!(b.matched && b._match && !b.pending)) return;
       const a = b._match;
       if (a.type === "expense" && a.settled === false) return; // clearedUnsettled
+      // A snowball payoff row can't be re-dated from here. _relocateEntry
+      // rebuilds the row without its snowballGenerated/snowballMonth stamps, so
+      // syncSnowballTransactionsForMonth stops recognizing it, treats the
+      // month's payoff as unmaterialized, and creates a second one — the payoff
+      // is then counted twice on the calendar. The projection owns this date.
+      if (a.snowballGenerated) return;
       const posted = b.postedDate || b.date;
       const crossedAnchor = this._anchorBetween(a.date, posted);
       if (!crossedAnchor && (a.date === b.date || a.date === posted)) return;
@@ -1248,7 +1260,7 @@ class BankReconcileUI {
       .map((b, i) => {
         const name = this._normalizeMerchant(b.description);
         return `
-        <div class="bank-reconcile-row" data-open-date="${b.date}">
+        <div class="bank-reconcile-row" data-open-date="${this._attr(b.date)}">
           <span class="br-date">${this._shortDate(b.date)}</span>
           <span class="br-amount ${b.signed < 0 ? "expense" : "income"}">${this._money(b.signed)}</span>
           <span class="br-desc" title="${this._attr(b.description)}">${this._esc(name)}</span>
@@ -1274,11 +1286,16 @@ class BankReconcileUI {
         const nameTag = p.viaName ? `<span class="br-note">name match</span> ` : "";
         // A pending hold's amount isn't final (the app entry may be the correct
         // settled figure), so don't offer to overwrite it with the hold amount.
+        // A snowball payoff row is derived data the projection rewrites on the
+        // next render, so an amount fix there never sticks — say so instead of
+        // offering a button that silently reverts.
         const action = p.bank.pending
           ? `<span class="br-note">${p.viaName ? "name match · " : ""}bank pending</span>`
-          : `${nameTag}<button type="button" class="br-action" data-act="fix-amount" data-i="${i}">Use bank amount</button>`;
+          : p.app.snowballGenerated
+            ? `<span class="br-note">${p.viaName ? "name match · " : ""}set by the debt plan</span>`
+            : `${nameTag}<button type="button" class="br-action" data-act="fix-amount" data-i="${i}">Use bank amount</button>`;
         return `
-        <div class="bank-reconcile-row review" data-open-date="${p.app.date}">
+        <div class="bank-reconcile-row review" data-open-date="${this._attr(p.app.date)}">
           <span class="br-date">${this._shortDate(p.bank.date)}</span>
           <span class="br-amount">
             bank ${this._money(p.bank.signed)} · app ${this._money(p.app.signed)}
@@ -1309,7 +1326,7 @@ class BankReconcileUI {
           ? ` <em class="br-move">→ settles ${this._shortDate(settleDate)}</em>`
           : "";
         return `
-        <div class="bank-reconcile-row" data-open-date="${p.app.date}">
+        <div class="bank-reconcile-row" data-open-date="${this._attr(p.app.date)}">
           <span class="br-date">${this._shortDate(p.app.date)}</span>
           <span class="br-amount expense">${this._money(p.app.signed)}</span>
           <span class="br-desc">${this._esc(p.app.description || "(no description)")}${moveNote}</span>
@@ -1348,7 +1365,7 @@ class BankReconcileUI {
           ? `<em class="br-move">posted ${this._shortDate(p.bank.postedDate || p.bank.date)}, after the ${this._shortDate(p.crossedAnchor)} Ending Balance</em>`
           : `<em class="br-move">→ scheduled ${this._shortDate(p.app.date)}</em>`;
         return `
-        <div class="bank-reconcile-row" data-open-date="${p.app.date}">
+        <div class="bank-reconcile-row" data-open-date="${this._attr(p.app.date)}">
           <span class="br-date">${this._shortDate(p.bank.date)}</span>
           <span class="br-amount ${p.bank.signed < 0 ? "expense" : "income"}">${this._money(p.bank.signed)}</span>
           <span class="br-desc" title="${this._attr(p.bank.description)}">${this._esc(name)} ↔ ${this._esc(p.app.description || "(no description)")}${recurTag} ${note}</span>
@@ -1373,7 +1390,7 @@ class BankReconcileUI {
       .map((b, i) => {
         const name = this._normalizeMerchant(b.description);
         return `
-        <div class="bank-reconcile-row pending" data-open-date="${b.date}">
+        <div class="bank-reconcile-row pending" data-open-date="${this._attr(b.date)}">
           <span class="br-date">${this._shortDate(b.date)}</span>
           <span class="br-amount ${b.signed < 0 ? "expense" : "income"}">${this._money(b.signed)}</span>
           <span class="br-desc" title="${this._attr(b.description)}">${this._esc(name)}</span>
@@ -1403,7 +1420,7 @@ class BankReconcileUI {
           : "";
         const recurTag = p.app.recurringId ? " (Recurring)" : "";
         return `
-        <div class="bank-reconcile-row pending muted" data-open-date="${p.app.date}">
+        <div class="bank-reconcile-row pending muted" data-open-date="${this._attr(p.app.date)}">
           <span class="br-date">${this._shortDate(p.bank.date)}</span>
           <span class="br-amount ${p.bank.signed < 0 ? "expense" : "income"}">${this._money(p.bank.signed)}</span>
           <span class="br-desc" title="${this._attr(p.bank.description)}">${this._esc(name)} ↔ ${this._esc(p.app.description || "(no description)")}${recurTag}${dateNote}</span>
@@ -1423,7 +1440,7 @@ class BankReconcileUI {
     const rows = items
       .map((a) => {
         return `
-        <div class="bank-reconcile-row" data-open-date="${a.date}">
+        <div class="bank-reconcile-row" data-open-date="${this._attr(a.date)}">
           <span class="br-date">${this._shortDate(a.date)}</span>
           <span class="br-amount ${a.signed < 0 ? "expense" : "income"}">${this._money(a.signed)}</span>
           <span class="br-desc">${this._esc(a.description || "(no description)")}${a.recurringId ? " (Recurring)" : ""}</span>
@@ -1446,7 +1463,7 @@ class BankReconcileUI {
     const rows = items
       .map((a) => {
         return `
-        <div class="bank-reconcile-row" data-open-date="${a.date}">
+        <div class="bank-reconcile-row" data-open-date="${this._attr(a.date)}">
           <span class="br-date">${this._shortDate(a.date)}</span>
           <span class="br-amount expense">${this._money(a.signed)}</span>
           <span class="br-desc">${this._esc(a.description || "(no description)")}</span>
@@ -1468,7 +1485,7 @@ class BankReconcileUI {
     const rows = items
       .map((a) => {
         return `
-        <div class="bank-reconcile-row muted" data-open-date="${a.date}">
+        <div class="bank-reconcile-row muted" data-open-date="${this._attr(a.date)}">
           <span class="br-date">${this._shortDate(a.date)}</span>
           <span class="br-amount expense">${this._money(a.signed)}</span>
           <span class="br-desc">${this._esc(a.description || "(no description)")}</span>
@@ -1677,10 +1694,20 @@ class BankReconcileUI {
   // the shift), and this instance must be the series' first occurrence —
   // shifting the anchor under a series with earlier occurrences would rewrite
   // history. Later-occurrence drifts still get the single-instance Move.
+  //
+  // A debt minimum-payment series is excluded outright: its schedule is owned
+  // by the debt record, not by the recurring definition. The snowball
+  // projection builds its own template straight from the debt
+  // (buildDebtRecurringTransaction), so a shifted definition immediately
+  // disagrees with the plan about when minimums fall — and the next debt edit
+  // calls ensureMinimumPaymentRecurring, which rewrites startDate back from
+  // debt.dueStartDate and silently undoes the shift. Change the due date in the
+  // Debt Snowball panel instead; the per-instance Move is still offered here.
   _seriesShiftable(appItem, recurringById) {
     if (!appItem.recurringId) return false;
     const rec = recurringById.get(appItem.recurringId);
     if (!rec || !rec.recurrence || !rec.startDate) return false;
+    if (rec.debtId) return false;
     if (rec.recurrence === "once" || rec.recurrence === "semi-monthly") return false;
     if (rec.daySpecific || rec.lastDayOfMonth) return false;
     if (rec.businessDayAdjustment && rec.businessDayAdjustment !== "none") return false;
@@ -1867,6 +1894,10 @@ class BankReconcileUI {
     return Utils.escapeHtml(str);
   }
 
+  // Every value interpolated into raw markup goes through here or _esc —
+  // including date keys. They normally come from _toIsoDate's strict regex or
+  // the app's own map keys, but an imported backup can carry any string as a
+  // key, and an unescaped one would break out of the attribute.
   _attr(str) {
     return Utils.escapeHtml(str);
   }

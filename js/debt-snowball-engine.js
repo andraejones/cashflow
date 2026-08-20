@@ -105,12 +105,42 @@ Object.assign(DebtSnowballUI.prototype, {
       return [];
     }
     const transactions = {};
+    // Throwaway store for a throwaway manager: expand ONE definition into an
+    // isolated map so the projection can read clean scheduled amounts without
+    // touching (or being coloured by) the real data.
+    //
+    // This has to cover everything applyRecurringTransactions can call on a
+    // store, not just what it happens to call today. trackDeletedTransaction is
+    // reached from _clearRecurringExpansions for any instance carrying an id —
+    // rows built here never have one, so it is unreachable at the moment, but a
+    // change that stamped ids on expansions would turn the whole snowball
+    // projection into a TypeError. Keep this list in step with the
+    // `this.store.*` calls in recurring-manager.js.
+    const readOnly = (name) => () => {
+      throw new Error(
+        `getRecurringOccurrencesForMonth's throwaway store is read-only; ` +
+          `something called ${name}(). Expansion for the projection must not mutate anything.`
+      );
+    };
     const dummyStore = {
       getTransactions: () => transactions,
       getRecurringTransactions: () => [recurringTransaction],
       getSkippedTransactions: () => ({}),
       isTransactionSkipped: () => false,
+      // Legitimately reachable: _clearRecurringExpansions tombstones any
+      // instance carrying an id. Rows built here have none today, but dropping
+      // a tombstone for a throwaway map is the right no-op if that changes.
+      trackDeletedTransaction: () => { },
       saveData: () => { },
+      debouncedSave: () => { },
+      // Not reachable from applyRecurringTransactions today. Present so the
+      // shape is complete, and loud rather than silent if a future path does
+      // reach one — a no-op would swallow a real mutation.
+      addRecurringTransaction: readOnly("addRecurringTransaction"),
+      updateRecurringTransaction: readOnly("updateRecurringTransaction"),
+      updateTransaction: readOnly("updateTransaction"),
+      deleteTransaction: readOnly("deleteTransaction"),
+      setTransactionSkipped: readOnly("setTransactionSkipped"),
     };
     const manager = new RecurringTransactionManager(dummyStore);
     manager.applyRecurringTransactions(year, month);
@@ -479,6 +509,17 @@ Object.assign(DebtSnowballUI.prototype, {
   },
 
   calculateSnowballProjection(viewYear, viewMonth, includeExtra = true, options = {}) {
+    // The walk below seeds itself from the real running balance through today
+    // (getRunningBalanceForDate) and consults getReservedTotalOnOrBefore at
+    // every anchor. Both read CalculationService's caches, which are otherwise
+    // only refreshed by updateMonthlyBalances — and CalendarUI runs this
+    // projection BEFORE that call, so on the render right after an edit the
+    // starting checking balance would still be the pre-edit figure and a payoff
+    // could be materialized on a day the money isn't actually there. Same
+    // reason calculateMinimum/getMinimumBalanceThrough invalidate on entry.
+    if (this.calculationService) {
+      this.calculationService.invalidateCache();
+    }
     const debts = this.store.getDebts();
     const settings = this.store.getDebtSnowballSettings();
     const dailyFloor = Number(settings.dailyFloor) || 0;
@@ -594,8 +635,18 @@ Object.assign(DebtSnowballUI.prototype, {
       viewBalances = { ...balances };
     }
     const baseIndex = this.getMonthIndex(baseYear, baseMonth);
+    // 600 months is the payoff horizon for a debt that clears very slowly. With
+    // nothing left to pay off there is nothing to project past the view/capture
+    // window — the walk below breaks the moment it reaches it — so the 50-year
+    // day timeline was ~18k throwaway objects built on every calendar render
+    // (~24ms even before the walk, for a user with no debts at all). The
+    // shortened horizon still covers every month the walk can reach, so the
+    // result is identical.
+    const hasActiveDebt = Object.keys(balances).some(
+      (debtId) => (Number(balances[debtId]) || 0) > 0
+    );
     const maxMonths = Math.max(
-      600,
+      hasActiveDebt ? 600 : 1,
       viewIndex - baseIndex + 1,
       captureThroughIndex !== null ? captureThroughIndex - baseIndex + 1 : 0
     );

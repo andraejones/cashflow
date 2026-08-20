@@ -378,6 +378,34 @@ Object.assign(TransactionStore.prototype, {
     allocation._lastModified = new Date().toISOString();
   },
 
+  // Re-point every expense drawing from `oldId` at `newId`.
+  //
+  // Relocating a bucket to another date goes through delete + re-add (the
+  // tombstone on the old id rules out reusing it), so the bucket comes back
+  // under a fresh id while its drawers still name the old one. The links then
+  // dangle: the "Drawn from" label disappears, and the next edit of a drawing
+  // expense finds no bucket to refund — _applyAllocationDraw drops the link
+  // instead, so the reserve stops absorbing the change and the projected
+  // balance drifts by the difference. rollForwardAllocations avoids all this by
+  // keeping the id when it moves a bucket; a user-initiated move can't, so it
+  // repairs the references instead. Returns the number of drawers updated.
+  repointAllocationDraws(oldId, newId) {
+    if (!oldId || !newId || oldId === newId) return 0;
+    let updated = 0;
+    Object.keys(this.transactions).forEach((date) => {
+      this.transactions[date].forEach((t) => {
+        if (t.drawsFromAllocationId !== oldId) return;
+        t.drawsFromAllocationId = newId;
+        t._lastModified = new Date().toISOString();
+        updated++;
+      });
+    });
+    if (updated > 0) {
+      this.debouncedSave();
+    }
+    return updated;
+  },
+
   // Refund a previously-applied draw back to its allocation.
   _reverseAllocationDraw(transaction) {
     if (

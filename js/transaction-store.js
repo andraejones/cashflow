@@ -80,8 +80,15 @@ class TransactionStore {
   // localStorage, exports, and cloud sync. No save is triggered here — nothing
   // persisted changes until the drafts are applied.
 
+  // Cent rounding for the allocation engine. Non-finite input collapses to 0
+  // rather than propagating: every value this touches (a bucket's remaining, a
+  // draw amount) is persisted, and the house rule for persisted money is
+  // Number.isFinite (see _finiteNumber / _repairWalkAmounts). Before this,
+  // Number(undefined) + EPSILON produced NaN, and one NaN reaching
+  // _applyAllocationDraw turned the bucket's amount into NaN for good.
   _roundCents(value) {
-    return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+    const num = Number(value);
+    return Math.round(((Number.isFinite(num) ? num : 0) + Number.EPSILON) * 100) / 100;
   }
 
   _todayString() {

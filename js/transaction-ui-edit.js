@@ -190,7 +190,8 @@ Object.assign(TransactionUI.prototype, {
               movedTransaction.autoCloseout = true;
             }
           }
-          this.store.addTransaction(newDate, movedTransaction);
+          const movedId = this.store.addTransaction(newDate, movedTransaction);
+          this._repointMovedAllocation(transaction, movedTransaction, movedId);
         } else if (transaction.movedFrom && transaction.originalRecurringId) {
           // One-time that was previously moved from a recurring
           if (newDate === transaction.movedFrom) {
@@ -252,7 +253,8 @@ Object.assign(TransactionUI.prototype, {
                 }
               }
             }
-            this.store.addTransaction(newDate, reMovedTransaction);
+            const reMovedId = this.store.addTransaction(newDate, reMovedTransaction);
+            this._repointMovedAllocation(transaction, reMovedTransaction, reMovedId);
           }
         } else {
           // Regular one-time transaction
@@ -294,7 +296,8 @@ Object.assign(TransactionUI.prototype, {
               }
             }
           }
-          this.store.addTransaction(newDate, newTransaction);
+          const newId = this.store.addTransaction(newDate, newTransaction);
+          this._repointMovedAllocation(transaction, newTransaction, newId);
         }
 
         this.showTransactionDetails(newDate);
@@ -305,6 +308,19 @@ Object.assign(TransactionUI.prototype, {
       console.error("Error saving edit:", error);
       Utils.showNotification("Error updating transaction", "error");
     }
+  },
+
+  // A date change relocates a transaction by delete + re-add, so it lands under
+  // a fresh id. When the thing being moved is an allocation bucket, every
+  // expense drawing from it still names the old id — re-point them, or the
+  // links dangle and the bucket silently stops absorbing later edits to those
+  // expenses (see TransactionStore.repointAllocationDraws). Skipped when the
+  // moved copy is no longer a bucket (a type change off expense drops the
+  // flag); those drawers degrade exactly as they do after a Close Out.
+  _repointMovedAllocation(original, movedCopy, newId) {
+    if (!original || !original.id || !newId) return;
+    if (movedCopy.allocated !== true) return;
+    this.store.repointAllocationDraws(original.id, newId);
   },
 
   // Re-add a just-deleted one-time transaction (undo toast callback). Runs

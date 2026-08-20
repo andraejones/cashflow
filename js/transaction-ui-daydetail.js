@@ -16,6 +16,21 @@ Object.assign(TransactionUI.prototype, {
     const modalBalance = document.getElementById("modalBalance");
     if (!modalBalance || !this.calculationService) return;
 
+    // Rebuild the derived balance data before reading it. CalculationService's
+    // caches (daily totals, monthly summaries, reserved totals) and the
+    // monthlyBalances map are only refreshed by updateMonthlyBalances, which
+    // runs during a calendar render — and every in-modal mutation (delete,
+    // edit, settle, skip, close out, undo-restore) re-renders this modal
+    // BEFORE _notifyChange() triggers that render. Without this refresh the
+    // Income/Expenses/Balance lines keep showing the pre-mutation figures while
+    // the transaction list below already shows the new state.
+    const dateObj = Utils.parseDateString(date);
+    if (dateObj) {
+      this.calculationService.updateMonthlyBalances(dateObj);
+    } else {
+      this.calculationService.invalidateCache();
+    }
+
     const b = this.calculationService.getDayBalanceBreakdown(date);
     const rows = [];
     if (b.income > 0) {

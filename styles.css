@@ -191,7 +191,11 @@ body.app-locked .fab-today {
 
 .days {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  /* minmax(0, 1fr), not 1fr: a bare `1fr` track is minmax(auto, 1fr), and the
+     `auto` minimum refuses to shrink below the widest cell's min-content width.
+     A four-figure balance in a day cell therefore forced the seven tracks wider
+     than the viewport at 320px, and the whole page scrolled sideways. */
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 8px;
   padding: 14px;
   background-color: var(--surface-muted);
@@ -410,6 +414,18 @@ body.app-locked .fab-today {
   background-color: var(--surface-muted);
 }
 
+/* CalendarUI switches between the grid and the agenda with the `hidden`
+   attribute, but the two rules above set `display` from a class selector — and
+   an author `display` declaration outranks the UA's `[hidden] { display: none }`.
+   Both containers therefore stayed laid out whichever view was active, leaving
+   an empty padded strip of --surface-muted above (or below) the real one. Same
+   explicit opt-out .description-suggestions[hidden] and .what-if-banner[hidden]
+   already use. */
+.days[hidden],
+.agenda-list[hidden] {
+  display: none;
+}
+
 .agenda-row {
   display: flex;
   align-items: flex-start;
@@ -606,7 +622,14 @@ body.app-locked .fab-today {
   border-radius: var(--radius-md);
 }
 
-#transactionForm input,
+/* Checkboxes are excluded: these are ID-specificity declarations, so they beat
+   `.settled-toggle-label input[type="checkbox"]` on every property they share.
+   The Settled / Auto close-out / Suggest-amount / Free-funds toggles were
+   therefore rendering as >=140px-wide padded, inset-shadowed fields with their
+   label stranded to the right, instead of the compact "[x] Settled" row the
+   toggle rules describe. (.last-day-option-group is the same fight, fixed
+   locally for the one toggle that lives inside an .option-group.) */
+#transactionForm input:not([type="checkbox"]),
 #transactionForm select {
   margin: 0;
   padding: 8px 10px;
@@ -1127,7 +1150,13 @@ body.app-locked .fab-today {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   background: linear-gradient(135deg, #fdf7ef 0%, #e2f3ee 100%);
-  z-index: 500;
+  /* Above the mobile FABs (800), below the modals (1000+). A full-screen view
+     is opaque and owns the screen: at 500 the floating add / jump-to-today
+     buttons sat ON TOP of the Debt Snowball panel, covering its controls and
+     swallowing taps meant for them. Dialogs opened FROM the panel (the delete
+     confirmations on #appModal) must still stack above it, hence 900 rather
+     than something higher. */
+  z-index: 900;
 }
 
 .app-view-content {
@@ -2611,7 +2640,9 @@ body.app-locked #calendarOptions {
     flex-direction: column;
   }
 
-  #transactionForm input,
+  /* Checkboxes excluded for the same reason as the desktop rule above — a
+     100%-wide, 10px-padded checkbox is not a toggle. */
+  #transactionForm input:not([type="checkbox"]),
   #transactionForm select,
   #transactionForm button {
     width: 100%;

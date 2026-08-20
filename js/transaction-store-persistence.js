@@ -73,6 +73,49 @@ Object.assign(TransactionStore.prototype, {
     return normalized;
   },
 
+  // ---- Stored-shape guards -------------------------------------------------
+  // JSON.parse accepting a value is not the same as the app being able to use
+  // it. A truncated write, another tool touching the key, or a hand-edited
+  // backup can leave `123`, `true`, `null` or `"text"` under a key the rest of
+  // the code reads as a map or a list. loadData used to assign those straight
+  // through, and the failure surfaced far away and uncaught — updateMonthlyBalances
+  // writing a property onto a number, hasMoveAnomaly reading .fromDate off
+  // null — leaving a blank app with no way back. Treat an unusable shape as
+  // missing data instead: keep the empty default, warn, and let the user
+  // restore from cloud or a backup.
+  _storedMap(parsed, label) {
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed;
+    }
+    console.warn(`Stored "${label}" has an unusable shape; ignoring it.`);
+    return null;
+  },
+
+  _storedArray(parsed, label) {
+    if (Array.isArray(parsed)) {
+      return parsed;
+    }
+    console.warn(`Stored "${label}" has an unusable shape; ignoring it.`);
+    return null;
+  },
+
+  // Same idea one level down: every day of the transactions map must be an
+  // array, every skip list must be an array, every move record an object.
+  // One bad entry otherwise throws inside a forEach the moment it is walked.
+  _prunedEntries(map, keep) {
+    let dropped = 0;
+    Object.keys(map).forEach((key) => {
+      if (!keep(map[key])) {
+        delete map[key];
+        dropped++;
+      }
+    });
+    if (dropped > 0) {
+      console.warn(`Dropped ${dropped} unusable stored entr${dropped === 1 ? "y" : "ies"}.`);
+    }
+    return map;
+  },
+
   // Debounced save method - batches multiple rapid changes into a single save
   debouncedSave(isDataModified = true) {
     // Track if any pending save has data modification
@@ -194,7 +237,25 @@ Object.assign(TransactionStore.prototype, {
       );
 
       if (storedTransactions) {
-        this.transactions = JSON.parse(storedTransactions);
+        const parsedTransactions = this._storedMap(
+          JSON.parse(storedTransactions), "transactions"
+        );
+        if (parsedTransactions) {
+          // Prune inside each day too: a null or a bare number among the rows
+          // throws on the very next `t.id` read, and the catch below would then
+          // discard the ENTIRE dataset (and block saves) over one junk entry.
+          Object.keys(parsedTransactions).forEach((date) => {
+            if (Array.isArray(parsedTransactions[date])) {
+              parsedTransactions[date] = parsedTransactions[date].filter(
+                (t) => t && typeof t === "object" && !Array.isArray(t)
+              );
+            }
+          });
+          this.transactions = this._prunedEntries(
+            parsedTransactions,
+            (day) => Array.isArray(day) && day.length > 0
+          );
+        }
         // Migration: assign IDs and timestamps to transactions without them
         let needsMigration = false;
         Object.keys(this.transactions).forEach((date) => {
@@ -217,11 +278,21 @@ Object.assign(TransactionStore.prototype, {
       }
 
       if (storedMonthlyBalances) {
-        this.monthlyBalances = JSON.parse(storedMonthlyBalances);
+        const parsedBalances = this._storedMap(
+          JSON.parse(storedMonthlyBalances), "monthlyBalances"
+        );
+        // Derived data — an unusable copy just gets rebuilt on the next render.
+        this.monthlyBalances = parsedBalances || {};
       }
 
       if (storedRecurringTransactions) {
-        this.recurringTransactions = JSON.parse(storedRecurringTransactions);
+        this.recurringTransactions =
+          this._storedArray(
+            JSON.parse(storedRecurringTransactions), "recurringTransactions"
+          ) || [];
+        this.recurringTransactions = this.recurringTransactions.filter(
+          (rt) => rt && typeof rt === "object" && !Array.isArray(rt)
+        );
         this.recurringTransactions.forEach((rt) => {
           if (!rt.id) {
             rt.id = Utils.generateUniqueId();
@@ -264,30 +335,52 @@ Object.assign(TransactionStore.prototype, {
       this._repairWalkAmounts();
 
       if (storedSkippedTransactions) {
-        this.skippedTransactions = JSON.parse(storedSkippedTransactions);
+        const parsedSkips = this._storedMap(
+          JSON.parse(storedSkippedTransactions), "skippedTransactions"
+        );
+        if (parsedSkips) {
+          Object.keys(parsedSkips).forEach((date) => {
+            if (Array.isArray(parsedSkips[date])) {
+              parsedSkips[date] = parsedSkips[date].filter(
+                (id) => typeof id === "string" && id
+              );
+            }
+          });
+          this.skippedTransactions = this._prunedEntries(
+            parsedSkips,
+            (list) => Array.isArray(list) && list.length > 0
+          );
+        }
       }
 
       if (storedDebts) {
-        const parsedDebts = JSON.parse(storedDebts);
-        this.debts = parsedDebts.map((debt) => this._normalizeDebt(debt));
+        const parsedDebts = this._storedArray(JSON.parse(storedDebts), "debts") || [];
+        this.debts = parsedDebts
+          .filter((debt) => debt && typeof debt === "object" && !Array.isArray(debt))
+          .map((debt) => this._normalizeDebt(debt));
       }
 
       if (storedCashInfusions) {
-        const parsedInfusions = JSON.parse(storedCashInfusions);
-        this.cashInfusions = parsedInfusions.map((infusion) =>
-          this._normalizeCashInfusion(infusion)
-        );
+        const parsedInfusions =
+          this._storedArray(JSON.parse(storedCashInfusions), "cashInfusions") || [];
+        this.cashInfusions = parsedInfusions
+          .filter((inf) => inf && typeof inf === "object" && !Array.isArray(inf))
+          .map((infusion) => this._normalizeCashInfusion(infusion));
       }
 
       if (storedSavingsGoals) {
-        const parsedGoals = JSON.parse(storedSavingsGoals);
-        this.savingsGoals = parsedGoals.map((goal) =>
-          this._normalizeSavingsGoal(goal)
-        );
+        const parsedGoals =
+          this._storedArray(JSON.parse(storedSavingsGoals), "savingsGoals") || [];
+        this.savingsGoals = parsedGoals
+          .filter((goal) => goal && typeof goal === "object" && !Array.isArray(goal))
+          .map((goal) => this._normalizeSavingsGoal(goal));
       }
 
       if (storedSnowballSettings) {
-        const parsedSettings = JSON.parse(storedSnowballSettings);
+        const parsedSettings =
+          this._storedMap(
+            JSON.parse(storedSnowballSettings), "debtSnowballSettings"
+          ) || {};
         this.debtSnowballSettings = {
           dailyFloor: this._finiteNumber(parsedSettings.dailyFloor),
           extraPaymentStartMonth: this.normalizeExtraStartMonth(
@@ -298,11 +391,20 @@ Object.assign(TransactionStore.prototype, {
       }
 
       if (storedMonthlyNotes) {
-        this.monthlyNotes = JSON.parse(storedMonthlyNotes);
+        this.monthlyNotes =
+          this._storedMap(JSON.parse(storedMonthlyNotes), "monthlyNotes") || {};
       }
 
       if (storedMovedTransactions) {
-        this.movedTransactions = JSON.parse(storedMovedTransactions);
+        const parsedMoves = this._storedMap(
+          JSON.parse(storedMovedTransactions), "movedTransactions"
+        );
+        this.movedTransactions = parsedMoves
+          ? this._prunedEntries(
+              parsedMoves,
+              (move) => move && typeof move === "object" && !Array.isArray(move)
+            )
+          : {};
 
         // Clean up stale entries where fromDate equals toDate
         // (transaction was moved back to original date)
@@ -456,6 +558,9 @@ Object.assign(TransactionStore.prototype, {
 
     // Mark save as in progress
     this._saveInProgress = true;
+    // Reported to callers so a step that depends on the write landing (the PIN
+    // change flow re-keying every value) can back out instead of committing.
+    let wrote = false;
 
     try {
       const encrypt = (val) => {
@@ -519,10 +624,32 @@ Object.assign(TransactionStore.prototype, {
         "deletedItems",
         encrypt(JSON.stringify(this._deletedItems))
       );
-      this.triggerSaveCallbacks(isDataModified);
+      this._storageWriteFailed = false;
+      wrote = true;
     } catch (error) {
+      // A write that throws part-way through (localStorage over quota is the
+      // realistic case — the dataset plus its PIN-encrypted base64 plus
+      // cloud-sync's _backup_before_merge copy add up) used to be swallowed
+      // here: some keys were written and some weren't, the save callbacks
+      // below never ran so CloudSync stopped scheduling a push, and the user
+      // was told nothing. The in-memory data is still correct, so let the
+      // callbacks run anyway — the change can still reach the cloud — and say
+      // out loud that this device's storage is failing.
       console.error("Error saving data to storage:", error);
+      if (!this._storageWriteFailed) {
+        this._storageWriteFailed = true;
+        if (typeof Utils !== "undefined" && Utils.showNotification) {
+          Utils.showNotification(
+            "Couldn't save to this device's storage — your changes may not survive a reload. Save to Cloud now.",
+            "error"
+          );
+        }
+      }
     } finally {
+      // In the finally, not the try: cloud sync must be notified whether or not
+      // localStorage accepted the data, and _saveInProgress must always clear.
+      // triggerSaveCallbacks isolates each callback itself.
+      this.triggerSaveCallbacks(isDataModified);
       this._saveInProgress = false;
 
       // Process queued save if any
@@ -532,6 +659,8 @@ Object.assign(TransactionStore.prototype, {
         this.saveData(queuedModified);
       }
     }
+
+    return wrote;
   },
 
   resetData() {

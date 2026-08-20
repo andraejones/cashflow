@@ -88,3 +88,7 @@ The exported JSON schema includes: `transactions`, `monthlyBalances`, `recurring
 - `js/pin-protection.js`: PIN locking and encryption.
 - `js/utils.js`: date and ID helpers plus notifications.
 - `scripts/verify-logic.js`: standalone logic verification utility.
+- `scripts/verify-walk-parity.js`: randomized balance-walk parity harness.
+- `scripts/verify-ui.js` / `scripts/verify-sync.js`: optional headless-browser
+  harnesses (`npm run test:ui`, `npm run test:sync`); they skip cleanly when
+  puppeteer is not installed.

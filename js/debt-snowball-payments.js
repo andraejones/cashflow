@@ -298,10 +298,20 @@ Object.assign(DebtSnowballUI.prototype, {
   // Scans all dates (strandings can sit far outside the materialized horizon)
   // and runs once per render via ensureSnowballPaymentsForHorizon, which then
   // re-expands and re-adjusts a clean set within the current window.
+  //
+  // Also sweeps snowball payoff rows whose debt no longer exists.
+  // syncSnowballTransactionsForMonth only reconciles rows stamped with a month
+  // it is actually materializing (the current month + the forward horizon), so
+  // a payoff the user had already materialized further out survives deleting
+  // its debt and keeps showing as a real expense on those far-future days until
+  // they happen to navigate back to that month.
   cleanupOrphanedDebtMinimums() {
     const transactions = this.store.getTransactions();
     const recurringById = new Map(
       this.store.getRecurringTransactions().map((rt) => [rt.id, rt])
+    );
+    const liveDebtIds = new Set(
+      (this.store.getDebts() || []).map((debt) => debt && debt.id).filter(Boolean)
     );
     let changed = false;
 
@@ -354,6 +364,16 @@ Object.assign(DebtSnowballUI.prototype, {
         return;
       }
       const filtered = list.filter((t) => {
+        // Engine-generated payoff row for a debt that has since been deleted.
+        if (
+          t.snowballGenerated === true &&
+          t.debtId &&
+          !liveDebtIds.has(t.debtId)
+        ) {
+          this.store.trackDeletedTransaction(t.id);
+          changed = true;
+          return false;
+        }
         if (t.debtRole !== "minimum" || !t.debtId || !t.recurringId) {
           return true;
         }

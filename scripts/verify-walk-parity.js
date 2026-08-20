@@ -31,6 +31,9 @@ global.localStorage = {
 global.window = { localStorage: global.localStorage };
 global.document = {
   addEventListener: () => {},
+  // Kept in step with the other harness's stub (see the note below):
+  // PinProtection.stopInactivityMonitoring detaches its activity listeners.
+  removeEventListener: () => {},
   getElementById: () => null,
   // Kept in step with verify-logic.js's stub: a stub that is looser or thinner
   // than the other lets code pass in one harness and throw in the other.
@@ -66,6 +69,34 @@ global.Utils = {
       maximumFractionDigits: 2,
     });
   },
+  // --- Kept identical in scripts/verify-logic.js and
+  // scripts/verify-walk-parity.js. A stub that is thinner than the other lets
+  // code pass in one harness and throw in the other, and a member missing from
+  // both means any test that reaches it dies on a bare TypeError instead of
+  // exercising the path. Dialogs resolve to their CANCEL value so a test that
+  // unexpectedly reaches one takes the "user declined" branch rather than
+  // silently confirming something destructive.
+  showModalAlert: async () => undefined,
+  showModalConfirm: async () => false,
+  showModalPrompt: async () => null,
+  cancelActiveModalDialog: () => {},
+  showUndoToast: () => {},
+  showLoading: () => {},
+  hideLoading: () => {},
+  announceToScreenReader: () => {},
+  cleanUpHtmlArtifacts: () => {},
+  // The recurrence-form builders need a live DOM container; a test that needs
+  // them must supply one and override these.
+  buildSemiMonthlyOptions: () => {},
+  buildCustomIntervalOptions: () => {},
+  buildBusinessDayOptions: () => {},
+  buildEndConditionOptions: () => {},
+  MONTH_LABELS: [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+  ],
+  WEEKDAY_LABELS: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+  DAY_SPECIFIC_OPTIONS: [],
   escapeHtml: (str) => String(str)
 };
 global.ModalManager = { openModal: () => {}, closeModal: () => {}, topModal: () => null };

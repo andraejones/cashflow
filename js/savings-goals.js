@@ -116,8 +116,18 @@ class SavingsGoalsUI {
       let statusHtml = "";
       if (remaining === 0) {
         statusHtml = `<span class="savings-goal-status funded">Fully funded 🎉</span>`;
-      } else if (!goal.targetDate || goal.targetDate <= todayStr) {
-        statusHtml = `<span class="savings-goal-status short">$${Utils.formatAmount(remaining)} to go — target date ${goal.targetDate ? "passed" : "not set"}</span>`;
+      } else if (
+        !goal.targetDate ||
+        // A goal restored from an import can carry any string here
+        // (_normalizeSavingsGoal only checks the type). An unparseable one used
+        // to slip past the todayStr comparison — "not-a-date" sorts after any
+        // ISO date — and then read as "about $0.00/month for NaN months".
+        !Utils.parseDateString(goal.targetDate) ||
+        goal.targetDate <= todayStr
+      ) {
+        statusHtml = `<span class="savings-goal-status short">$${Utils.formatAmount(remaining)} to go — target date ${
+          goal.targetDate && Utils.parseDateString(goal.targetDate) ? "passed" : "not set"
+        }</span>`;
       } else {
         const monthsLeft = Math.max(
           1,

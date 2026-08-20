@@ -17,6 +17,10 @@ Object.assign(TransactionUI.prototype, {
         // Skip expanded recurring instances and debt/snowball payments —
         // only genuine one-time entries the user typed themselves.
         if (t.recurringId || t.debtId) return;
+        // What-if drafts ride in the shared transactions map, so this read
+        // surface has to opt out like the others: a hypothetical is not a
+        // description the user has actually used before.
+        if (t.whatIf === true) return;
         // Allocations are set-aside buckets, not everyday expenses — keep them
         // out of the quick-input suggestion list.
         if (t.allocated === true) return;

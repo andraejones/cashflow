@@ -134,6 +134,17 @@ class RecurringTransactionManager {
     return Math.round((endLocal.getTime() - startLocal.getTime()) / (1000 * 60 * 60 * 24));
   }
 
+  // How many whole `stepDays` intervals it takes to reach or pass `target` from
+  // `startDate`. Replaces the step-a-period-at-a-time catch-up loops in the
+  // day-stepped recurrences, which were O(distance) and therefore made a whole
+  // render O(months x history). Both dates are normalised to noon by
+  // daysBetween, so DST cannot shift the count.
+  _catchUpSteps(startDate, target, stepDays) {
+    const days = this.daysBetween(startDate, target);
+    if (days <= 0) return 0;
+    return Math.ceil(days / stepDays);
+  }
+
   // Adjust day for months with fewer days (handles Feb 29 in non-leap years, etc.)
   adjustDayForMonth(year, month, preferredDay) {
     const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -620,6 +631,21 @@ class RecurringTransactionManager {
   // expansions (no id, not a modified instance); persisted/drawn buckets are left
   // to the sweep, which records the deletion in _deletedItems for sync safety.
   _collapseSupersededRollingAllocations() {
+    // Nothing can be collapsed unless some series IS a rolling allocation
+    // (allocated, no auto close-out). This pass only ever removes pure
+    // expansions — no id, not a modified instance — and a pure expansion's
+    // flags always come from its definition, so checking the definitions is
+    // exactly equivalent and costs O(series). The scan below is O(every
+    // transaction ever stored) and runs once per expanded month, which made it
+    // the single largest cost of a render on a multi-year dataset (quadratic in
+    // history length) even for users with no allocations at all.
+    const hasRollingAllocationSeries = this.store
+      .getRecurringTransactions()
+      .some((rt) => rt && rt.allocated === true && rt.autoCloseout !== true);
+    if (!hasRollingAllocationSeries) {
+      return;
+    }
+
     const transactions = this.store.getTransactions();
     const now = new Date();
     const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
@@ -773,10 +799,14 @@ class RecurringTransactionManager {
     const startOfMonth = new Date(year, month, 1, 12, 0, 0);
     const endOfMonth = new Date(year, month + 1, 0, 12, 0, 0);
     let currentDate = new Date(startDate);
-    let occurrenceCount = 0;
-    while (currentDate < startOfMonth) {
-      currentDate.setDate(currentDate.getDate() + 7);
-      occurrenceCount++;
+    // Skip straight to the first occurrence on/after this month instead of
+    // stepping a week at a time. The loop was O(weeks since startDate) and runs
+    // once per rendered month, so a years-old series made expansion quadratic
+    // in history length. ceil() lands on exactly the date the loop stopped at:
+    // startDate + steps*7 >= startOfMonth while startDate + (steps-1)*7 < it.
+    let occurrenceCount = this._catchUpSteps(startDate, startOfMonth, 7);
+    if (occurrenceCount > 0) {
+      currentDate.setDate(currentDate.getDate() + occurrenceCount * 7);
     }
     while (
       currentDate <= endOfMonth &&
@@ -825,10 +855,10 @@ class RecurringTransactionManager {
     const startOfMonth = new Date(year, month, 1, 12, 0, 0);
     const endOfMonth = new Date(year, month + 1, 0, 12, 0, 0);
     let currentDate = new Date(startDate);
-    let occurrenceCount = 0;
-    while (currentDate < startOfMonth) {
-      currentDate.setDate(currentDate.getDate() + 14);
-      occurrenceCount++;
+    // See applyWeeklyRecurrence: arithmetic catch-up instead of stepping.
+    let occurrenceCount = this._catchUpSteps(startDate, startOfMonth, 14);
+    if (occurrenceCount > 0) {
+      currentDate.setDate(currentDate.getDate() + occurrenceCount * 14);
     }
     while (
       currentDate <= endOfMonth &&
@@ -1291,15 +1321,34 @@ class RecurringTransactionManager {
 
     const startOfMonth = new Date(year, month, 1, 12, 0, 0);
     const endOfMonth = new Date(year, month + 1, 0, 12, 0, 0);
+    // Jump to the first occurrence on/after this month rather than walking
+    // every interval from startDate (see applyWeeklyRecurrence). Only the
+    // day-stepped units get the arithmetic shortcut: a month step is not a
+    // fixed number of days, and a month-stepped catch-up is bounded by the
+    // number of months anyway, so that one keeps the loop.
     let occurrenceCount = 0;
     let currentDate = new Date(startDate);
-    while (currentDate < startOfMonth) {
-      currentDate = this.getCustomIntervalDate(
-        startDate,
-        rt.customInterval,
-        occurrenceCount + 1
-      );
-      occurrenceCount++;
+    const unit = rt.customInterval.unit;
+    const stepDays =
+      unit === "days" ? intervalStep : unit === "weeks" ? intervalStep * 7 : 0;
+    if (stepDays > 0) {
+      occurrenceCount = this._catchUpSteps(startDate, startOfMonth, stepDays);
+      if (occurrenceCount > 0) {
+        currentDate = this.getCustomIntervalDate(
+          startDate,
+          rt.customInterval,
+          occurrenceCount
+        );
+      }
+    } else {
+      while (currentDate < startOfMonth) {
+        currentDate = this.getCustomIntervalDate(
+          startDate,
+          rt.customInterval,
+          occurrenceCount + 1
+        );
+        occurrenceCount++;
+      }
     }
     while (
       currentDate <= endOfMonth &&

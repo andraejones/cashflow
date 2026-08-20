@@ -29,15 +29,37 @@ class PinProtection {
   }
 
   async initWebAuthn() {
-    this.webAuthnAvailable = await this.checkWebAuthnSupport();
-    this.credentialId = localStorage.getItem("webauthn_credential_id");
+    // Nothing in here may reject. promptUnlock() awaits this promise before it
+    // will show the unlock dialog at all, and lockApp() calls promptUnlock()
+    // without a catch — so a throw here (a browser that denies localStorage,
+    // an authenticator query that blows up) would leave the lock overlay up
+    // with no way past it. Failing to detect biometrics just means PIN entry.
+    try {
+      this.webAuthnAvailable = await this.checkWebAuthnSupport();
+    } catch (error) {
+      console.warn("WebAuthn support check failed:", error);
+      this.webAuthnAvailable = false;
+    }
+    try {
+      this.credentialId = localStorage.getItem("webauthn_credential_id");
+    } catch (error) {
+      console.warn("Could not read the stored WebAuthn credential:", error);
+      this.credentialId = null;
+    }
     this.webAuthnEnabled = this.webAuthnAvailable && this.credentialId !== null;
   }
 
   // Wait for WebAuthn initialization to complete
   async ensureWebAuthnInit() {
     if (this.webAuthnInitPromise) {
-      await this.webAuthnInitPromise;
+      // Belt to initWebAuthn's braces: an unlock must never be blocked by a
+      // failed capability probe. Callers only read the flags it sets, which
+      // default to "no biometrics available".
+      try {
+        await this.webAuthnInitPromise;
+      } catch (error) {
+        console.warn("WebAuthn initialization failed:", error);
+      }
     }
   }
 
@@ -667,8 +689,24 @@ class PinProtection {
       );
       if (newPin === null) return;
       if (newPin === "") {
+        // Re-write every value in the clear BEFORE dropping the PIN hash. The
+        // other order is a one-way data loss: clearPin() removes the hash, and
+        // if the rewrite then fails (storage over quota) the disk still holds
+        // ciphertext that nothing can decrypt — no hash left to unlock it, and
+        // no PIN in memory to decrypt with. Clearing currentPin first makes
+        // saveData's encrypt() a pass-through, so this write IS the plaintext
+        // copy; only once it lands do we drop the hash.
+        const encryptedWith = this.currentPin;
+        this.currentPin = "";
+        if (store.saveData(false) === false) {
+          this.currentPin = encryptedWith;
+          await Utils.showModalAlert(
+            "Couldn't rewrite your data without encryption, so the PIN was left in place. Free up space on this device and try again.",
+            "Change PIN"
+          );
+          return;
+        }
         this.clearPin();
-        store.saveData(false);
         await Utils.showModalAlert("PIN disabled", "Change PIN");
         return;
       }
@@ -693,12 +731,43 @@ class PinProtection {
       await Utils.showModalAlert("PINs do not match", "Confirm PIN");
       return;
     }
-    await this.setPin(newPin);
+    // Re-key the stored data with the new PIN BEFORE committing the new hash,
+    // for the same reason as the disable path above: if the rewrite fails, the
+    // disk still holds data encrypted with the old key AND the old hash that
+    // unlocks it. Committing the hash first and then failing to rewrite leaves
+    // a hash and a ciphertext that don't match — the correct PIN no longer
+    // opens the data.
+    const previousPin = this.currentPin;
+    this.currentPin = newPin;
+    if (store.saveData(false) === false) {
+      this.currentPin = previousPin;
+      await Utils.showModalAlert(
+        "Couldn't re-save your data with the new PIN, so the PIN was not changed. Free up space on this device and try again.",
+        "Change PIN"
+      );
+      return;
+    }
+    // Committing the hash is itself a storage write, and it can fail for the
+    // same reason the re-key can. Failing here is the worse half of the pair:
+    // the data is already encrypted with the NEW pin while the stored hash
+    // still names the old one, so neither PIN opens it on the next load. Put
+    // the data back under the old key before giving up.
+    try {
+      await this.setPin(newPin);
+    } catch (error) {
+      console.error("Could not store the new PIN:", error);
+      this.currentPin = previousPin;
+      store.saveData(false);
+      await Utils.showModalAlert(
+        "Couldn't store the new PIN, so it was not changed and your data was left encrypted with the old one.",
+        "Change PIN"
+      );
+      return;
+    }
     // Update stored biometric PIN if biometrics is enabled
     if (this.isWebAuthnEnabled()) {
       await this.storePinForBiometrics(newPin);
     }
-    store.saveData(false);
     await Utils.showModalAlert("PIN updated", "Change PIN");
   }
 
@@ -781,6 +850,15 @@ class PinProtection {
       if (typeof window.app._removeAllocatedEscHandler === "function") {
         window.app._removeAllocatedEscHandler();
       }
+      // The cloud-sync credentials dialog is built at runtime, so the sweep
+      // below only HIDES it — leaving the promise a sync is awaiting pending
+      // forever, with _isSyncing stuck true. Settle it explicitly.
+      if (
+        window.app.cloudSync &&
+        typeof window.app.cloudSync.cancelCredentialsPrompt === "function"
+      ) {
+        window.app.cloudSync.cancelCredentialsPrompt();
+      }
     }
 
     // Close appModal if it's open
@@ -793,11 +871,21 @@ class PinProtection {
       }
     }
 
-    // Close the debt snowball view if it's open
+    // Close the debt snowball view if it's open. Route through its own teardown
+    // when we can: hiding the element directly leaves _viewHistoryActive set
+    // and its pushed history entry orphaned, so every lock-while-open leaked
+    // another entry and cost the user a wasted Back press. _hideViewDom is the
+    // no-history half of hideView, which is what we want here — the panel is
+    // being torn down, not navigated away from.
     const debtView = document.getElementById("debtSnowballView");
     if (debtView && debtView.style.display === "block") {
-      debtView.style.display = "none";
-      debtView.setAttribute("aria-hidden", "true");
+      const snowball = window.app && window.app.debtSnowball;
+      if (snowball && typeof snowball._hideViewDom === "function") {
+        snowball._hideViewDom();
+      } else {
+        debtView.style.display = "none";
+        debtView.setAttribute("aria-hidden", "true");
+      }
     }
 
     // Close any other common modals

@@ -19,6 +19,9 @@ global.window = {
 global.__domFields = {};
 global.document = {
   addEventListener: () => {},
+  // Kept in step with the other harness's stub (see the note below):
+  // PinProtection.stopInactivityMonitoring detaches its activity listeners.
+  removeEventListener: () => {},
   getElementById: (id) =>
     Object.prototype.hasOwnProperty.call(global.__domFields, id)
       ? { value: global.__domFields[id], focus() {}, style: {}, setAttribute() {} }
@@ -59,6 +62,34 @@ global.Utils = {
       maximumFractionDigits: 2,
     });
   },
+  // --- Kept identical in scripts/verify-logic.js and
+  // scripts/verify-walk-parity.js. A stub that is thinner than the other lets
+  // code pass in one harness and throw in the other, and a member missing from
+  // both means any test that reaches it dies on a bare TypeError instead of
+  // exercising the path. Dialogs resolve to their CANCEL value so a test that
+  // unexpectedly reaches one takes the "user declined" branch rather than
+  // silently confirming something destructive.
+  showModalAlert: async () => undefined,
+  showModalConfirm: async () => false,
+  showModalPrompt: async () => null,
+  cancelActiveModalDialog: () => {},
+  showUndoToast: () => {},
+  showLoading: () => {},
+  hideLoading: () => {},
+  announceToScreenReader: () => {},
+  cleanUpHtmlArtifacts: () => {},
+  // The recurrence-form builders need a live DOM container; a test that needs
+  // them must supply one and override these.
+  buildSemiMonthlyOptions: () => {},
+  buildCustomIntervalOptions: () => {},
+  buildBusinessDayOptions: () => {},
+  buildEndConditionOptions: () => {},
+  MONTH_LABELS: [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+  ],
+  WEEKDAY_LABELS: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+  DAY_SPECIFIC_OPTIONS: [],
   escapeHtml: (str) => String(str)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -4660,11 +4691,1032 @@ console.log("TEST 59: An Ending Balance Between The Bank's Two Dates Is Reported
   );
 }
 
+// TEST 60: Relocating an allocation bucket must not orphan the expenses drawing
+// from it. A date change moves a transaction by delete + re-add, so the bucket
+// comes back under a fresh id (the old one is tombstoned and can't be reused).
+// Before repointAllocationDraws the drawers kept naming the dead id: the
+// "Drawn from" label vanished and the next edit of a drawing expense found no
+// bucket to refund, so the reserve silently stopped absorbing the change.
+console.log("TEST 60: Moving An Allocation Bucket Keeps Its Draws Linked");
+{
+  const s = new TransactionStore();
+  s.resetData();
+
+  const bucketId = s.addTransaction("2026-08-01", {
+    amount: 200,
+    type: "expense",
+    description: "Groceries Bucket",
+    allocated: true,
+    settled: true,
+  });
+  s.addTransaction("2026-08-05", {
+    amount: 50,
+    type: "expense",
+    description: "Publix",
+    settled: true,
+    drawsFromAllocationId: bucketId,
+  });
+
+  if (s.findTransactionById(bucketId).transaction.amount !== 150) {
+    throw new Error("Draw did not debit the bucket");
+  }
+
+  // Relocate the bucket the way saveEdit's date-change path does.
+  const loc = s.findTransactionById(bucketId);
+  const moved = { ...s.getTransactions()[loc.date][loc.index] };
+  s.deleteTransaction(loc.date, loc.index);
+  const newId = s.addTransaction("2026-08-02", {
+    amount: moved.amount,
+    type: "expense",
+    description: moved.description,
+    allocated: true,
+    settled: true,
+  });
+  if (s.repointAllocationDraws(bucketId, newId) !== 1) {
+    throw new Error("repointAllocationDraws did not update the drawing expense");
+  }
+
+  const drawer = s.getTransactions()["2026-08-05"][0];
+  if (drawer.drawsFromAllocationId !== newId) {
+    throw new Error(
+      `Drawer still points at the dead bucket id: ${drawer.drawsFromAllocationId}`
+    );
+  }
+  const info = s.getAllocationInfoById(drawer.drawsFromAllocationId);
+  if (!info || info.date !== "2026-08-02") {
+    throw new Error(`Draw label lost the relocated bucket: ${JSON.stringify(info)}`);
+  }
+
+  // The reserve must absorb a later edit of the drawing expense again.
+  s.updateTransaction("2026-08-05", 0, { amount: 60 });
+  const remaining = s.findTransactionById(newId).transaction.amount;
+  if (remaining !== 140) {
+    throw new Error(`Bucket did not re-absorb the edit: ${remaining} (expected 140)`);
+  }
+
+  // A no-op / unknown re-point must not touch anything.
+  if (s.repointAllocationDraws(newId, newId) !== 0) {
+    throw new Error("Self re-point should be a no-op");
+  }
+  if (s.repointAllocationDraws("does-not-exist", newId) !== 0) {
+    throw new Error("Re-pointing an unknown id should be a no-op");
+  }
+
+  s.cancelPendingSave();
+  console.log("✅ A relocated allocation bucket keeps its draws and its reserve");
+}
+
+// TEST 61: syncSnowballTransactionsForMonth only reconciles rows stamped with a
+// month it is actually materializing (current month + forward horizon), so a
+// payoff row the user had already materialized further out survived deleting
+// its debt and kept counting as a real expense on those far-future days.
+// cleanupOrphanedDebtMinimums — which already scans every date once per render —
+// now sweeps snowball rows whose debt is gone.
+console.log("TEST 61: Deleting A Debt Sweeps Its Far-Future Snowball Payoff Rows");
+{
+  const s = new TransactionStore();
+  s.resetData();
+  const rm = new RecurringTransactionManager(s);
+  // Same idiom the other snowball tests use: the constructor wires DOM/history
+  // listeners that don't exist here.
+  const ui = Object.create(DebtSnowballUI.prototype);
+  ui.store = s;
+  ui.recurringManager = rm;
+  ui.daySpecificOptions = [];
+
+  const liveDebtId = s.addDebt({
+    name: "Card A",
+    balance: 500,
+    minPayment: 25,
+    recurrence: "monthly",
+    dueStartDate: "2026-08-05",
+  });
+  const goneDebtId = s.addDebt({
+    name: "Card B",
+    balance: 900,
+    minPayment: 40,
+    recurrence: "monthly",
+    dueStartDate: "2026-08-09",
+  });
+
+  const txns = s.getTransactions();
+  const addSnowballRow = (date, debtId, monthKey, name) => {
+    if (!txns[date]) txns[date] = [];
+    txns[date].push({
+      id: Utils.generateUniqueId(),
+      _lastModified: new Date().toISOString(),
+      amount: 300,
+      type: "expense",
+      description: `Snowball Payoff: ${name}`,
+      debtId,
+      debtRole: "snowball",
+      debtName: name,
+      snowballMonth: monthKey,
+      snowballGenerated: true,
+    });
+  };
+  // Far outside any horizon the sweep would otherwise reconcile.
+  addSnowballRow("2028-03-14", goneDebtId, "2028-03", "Card B");
+  addSnowballRow("2028-05-14", liveDebtId, "2028-05", "Card A");
+
+  s.deleteDebt(goneDebtId);
+  if (!ui.cleanupOrphanedDebtMinimums()) {
+    throw new Error("Cleanup reported no change after a debt was deleted");
+  }
+
+  const after = s.getTransactions();
+  const orphan = (after["2028-03-14"] || []).filter(
+    (t) => t.snowballGenerated === true
+  );
+  if (orphan.length !== 0) {
+    throw new Error("Snowball payoff row for the deleted debt survived the sweep");
+  }
+  const kept = (after["2028-05-14"] || []).filter(
+    (t) => t.snowballGenerated === true && t.debtId === liveDebtId
+  );
+  if (kept.length !== 1) {
+    throw new Error("Sweep removed the surviving debt's payoff row");
+  }
+  const tombstoned = s._deletedItems.transactions.length;
+  if (tombstoned === 0) {
+    throw new Error("Removed snowball row was not tombstoned for sync");
+  }
+
+  // Idempotent: a second pass finds nothing left to do.
+  if (ui.cleanupOrphanedDebtMinimums()) {
+    throw new Error("Cleanup is not idempotent");
+  }
+
+  s.cancelPendingSave();
+  console.log("✅ Orphaned snowball payoff rows are swept and tombstoned; live ones stay");
+}
+
+// TEST 62: CalculationService's caches (daily totals, monthly summaries,
+// reserved totals) are only refreshed by updateMonthlyBalances, which runs
+// during a calendar render. The day-detail modal re-renders BEFORE that happens
+// on every in-modal mutation, and the snowball projection runs before it too —
+// so both used to read pre-mutation figures. Both entry points now refresh
+// first; this pins the underlying staleness so the guards can't be dropped.
+console.log("TEST 62: Balance Reads That Follow A Mutation See The New Data");
+{
+  const s = new TransactionStore();
+  s.resetData();
+  const rm = new RecurringTransactionManager(s);
+  const cs = new CalculationService(s, rm);
+
+  const now = new Date();
+  const mk = (day) =>
+    `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  const anchorDay = mk(5);
+  const spendDay = mk(10);
+
+  s.addTransaction(anchorDay, { amount: 1000, type: "balance", description: "Ending Balance" });
+  s.addTransaction(spendDay, { amount: 100, type: "expense", description: "Groceries", settled: true });
+
+  cs.updateMonthlyBalances(new Date(now.getFullYear(), now.getMonth(), 1));
+  if (cs.getDayBalanceBreakdown(spendDay).balance !== 900) {
+    throw new Error("Baseline breakdown is wrong");
+  }
+
+  s.deleteTransaction(spendDay, 0);
+
+  // Without a refresh the caches still answer 900 — that is the bug being
+  // guarded against, and it is what the modal used to render.
+  const stale = cs.getDayBalanceBreakdown(spendDay);
+  if (stale.balance !== 900) {
+    throw new Error(
+      "Cache no longer goes stale; the refresh guards in renderModalBalance / " +
+        "calculateSnowballProjection may need revisiting"
+    );
+  }
+
+  // The refresh both entry points perform must recover the true figure.
+  cs.updateMonthlyBalances(Utils.parseDateString(spendDay));
+  const fresh = cs.getDayBalanceBreakdown(spendDay);
+  if (fresh.balance !== 1000 || fresh.expense !== 0) {
+    throw new Error(
+      `Refreshed breakdown still stale: ${JSON.stringify(fresh)}`
+    );
+  }
+  if (cs.getRunningBalanceForDate(spendDay) !== 1000) {
+    throw new Error("Running balance still stale after refresh");
+  }
+
+  // invalidateCache() alone (what calculateSnowballProjection does before it
+  // seeds its checking balance) is enough for the within-month case.
+  s.addTransaction(spendDay, { amount: 250, type: "expense", description: "Vet", settled: true });
+  cs.invalidateCache();
+  if (cs.getRunningBalanceForDate(spendDay) !== 750) {
+    throw new Error("invalidateCache did not refresh the running balance");
+  }
+
+  s.cancelPendingSave();
+  console.log("✅ Modal and snowball balance reads refresh before they read");
+}
+
+// TEST 63: a localStorage write that throws (over quota is the realistic case)
+// used to be swallowed whole: some keys were written and some weren't, and
+// because triggerSaveCallbacks sat inside the same try, CloudSync stopped being
+// told there was anything to push. The user lost the change locally AND lost
+// the last route it had to the cloud, with nothing on screen. The in-memory
+// data is still correct, so the callbacks must fire regardless.
+console.log("TEST 63: A Failed Local Write Still Notifies Cloud Sync (And Says So)");
+{
+  const written = {};
+  let failWrites = false;
+  const flakyStorage = {
+    getItem: (key) => (key in written ? written[key] : null),
+    setItem: (key, val) => {
+      if (failWrites && key === "debts") {
+        const err = new Error("QuotaExceededError");
+        err.name = "QuotaExceededError";
+        throw err;
+      }
+      written[key] = val;
+    },
+    removeItem: (key) => { delete written[key]; },
+  };
+
+  const s = new TransactionStore(flakyStorage);
+  s.resetData();
+  s.cancelPendingSave();
+
+  let calls = 0;
+  let sawModified = false;
+  s.registerSaveCallback((isDataModified) => {
+    calls++;
+    if (isDataModified) sawModified = true;
+  });
+
+  const notices = [];
+  const realNotify = Utils.showNotification;
+  Utils.showNotification = (message, type) => notices.push({ message, type });
+  try {
+    failWrites = true;
+    s.addTransaction("2026-08-20", { amount: 12.5, type: "expense", description: "Coffee" });
+    s.flushPendingSave();
+
+    if (calls !== 1 || !sawModified) {
+      throw new Error(
+        `save callbacks did not fire after a failed write (calls=${calls}, modified=${sawModified})`
+      );
+    }
+    if (!notices.some((n) => n.type === "error")) {
+      throw new Error("a failed local write told the user nothing");
+    }
+    const firstCount = notices.length;
+
+    // The warning must not repeat on every subsequent debounced save.
+    s.saveData(true);
+    if (notices.length !== firstCount) {
+      throw new Error("repeated write failures spam the user with notifications");
+    }
+
+    // Recovering re-arms the warning for the next failure.
+    failWrites = false;
+    s.saveData(true);
+    if (s._storageWriteFailed !== false) {
+      throw new Error("a successful write did not clear the failure flag");
+    }
+    failWrites = true;
+    s.saveData(true);
+    if (notices.length <= firstCount) {
+      throw new Error("a fresh failure after a recovery was not reported");
+    }
+  } finally {
+    Utils.showNotification = realNotify;
+    s.cancelPendingSave();
+  }
+  console.log("✅ Failed local writes still schedule a cloud push and surface once");
+}
+
+// TEST 64: changing or disabling the PIN re-keys every stored value. Committing
+// the new hash (or removing the old one) BEFORE that rewrite lands is a one-way
+// data loss when the write fails: the disk keeps ciphertext encrypted with a key
+// the stored hash no longer matches, so the correct PIN stops opening the data.
+// The rewrite must go first and the PIN state must roll back on failure.
+async function runPinRekeyTest() {
+  console.log("TEST 64: A Failed Re-Key Leaves The PIN And The Data Consistent");
+
+  const nodeCrypto = require("crypto");
+  const prevCrypto = global.crypto;
+  const prevBtoa = global.btoa;
+  const prevAtob = global.atob;
+  const prevPKC = global.PublicKeyCredential;
+  const prevPrompt = Utils.showModalPrompt;
+  const prevAlert = Utils.showModalAlert;
+
+  global.crypto = {
+    getRandomValues: (arr) => {
+      nodeCrypto.randomFillSync(Buffer.from(arr.buffer, arr.byteOffset, arr.byteLength));
+      return arr;
+    },
+    subtle: {
+      digest: async (_alg, data) =>
+        nodeCrypto.createHash("sha256").update(Buffer.from(data)).digest().buffer,
+    },
+  };
+  global.btoa = (s) => Buffer.from(s, "binary").toString("base64");
+  global.atob = (s) => Buffer.from(s, "base64").toString("binary");
+  global.PublicKeyCredential = undefined;
+
+  vm.runInThisContext(fs.readFileSync(path.join(jsDir, "pin-protection.js"), "utf8"));
+
+  const alerts = [];
+  Utils.showModalAlert = async (message) => { alerts.push(message); };
+
+  const mem = {};
+  let failWrites = false;
+  const storage = {
+    getItem: (k) => (k in mem ? mem[k] : null),
+    setItem: (k, v) => {
+      if (failWrites) {
+        const e = new Error("QuotaExceededError");
+        e.name = "QuotaExceededError";
+        throw e;
+      }
+      mem[k] = v;
+    },
+    removeItem: (k) => { delete mem[k]; },
+  };
+
+  const pin = new PinProtection();
+  await pin.ensureWebAuthnInit();
+  try {
+    const store = new TransactionStore(storage, pin);
+    store.resetData();
+    store.addTransaction("2026-08-10", { amount: 42.5, type: "expense", description: "Coffee" });
+    store.flushPendingSave();
+
+    await pin.setPin("1234");
+    store.saveData(false);
+    pin.stopInactivityMonitoring();
+    if (!String(mem.transactions).startsWith("xor2:")) {
+      throw new Error("Setup: data was not encrypted with the PIN");
+    }
+
+    // --- Change the PIN while every write fails --------------------------
+    failWrites = true;
+    Utils.showModalPrompt = (message) => {
+      if (/current PIN/i.test(message)) return Promise.resolve("1234");
+      if (/new PIN/i.test(message)) return Promise.resolve("9999");
+      if (/Confirm/i.test(message)) return Promise.resolve("9999");
+      return Promise.resolve(null);
+    };
+    await pin.promptChangePin(store);
+    failWrites = false;
+    pin.stopInactivityMonitoring();
+
+    if (pin.getCurrentPin() !== "1234") {
+      throw new Error(
+        `failed re-key left currentPin as "${pin.getCurrentPin()}" — the stored ciphertext can no longer be read`
+      );
+    }
+    if (!alerts.some((a) => /was not changed/i.test(a))) {
+      throw new Error("a failed PIN change did not tell the user it was refused");
+    }
+    // Reloading with the original PIN must still recover the data.
+    const reloadPin = new PinProtection();
+    await reloadPin.ensureWebAuthnInit();
+    reloadPin.currentPin = "1234";
+    const reloaded = new TransactionStore(storage, reloadPin);
+    reloadPin.stopInactivityMonitoring();
+    if (reloaded._loadFailed) {
+      throw new Error("data became unreadable after a failed PIN change");
+    }
+    const amount = reloaded.getTransactions()["2026-08-10"]?.[0]?.amount;
+    if (amount !== 42.5) {
+      throw new Error(`data lost after a failed PIN change: ${amount}`);
+    }
+
+    // --- Disable the PIN while every write fails --------------------------
+    alerts.length = 0;
+    failWrites = true;
+    Utils.showModalPrompt = (message) => {
+      if (/current PIN/i.test(message)) return Promise.resolve("1234");
+      if (/new PIN/i.test(message)) return Promise.resolve("");
+      return Promise.resolve(null);
+    };
+    await pin.promptChangePin(store);
+    failWrites = false;
+    pin.stopInactivityMonitoring();
+
+    if (pin.getCurrentPin() !== "1234") {
+      throw new Error("a failed PIN disable dropped the key the data is encrypted with");
+    }
+    if (!pin.isPinSet()) {
+      throw new Error("a failed PIN disable removed the hash anyway");
+    }
+    if (!alerts.some((a) => /left in place/i.test(a))) {
+      throw new Error("a failed PIN disable did not tell the user it was refused");
+    }
+
+    // --- And the happy path still works ----------------------------------
+    alerts.length = 0;
+    Utils.showModalPrompt = (message) => {
+      if (/current PIN/i.test(message)) return Promise.resolve("1234");
+      if (/new PIN/i.test(message)) return Promise.resolve("");
+      return Promise.resolve(null);
+    };
+    await pin.promptChangePin(store);
+    pin.stopInactivityMonitoring();
+    if (pin.isPinSet()) {
+      throw new Error("disabling the PIN did not remove the hash");
+    }
+    if (String(mem.transactions).startsWith("xor2:")) {
+      throw new Error("disabling the PIN did not rewrite the data in the clear");
+    }
+    const plainReload = new TransactionStore(storage, null);
+    if (plainReload.getTransactions()["2026-08-10"]?.[0]?.amount !== 42.5) {
+      throw new Error("data did not survive disabling the PIN");
+    }
+    plainReload.cancelPendingSave();
+    store.cancelPendingSave();
+  } finally {
+    pin.stopInactivityMonitoring();
+    global.crypto = prevCrypto;
+    global.btoa = prevBtoa;
+    global.atob = prevAtob;
+    global.PublicKeyCredential = prevPKC;
+    Utils.showModalPrompt = prevPrompt;
+    Utils.showModalAlert = prevAlert;
+  }
+
+  console.log("✅ A failed PIN re-key rolls back; the happy path still re-keys cleanly");
+}
+
+// TEST 65: the cloud-sync credentials dialog is built at runtime, so the
+// wholesale modal sweeps (the inactivity lock's closeAllModals, an import) only
+// HID it. The promise saveToCloud/loadFromCloud was awaiting then stayed pending
+// forever, so their finally never ran and _isSyncing stayed true — every later
+// sync short-circuited with "Sync already in progress" for the rest of the
+// session. An external teardown must settle it.
+// Runs inside the sequential async chain: it swaps global.document, and a
+// block that restores it from a .finally() would do so while a LATER async test
+// is mid-await (that is exactly what broke TEST 67).
+async function runCredentialsTeardownTest() {
+  console.log("TEST 65: Tearing Down The Credentials Dialog Doesn't Wedge Sync");
+  const T65_make = (tag) => ({
+    tagName: tag, style: {}, className: "", id: "", value: "", checked: false,
+    children: [],
+    setAttribute() {}, removeAttribute() {},
+    appendChild(child) { this.children.push(child); return child; },
+    remove() { this.removed = true; },
+    addEventListener() {}, focus() {},
+    querySelector: () => null, querySelectorAll: () => [],
+    get innerHTML() { return ""; }, set innerHTML(_v) {},
+  });
+  const prevDoc = global.document;
+  const prevModalManager = global.ModalManager;
+  global.document = {
+    createElement: T65_make,
+    getElementById: () => null,
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    addEventListener() {}, removeEventListener() {},
+    body: { appendChild() {}, removeChild() {} },
+  };
+  const stack = [];
+  global.ModalManager = {
+    openModal: (m) => stack.push(m),
+    closeModal: (m) => { const i = stack.indexOf(m); if (i !== -1) stack.splice(i, 1); },
+    topModal: () => stack[stack.length - 1] || null,
+  };
+
+  try {
+    const s = new TransactionStore();
+    s.resetData();
+    s.cancelPendingSave();
+    const sync = new CloudSync(s, () => {});
+
+    let outcome = null;
+    const pending = sync
+      .promptForCredentials()
+      .then(() => { outcome = "resolved"; })
+      .catch((e) => { outcome = e.message; });
+
+    // promptForCredentials awaits the stored credentials before it builds the
+    // dialog, so let that microtask run first.
+    await new Promise((resolve) => setImmediate(resolve));
+    if (stack.length !== 1) {
+      throw new Error("credentials dialog was not registered with the modal stack");
+    }
+    // What closeAllModals / importData now do.
+    sync.cancelCredentialsPrompt();
+    await pending;
+
+    if (outcome !== "Credentials entry cancelled") {
+      throw new Error(`external teardown left the prompt unsettled (outcome=${outcome})`);
+    }
+    if (stack.length !== 0) {
+      throw new Error("cancelled dialog stayed on the modal stack");
+    }
+    // Idempotent: a second teardown must not throw or double-settle.
+    sync.cancelCredentialsPrompt();
+    s.cancelPendingSave();
+  } finally {
+    global.document = prevDoc;
+    global.ModalManager = prevModalManager;
+  }
+
+  console.log("✅ An externally torn-down credentials prompt settles instead of wedging sync");
+}
+
+// TEST 66: JSON.parse accepting a stored value is not the same as the app being
+// able to use it. A truncated write or a hand-edited backup can leave `123`,
+// `true`, `null` or `"text"` under a key the rest of the code reads as a map or
+// a list. loadData assigned those straight through and the failure surfaced far
+// away and UNCAUGHT — updateMonthlyBalances writing a property onto a number,
+// hasMoveAnomaly reading .fromDate off null — leaving a blank app. And the cloud
+// merge had the same hole: `x || []` misses every non-null junk value, so a
+// malformed gist threw "remoteItems.forEach is not a function" mid-merge and
+// the device could never push again.
+console.log("TEST 66: Corrupt Stored / Remote Shapes Degrade Instead Of Bricking");
+{
+  const STORE_KEYS = [
+    "transactions", "monthlyBalances", "recurringTransactions",
+    "skippedTransactions", "debts", "cashInfusions", "savingsGoals",
+    "debtSnowballSettings", "monthlyNotes", "movedTransactions", "deletedItems",
+  ];
+  const RAW_JUNK = [
+    "123", "true", "null", '"text"', "[]", "{}", "[null,null]",
+    '{"2026-08-01":"not-an-array"}', '{"k":null}',
+    // Junk one level down: a bad ROW inside an otherwise-valid day used to
+    // throw on `t.id` and take the whole dataset down with it.
+    '{"2026-08-01":[null]}',
+    '{"2026-08-01":[null,{"amount":1,"type":"expense"},7]}',
+    '{"2026-08-01":[[]]}',
+    '{"2026-08-01":[{}]}',
+    '[{"id":null}]',
+    '[null,{"amount":5,"type":"expense","recurrence":"monthly","startDate":"2026-08-01"}]',
+  ];
+
+  const prevWarn = console.warn;
+  console.warn = () => {}; // the guards are deliberately noisy
+  try {
+    STORE_KEYS.forEach((key) => {
+      RAW_JUNK.forEach((junk) => {
+        for (const k in localStorageData) delete localStorageData[k];
+        const seed = new TransactionStore();
+        seed.resetData();
+        seed.addTransaction("2026-08-10", { amount: 10, type: "expense", description: "A" });
+        seed.addRecurringTransaction({
+          startDate: "2026-08-01", amount: 5, type: "expense",
+          description: "R", recurrence: "monthly",
+        });
+        seed.addDebt({ name: "D", balance: 100, minPayment: 10 });
+        seed.flushPendingSave();
+        localStorageData[key] = junk;
+
+        try {
+          const s = new TransactionStore();
+          const rm = new RecurringTransactionManager(s);
+          const cs = new CalculationService(s, rm);
+          cs.updateMonthlyBalances(new Date(2026, 7, 1));
+          cs.calculateMinimum();
+          cs.getDayBalanceBreakdown("2026-08-10");
+          s.getAllocations();
+          s.getUnsettledTransactions();
+          s.autoSettleExpiredRecurring();
+          s.closeOutExpiredAllocations();
+          s.rollForwardAllocations();
+          s.hasMoveAnomaly("2026-08-10");
+          s.exportData();
+          s.cancelPendingSave();
+        } catch (err) {
+          throw new Error(
+            `corrupt "${key}" = ${junk} still breaks the app: ${err.message}`
+          );
+        }
+      });
+    });
+
+    // The cloud merge must survive the same junk on either side.
+    const goodPayload = () => ({
+      transactions: {
+        "2026-08-10": [{ id: "a", amount: 10, type: "expense", description: "A", _lastModified: "2026-08-10T00:00:00Z" }],
+      },
+      monthlyBalances: {},
+      recurringTransactions: [],
+      skippedTransactions: {},
+      debts: [], cashInfusions: [], savingsGoals: [],
+      debtSnowballSettings: { dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false },
+      monthlyNotes: {}, movedTransactions: {},
+      _deletedItems: { transactions: [], recurringTransactions: [], debts: [], cashInfusions: [], savingsGoals: [], skips: [] },
+      lastUpdated: "2026-08-10T00:00:00Z",
+    });
+    const MERGE_JUNK = [null, 123, true, "text", [], {}, [null], { "2026-08-01": "nope" }, { k: null }];
+    const store66 = new TransactionStore();
+    store66.resetData();
+    store66.cancelPendingSave();
+    const sync66 = new CloudSync(store66, () => {});
+    Object.keys(goodPayload()).forEach((field) => {
+      MERGE_JUNK.forEach((junk) => {
+        [["remote", (a, b) => { b[field] = junk; }], ["local", (a) => { a[field] = junk; }]].forEach(
+          ([side, corrupt]) => {
+            const a = goodPayload();
+            const b = goodPayload();
+            corrupt(a, b);
+            let merged;
+            try {
+              merged = sync66._mergeData(a, b, a.lastUpdated);
+              JSON.stringify(merged);
+            } catch (err) {
+              throw new Error(
+                `corrupt ${side} "${field}" aborts the merge: ${err.message}`
+              );
+            }
+            // The merge must still produce every declared collection in a
+            // shape importData can consume.
+            ["debts", "cashInfusions", "savingsGoals", "recurringTransactions"].forEach((c) => {
+              if (!Array.isArray(merged[c])) {
+                throw new Error(`merge produced a non-array ${c} from corrupt ${side} ${field}`);
+              }
+            });
+            ["transactions", "skippedTransactions", "movedTransactions", "monthlyNotes"].forEach((c) => {
+              if (!merged[c] || typeof merged[c] !== "object" || Array.isArray(merged[c])) {
+                throw new Error(`merge produced a non-map ${c} from corrupt ${side} ${field}`);
+              }
+            });
+          }
+        );
+      });
+    });
+    store66.cancelPendingSave();
+  } finally {
+    console.warn = prevWarn;
+    for (const k in localStorageData) delete localStorageData[k];
+  }
+  console.log("✅ Unusable stored and remote shapes are ignored, not fatal");
+}
+
+// TEST 67: an edit made WHILE a push is in flight must survive it. saveToCloud
+// used to snapshot local data before the GET, merge that stale snapshot with
+// the remote copy, and then import the result — replacing the live transactions
+// map. Anything the user entered during the round trip was destroyed in memory
+// AND on disk, silently, with no error and nothing in the UI. Auto-sync pushes
+// 10s after every change, so the window is open constantly.
+async function runPushRaceTest() {
+  console.log("TEST 67: An Edit Made During A Push Survives The Merge");
+
+  const s = new TransactionStore();
+  s.resetData();
+  s.cancelPendingSave();
+  s.addTransaction("2026-08-01", { amount: 10, type: "expense", description: "Before push" });
+  s.flushPendingSave();
+
+  const sync = new CloudSync(s, () => {});
+  sync.getCloudCredentialsAsync = async () => ({ token: "tok", gistId: "gid" });
+
+  const remoteData = {
+    transactions: {
+      "2026-07-01": [{ id: "r1", amount: 5, type: "expense", description: "Remote only", _lastModified: "2026-07-01T00:00:00Z" }],
+    },
+    monthlyBalances: {}, recurringTransactions: [], skippedTransactions: {},
+    movedTransactions: {}, debts: [], cashInfusions: [], savingsGoals: [],
+    monthlyNotes: {},
+    debtSnowballSettings: { dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false },
+    _deletedItems: { transactions: [], recurringTransactions: [], debts: [], cashInfusions: [], savingsGoals: [], skips: [] },
+    lastUpdated: "2026-07-01T00:00:00Z",
+  };
+
+  const prevFetch = global.fetch;
+  const prevDoc = global.document;
+  const prevShow = Utils.showLoading, prevHide = Utils.hideLoading;
+  Utils.showLoading = () => {};
+  Utils.hideLoading = () => {};
+  global.document = {
+    addEventListener: () => {}, querySelector: () => null, getElementById: () => null,
+    // The concurrent edit legitimately queues a follow-up push, and
+    // scheduleCloudSave builds the ⌛ indicator element.
+    createElement: () => ({
+      style: {}, setAttribute() {}, addEventListener() {},
+      textContent: "", title: "", remove() {},
+    }),
+  };
+
+  let patchBody = null;
+  let injected = false;
+  const etagHeaders = { get: () => '"etag-x"' };
+  global.fetch = async (url, opts) => {
+    if (opts && opts.method === "PATCH") {
+      patchBody = JSON.parse(opts.body);
+      return { ok: true, status: 200, headers: etagHeaders };
+    }
+    // The GET is where the user's next keystroke lands.
+    await new Promise((resolve) => setImmediate(resolve));
+    if (!injected) {
+      injected = true;
+      s.addTransaction("2026-08-20", { amount: 77.77, type: "expense", description: "TYPED DURING PUSH" });
+      s.flushPendingSave();
+    }
+    return {
+      ok: true, status: 200, headers: etagHeaders,
+      json: async () => ({
+        files: { "cashflow_data.json": { content: JSON.stringify(remoteData), truncated: false } },
+      }),
+    };
+  };
+
+  try {
+    await sync.saveToCloud(true);
+
+    const hasIt = (map) =>
+      !!(map && map["2026-08-20"] || []).length &&
+      map["2026-08-20"].some((t) => t.description === "TYPED DURING PUSH");
+
+    if (!injected) {
+      throw new Error("Setup: the concurrent edit was never injected");
+    }
+    if (!hasIt(s.getTransactions())) {
+      throw new Error("the edit made during the push was erased from memory");
+    }
+    const onDisk = JSON.parse(localStorageData["transactions"] || "{}");
+    if (!hasIt(onDisk)) {
+      throw new Error("the edit made during the push was erased from localStorage");
+    }
+    if (!patchBody || !hasIt(patchBody.files["cashflow_data.json"]
+      ? JSON.parse(patchBody.files["cashflow_data.json"].content).transactions
+      : null)) {
+      throw new Error("the edit made during the push never reached the cloud copy");
+    }
+    // The remote-only row must still have been merged in — the fix must not
+    // turn the merge into a blind overwrite.
+    if (!(s.getTransactions()["2026-07-01"] || []).length) {
+      throw new Error("remote-only data was dropped instead of merged");
+    }
+  } finally {
+    // The concurrent edit legitimately queued a follow-up push; drop its timer
+    // so it can't fire after this test has restored the DOM stubs.
+    sync.cancelPendingCloudSave();
+    global.fetch = prevFetch;
+    global.document = prevDoc;
+    Utils.showLoading = prevShow;
+    Utils.hideLoading = prevHide;
+    s.cancelPendingSave();
+  }
+
+  console.log("✅ A transaction entered during a push survives in memory, on disk, and in the cloud copy");
+}
+
+// TEST 68: the snowball projection expands each debt's schedule through a
+// throwaway RecurringTransactionManager backed by a hand-written dummy store
+// (getRecurringOccurrencesForMonth). That store is maintained by hand, so it
+// drifts silently: it covered only 5 of the 12 store methods the manager can
+// call, and _clearRecurringExpansions reaches trackDeletedTransaction for any
+// instance carrying an id. Rows built there have no id today, so it was
+// unreachable — and a change that stamped ids on expansions would have turned
+// every projection into a TypeError. Pin the contract instead of trusting it.
+console.log("TEST 68: The Projection's Dummy Store Covers Everything Its Manager Can Call");
+{
+  // Source-level guard, like verify-walk-parity's. The classes are declared
+  // with `class` inside vm.runInThisContext, so they live in the global LEXICAL
+  // scope and cannot be intercepted through `global.` — read the source instead.
+  const managerSource = fs.readFileSync(path.join(jsDir, "recurring-manager.js"), "utf8");
+  const required = [
+    ...new Set(
+      [...managerSource.matchAll(/\bthis\.store\.([A-Za-z_$][\w$]*)\s*\(/g)].map((m) => m[1])
+    ),
+  ].sort();
+  if (required.length === 0) {
+    throw new Error("Setup: found no this.store.* calls in recurring-manager.js");
+  }
+
+  const engineSource = fs.readFileSync(path.join(jsDir, "debt-snowball-engine.js"), "utf8");
+  const literalStart = engineSource.indexOf("const dummyStore = {");
+  if (literalStart === -1) {
+    throw new Error("Could not find the projection's dummy store literal");
+  }
+  const literalEnd = engineSource.indexOf("\n    };", literalStart);
+  const literal = engineSource.slice(literalStart, literalEnd);
+  const provided = new Set(
+    [...literal.matchAll(/^\s{6}([A-Za-z_$][\w$]*)\s*:/gm)].map((m) => m[1])
+  );
+
+  const missing = required.filter((name) => !provided.has(name));
+  if (missing.length > 0) {
+    throw new Error(
+      "getRecurringOccurrencesForMonth's dummy store is missing store method(s) " +
+        `RecurringTransactionManager can call: ${missing.join(", ")}. ` +
+        "Add them (no-op if harmless, throwing if a mutation would be a bug)."
+    );
+  }
+
+  // And prove the read path really works end to end through that store.
+  const ui68 = Object.create(DebtSnowballUI.prototype);
+  const occurrences = ui68.getRecurringOccurrencesForMonth(
+    {
+      id: "probe",
+      startDate: "2026-08-05",
+      amount: 10,
+      type: "expense",
+      description: "probe",
+      recurrence: "monthly",
+    },
+    2026,
+    7
+  );
+  if (occurrences.length !== 1 || occurrences[0].dateString !== "2026-08-05") {
+    throw new Error(
+      `dummy-store expansion returned ${JSON.stringify(occurrences)}`
+    );
+  }
+
+  console.log(
+    `✅ Dummy store implements all ${required.length} store methods recurring-manager can call`
+  );
+}
+
+// TEST 69: cross-file lists that are maintained by hand and fail SILENTLY when
+// they drift.
+//
+//  (a) index.html's <script> tags vs sw.js's CORE_ASSETS. A script added to the
+//      page but not to the precache list breaks the app only when it is
+//      offline — the one moment nobody is watching, and the one the whole
+//      offline-first design exists for.
+//  (b) the two vm harnesses' Utils stubs. A helper used by vm-loaded code but
+//      missing from a stub means any test reaching it dies on a bare TypeError
+//      instead of exercising the path, and a stub thinner than its twin lets
+//      code pass in one harness and throw in the other.
+console.log("TEST 69: Hand-Maintained Cross-File Lists Have Not Drifted");
+{
+  const repoRoot = path.join(__dirname, "..");
+  const read = (rel) => fs.readFileSync(path.join(repoRoot, rel), "utf8");
+
+  // ---- (a) page scripts vs service-worker precache ----------------------
+  const pageScripts = [...read("index.html").matchAll(/<script src="(js\/[^"]+)"/g)].map(
+    (m) => m[1]
+  );
+  const precached = [...read("sw.js").matchAll(/"\.\/(js\/[^"]+)"/g)].map((m) => m[1]);
+  if (pageScripts.length === 0 || precached.length === 0) {
+    throw new Error("Setup: could not read the script or precache lists");
+  }
+  const notPrecached = pageScripts.filter((s) => !precached.includes(s));
+  const precachedButUnused = precached.filter((s) => !pageScripts.includes(s));
+  if (notPrecached.length > 0) {
+    throw new Error(
+      `index.html loads script(s) sw.js does not precache — the app would break offline: ${notPrecached.join(", ")}`
+    );
+  }
+  if (precachedButUnused.length > 0) {
+    throw new Error(
+      `sw.js precaches script(s) index.html no longer loads: ${precachedButUnused.join(", ")}`
+    );
+  }
+  // Load ORDER matters too (sequential dependencies), so the two lists must agree on it.
+  if (pageScripts.join("|") !== precached.join("|")) {
+    throw new Error(
+      "index.html and sw.js list the same scripts in a different order — keep them in step"
+    );
+  }
+
+  // ---- (b) Utils stubs in both harnesses --------------------------------
+  const utilsUsed = new Set();
+  fs.readdirSync(jsDir)
+    .filter((f) => f.endsWith(".js") && f !== "utils.js")
+    .forEach((f) => {
+      for (const m of fs.readFileSync(path.join(jsDir, f), "utf8").matchAll(
+        /\bUtils\.([A-Za-z_$][\w$]*)/g
+      )) {
+        utilsUsed.add(m[1]);
+      }
+    });
+
+  const stubMembers = (rel) => {
+    const source = read(rel);
+    const start = source.indexOf("global.Utils = {");
+    if (start === -1) throw new Error(`Setup: no Utils stub in ${rel}`);
+    const segment = source.slice(start, source.indexOf("\n};", start));
+    return new Set(
+      [...segment.matchAll(/^ {2}([A-Za-z_$][\w$]*)\s*[:(]/gm)].map((m) => m[1])
+    );
+  };
+  const logicStub = stubMembers("scripts/verify-logic.js");
+  const parityStub = stubMembers("scripts/verify-walk-parity.js");
+
+  [
+    ["verify-logic.js", logicStub],
+    ["verify-walk-parity.js", parityStub],
+  ].forEach(([name, stub]) => {
+    const gaps = [...utilsUsed].filter((member) => !stub.has(member)).sort();
+    if (gaps.length > 0) {
+      throw new Error(
+        `${name}'s Utils stub is missing member(s) the sources use: ${gaps.join(", ")}`
+      );
+    }
+  });
+  const onlyInLogic = [...logicStub].filter((m) => !parityStub.has(m)).sort();
+  const onlyInParity = [...parityStub].filter((m) => !logicStub.has(m)).sort();
+  if (onlyInLogic.length > 0 || onlyInParity.length > 0) {
+    throw new Error(
+      "the two harness Utils stubs have diverged — " +
+        `only in verify-logic: [${onlyInLogic}], only in verify-walk-parity: [${onlyInParity}]`
+    );
+  }
+
+  console.log(
+    `✅ ${pageScripts.length} scripts precached in the same order; both Utils stubs cover all ${utilsUsed.size} used members`
+  );
+}
+
+// TEST 70: expansion cost must not grow with how OLD a series is.
+//
+// The day-stepped recurrences used to catch up to the rendered month by
+// stepping one period at a time from startDate — O(distance). That loop runs
+// once per rendered month, and updateMonthlyBalances renders every month from
+// the earliest transaction forward, so a render was quadratic in history
+// length: a dataset with 8 years of history spent seconds re-walking the same
+// intervals. This pins the shape of the fix (constant work regardless of age)
+// AND that it did not change a single emitted occurrence.
+console.log("TEST 70: Expansion Cost Doesn't Grow With A Series' Age");
+{
+  const expandMonth = (definition, year, month) => {
+    const transactions = {};
+    const store = {
+      getTransactions: () => transactions,
+      getRecurringTransactions: () => [definition],
+      getSkippedTransactions: () => ({}),
+      isTransactionSkipped: () => false,
+      trackDeletedTransaction: () => {},
+      saveData: () => {},
+      debouncedSave: () => {},
+    };
+    const manager = new RecurringTransactionManager(store);
+    manager.applyRecurringTransactions(year, month);
+    return { manager, dates: Object.keys(transactions).sort() };
+  };
+
+  // --- correctness: a young and an old series produce the same cadence -----
+  // The two anchors must be an exact multiple of 7 days apart, or they simply
+  // fall on different weekdays and a difference would mean nothing.
+  const weekAnchor = (weeksBack) => {
+    const base = new Date(2026, 6, 1, 12, 0, 0); // 1 July 2026
+    base.setDate(base.getDate() - weeksBack * 7);
+    return Utils.formatDateString(base);
+  };
+  const weeklyDates = (weeksBack) =>
+    expandMonth(
+      {
+        id: "w", amount: 5, type: "expense", description: "w",
+        recurrence: "weekly", startDate: weekAnchor(weeksBack),
+      },
+      2026, 6 // July 2026
+    ).dates.map((d) => d.slice(8));
+  const young = weeklyDates(52);   // ~1 year back
+  const old = weeklyDates(520);    // ~10 years back, same weekday
+  if (young.length === 0) {
+    throw new Error("Setup: the weekly series produced no occurrences");
+  }
+  if (JSON.stringify(young) !== JSON.stringify(old)) {
+    throw new Error(
+      `a 10-year-old weekly series expands differently from a 1-year-old one: ${old} vs ${young}`
+    );
+  }
+
+  // --- shape: catching up must not walk every interval --------------------
+  // A daily custom series anchored 10 years back would need ~3650 steps to
+  // reach the window if it walked; the arithmetic catch-up needs one.
+  const definition = {
+    id: "c", amount: 5, type: "expense", description: "c",
+    recurrence: "custom", customInterval: { value: 1, unit: "days" },
+    startDate: "2015-01-05",
+  };
+  const original = RecurringTransactionManager.prototype.getCustomIntervalDate;
+  let calls = 0;
+  RecurringTransactionManager.prototype.getCustomIntervalDate = function (...args) {
+    calls++;
+    return original.apply(this, args);
+  };
+  let produced;
+  try {
+    produced = expandMonth(definition, 2026, 6).dates;
+  } finally {
+    RecurringTransactionManager.prototype.getCustomIntervalDate = original;
+  }
+  if (produced.length !== 31) {
+    throw new Error(`daily custom series produced ${produced.length} days in July, expected 31`);
+  }
+  // One catch-up call plus one per emitted day, with headroom.
+  if (calls > produced.length + 10) {
+    throw new Error(
+      `expansion walked the whole interval history: ${calls} getCustomIntervalDate calls ` +
+        `for ${produced.length} occurrences — the catch-up is stepping again`
+    );
+  }
+
+  console.log(
+    `✅ A 10-year-old series expands identically to a young one, in ${calls} interval computations`
+  );
+}
+
 // Run the async network tests sequentially (shared global.fetch mock): TEST 32
 // first, then TEST 30, which prints the final banner.
 runTest48Savings()
   .then(runReplaceRemoteTest)
   .then(runBackupAbortTest)
+  .then(runCredentialsTeardownTest)
+  .then(runPushRaceTest)
+  .then(runPinRekeyTest)
   .then(runTest30Final)
   .catch((err) => {
     console.error(err);

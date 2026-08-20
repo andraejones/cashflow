@@ -31,6 +31,14 @@ const ModalManager = {
 
     // Reset z-index to default
     modalElement.style.zIndex = '';
+
+    // Nothing is stacked any more, so the next modal can start from the base
+    // again. Without this the counter only ever climbs: after ~900 opens in one
+    // session the assigned z-index passes the 9999 lock overlay and a modal
+    // would paint on top of it.
+    if (this._openModals.length === 0) {
+      this._zIndexCounter = 0;
+    }
   },
 
   // The currently topmost (most recently opened) modal, or null. Lets a modal's

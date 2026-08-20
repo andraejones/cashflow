@@ -129,11 +129,21 @@ class DebtSnowballUI {
         }
       });
     }
+    // CAPTURE phase, like every other Escape handler in the app. In the bubble
+    // phase the stacked dialog's own handler runs first and has already popped
+    // itself off ModalManager by the time this one looks — so the guard below
+    // would see an empty stack and tear the panel down anyway.
     document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && this.view?.style.display === "block") {
-        this.hideView();
-      }
-    });
+      if (event.key !== "Escape") return;
+      if (this.view?.style.display !== "block") return;
+      // Anything stacked over the panel owns Escape first. The panel is an
+      // .app-view rather than a .modal, so ModalManager never lists it — any
+      // tracked modal being open means something is layered above us. Without
+      // this, cancelling the "Delete debt?" / "Delete cash infusion?"
+      // confirmation with Escape also tore the whole panel down.
+      if (typeof ModalManager !== "undefined" && ModalManager.topModal()) return;
+      this.hideView();
+    }, true);
     // Browser/hardware Back closes the view (our pushed history entry is popped).
     window.addEventListener("popstate", () => {
       if (this.view && this.view.style.display === "block") {

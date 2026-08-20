@@ -21,19 +21,62 @@ class TransactionUI {
   }
 
 
+  // The modals closeModals() actually tears down. Used to scope this class's
+  // close-button and Escape handling so it can't reach across the modal stack.
+  _ownedModalIds() {
+    return ["transactionModal", "searchModal"];
+  }
+
+
+  // True when one of our modals is the topmost open modal (or, if the stack is
+  // empty — e.g. a modal opened before ModalManager tracked it — when one of
+  // ours is visible and nothing else is stacked above it).
+  _ownsTopModal() {
+    const top = ModalManager.topModal();
+    if (top) {
+      return this._ownedModalIds().includes(top.id);
+    }
+    return this._ownedModalIds().some((id) => {
+      const modal = document.getElementById(id);
+      return modal && modal.style.display === "block";
+    });
+  }
+
+
   initEventListeners() {
-    document.querySelectorAll(".close").forEach((closeBtn) => {
-      closeBtn.onclick = () => {
-        this.closeModals();
-      };
+    // Bind ONLY the close buttons of the two modals this class owns. A blanket
+    // document.querySelectorAll(".close") also captured #appModalClose and the
+    // Recent/Allocated/What-If/Savings/Reconcile/Notes close buttons, so
+    // dismissing a confirmation dialog opened from the day modal tore the day
+    // modal down with it (and reset the half-filled add form). It also
+    // overwrote the Notes modal's inline onclick, since .onclick replaces
+    // rather than adds.
+    this._ownedModalIds().forEach((modalId) => {
+      const modal = document.getElementById(modalId);
+      if (!modal) return;
+      modal.querySelectorAll(".close").forEach((closeBtn) => {
+        closeBtn.onclick = () => {
+          this.closeModals();
+        };
+      });
     });
 
+    // Escape closes these modals only while one of them is actually on top of
+    // the stack. Anything layered above (a confirm/prompt dialog on #appModal,
+    // a day modal opened from the reconcile report) owns Escape first, exactly
+    // as the other modals in the app already do via ModalManager.topModal().
+    //
+    // CAPTURE phase, like every other modal's Escape handler here. In the
+    // bubble phase the dialog's own handler runs first — it is on a descendant
+    // of document — and by the time this ran, that dialog had already popped
+    // itself off the stack, so topModal() reported the day modal and the guard
+    // waved the teardown through. Capture sees the stack as it was.
     this._boundEscapeHandler = (event) => {
-      if (event.key === "Escape") {
-        this.closeModals();
-      }
+      if (event.key !== "Escape") return;
+      if (!this._ownsTopModal()) return;
+      this.closeModals();
     };
-    document.addEventListener("keydown", this._boundEscapeHandler);
+    document.addEventListener("keydown", this._boundEscapeHandler, true);
     const transactionType = document.getElementById("transactionType");
     const recurrenceSelect = document.getElementById("transactionRecurrence");
     const transactionDescription = document.getElementById("transactionDescription");

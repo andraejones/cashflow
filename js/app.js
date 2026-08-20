@@ -692,6 +692,12 @@ class CashflowApp {
               // leak their document-level Escape handlers. Detach them.
               this._removeRecentEscHandler();
               this._removeAllocatedEscHandler();
+              // Same reason: the credentials dialog is built at runtime, so the
+              // sweep only hid it and its promise would stay pending, leaving
+              // CloudSync._isSyncing stuck true for the rest of the session.
+              if (this.cloudSync) {
+                this.cloudSync.cancelCredentialsPrompt();
+              }
               this.recurringManager.invalidateCache();
               this.calculationService.invalidateCache();
               this.updateUI();

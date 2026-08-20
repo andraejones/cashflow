@@ -30,6 +30,10 @@ class CloudSync {
     // authoritative copy (import restore). Latched on the instance so a replace
     // push queued behind an in-flight sync keeps its semantics.
     this._replaceRemoteOnce = false;
+    // Set while the runtime-built credentials dialog is open, so an external
+    // teardown can settle the promise a sync is awaiting (see
+    // promptForCredentials / cancelCredentialsPrompt).
+    this._cancelCredentialsPrompt = null;
 
     if (typeof this.store.registerSaveCallback === 'function') {
       this.store.registerSaveCallback((isDataModified) => {
@@ -246,6 +250,16 @@ class CloudSync {
   }
 
 
+  // Settle a credentials dialog that is being torn down from outside (an
+  // inactivity lock, an import). No-op when none is open. See
+  // promptForCredentials for why leaving it pending wedges sync.
+  cancelCredentialsPrompt() {
+    if (this._cancelCredentialsPrompt) {
+      this._cancelCredentialsPrompt();
+    }
+  }
+
+
   clearCloudCredentials() {
     localStorage.removeItem("github_token_encrypted");
     localStorage.removeItem("github_token");
@@ -378,11 +392,39 @@ class CloudSync {
       "Note: Credentials are stored locally in your browser and can be cleared using the Reset option.";
     modalContent.appendChild(noteText);
     document.body.appendChild(modal);
+    // Register with the modal stack so other Escape handlers defer to this
+    // dialog while it is up (it is built here rather than declared in
+    // index.html, so nothing else knows about it otherwise).
+    ModalManager.openModal(modal);
 
     return new Promise((resolve, reject) => {
+      let settled = false;
+      const teardown = () => {
+        if (settled) return false;
+        settled = true;
+        this._cancelCredentialsPrompt = null;
+        ModalManager.closeModal(modal);
+        modal.remove();
+        return true;
+      };
+
+      // Torn down from outside — the inactivity lock hides every visible
+      // .modal, and an import closes them all. This dialog is not one of the
+      // declared modals, so hiding it left this promise pending forever: the
+      // saveToCloud/loadFromCloud awaiting it never reached its finally, so
+      // _isSyncing stayed true and every later sync short-circuited with
+      // "Sync already in progress" for the rest of the session. Settle it the
+      // same way the close button does.
+      this._cancelCredentialsPrompt = () => {
+        if (teardown()) {
+          reject(new Error("Credentials entry cancelled"));
+        }
+      };
+
       closeBtn.onclick = () => {
-        document.body.removeChild(modal);
-        reject(new Error("Credentials entry cancelled"));
+        if (teardown()) {
+          reject(new Error("Credentials entry cancelled"));
+        }
       };
 
       saveBtn.onclick = async () => {
@@ -403,8 +445,9 @@ class CloudSync {
           return;
         }
 
-        document.body.removeChild(modal);
-        resolve({ token, gistId });
+        if (teardown()) {
+          resolve({ token, gistId });
+        }
       };
       setTimeout(() => {
         tokenInput.focus();
@@ -507,10 +550,18 @@ class CloudSync {
       pendingSpan.style.cursor = "pointer";
       pendingSpan.setAttribute("role", "button");
       pendingSpan.setAttribute("tabindex", "0");
-      pendingSpan.addEventListener("click", () => this.saveNowFromPending());
+      // The indicator lives inside #currentMonth, which carries its own
+      // "return to the current month" click handler while an off-month is
+      // viewed — without stopping propagation, tapping the hourglass to save
+      // also yanked the calendar back to today.
+      pendingSpan.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.saveNowFromPending();
+      });
       pendingSpan.addEventListener("keydown", (e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
+          e.stopPropagation();
           this.saveNowFromPending();
         }
       });
@@ -626,8 +677,10 @@ class CloudSync {
     ]);
 
     allDates.forEach(date => {
-      const localList = localTxns[date] || [];
-      const remoteList = remoteTxns[date] || [];
+      // A single day that isn't a list (truncated gist, hand edit) must not
+      // take the whole merge down with it.
+      const localList = Array.isArray(localTxns[date]) ? localTxns[date] : [];
+      const remoteList = Array.isArray(remoteTxns[date]) ? remoteTxns[date] : [];
       const mergedList = this._mergeById(localList, remoteList, deletedIds);
 
       if (mergedList.length > 0) {
@@ -681,8 +734,8 @@ class CloudSync {
     ]);
 
     allDates.forEach(date => {
-      const localSkips = local[date] || [];
-      const remoteSkips = remote[date] || [];
+      const localSkips = Array.isArray(local[date]) ? local[date] : [];
+      const remoteSkips = Array.isArray(remote[date]) ? remote[date] : [];
       // Union of skipped IDs
       const mergedSkips = [...new Set([...localSkips, ...remoteSkips])];
       if (mergedSkips.length > 0) {
@@ -710,11 +763,17 @@ class CloudSync {
 
   // Merge moved transactions (key -> move info)
   _mergeMovedTransactions(local, remote) {
-    const merged = { ...remote };
+    const usable = (move) =>
+      !!move && typeof move === "object" && !Array.isArray(move);
+    const merged = {};
+    Object.keys(remote || {}).forEach((key) => {
+      if (usable(remote[key])) merged[key] = remote[key];
+    });
 
     Object.keys(local || {}).forEach(key => {
       const localMove = local[key];
-      const remoteMove = remote[key];
+      if (!usable(localMove)) return;
+      const remoteMove = merged[key];
 
       if (!remoteMove) {
         merged[key] = localMove;
@@ -791,9 +850,26 @@ class CloudSync {
   // "now" before merging (the push path) must pass the pre-stamp value, else
   // local always wins and a newer remote settings edit is silently discarded.
   _mergeData(localData, remoteData, localLastUpdated = localData.lastUpdated) {
+    // The tombstone reader below is careful about shapes because remote data is
+    // raw gist JSON. The COLLECTIONS need exactly the same care and did not get
+    // it: `x || []` only catches null/undefined, so a truncated or hand-edited
+    // gist carrying `"cashInfusions": 0` (or a string, or an object) sailed
+    // through and then threw "remoteItems.forEach is not a function" in the
+    // middle of _mergeById. That aborts saveToCloud before its PATCH — the
+    // cloud copy survives, but the device can never push again, and every sync
+    // reports a JS type error the user can do nothing with. Coerce first.
+    const asItems = (value) =>
+      Array.isArray(value)
+        ? value.filter(
+            (item) => item && typeof item === "object" && !Array.isArray(item)
+          )
+        : [];
+    const asMap = (value) =>
+      value && typeof value === "object" && !Array.isArray(value) ? value : {};
+
     // Get deleted items lists
-    const localDeleted = localData._deletedItems || {};
-    const remoteDeleted = remoteData._deletedItems || {};
+    const localDeleted = asMap(localData._deletedItems);
+    const remoteDeleted = asMap(remoteData._deletedItems);
 
     // Extract plain IDs from deleted item objects ({ id, deletedAt } or plain
     // strings). Remote tombstones arrive as raw gist JSON, so the shape is not
@@ -843,46 +919,46 @@ class CloudSync {
 
     const merged = {
       transactions: this._mergeTransactions(
-        localData.transactions,
-        remoteData.transactions,
+        asMap(localData.transactions),
+        asMap(remoteData.transactions),
         deletedTransactionIds
       ),
       recurringTransactions: this._mergeById(
-        localData.recurringTransactions || [],
-        remoteData.recurringTransactions || [],
+        asItems(localData.recurringTransactions),
+        asItems(remoteData.recurringTransactions),
         deletedRecurringIds
       ),
       skippedTransactions: this._mergeSkippedTransactions(
-        localData.skippedTransactions,
-        remoteData.skippedTransactions,
+        asMap(localData.skippedTransactions),
+        asMap(remoteData.skippedTransactions),
         mergedSkipEvents
       ),
       movedTransactions: this._mergeMovedTransactions(
-        localData.movedTransactions,
-        remoteData.movedTransactions
+        asMap(localData.movedTransactions),
+        asMap(remoteData.movedTransactions)
       ),
       debts: this._mergeById(
-        localData.debts || [],
-        remoteData.debts || [],
+        asItems(localData.debts),
+        asItems(remoteData.debts),
         deletedDebtIds
       ),
       cashInfusions: this._mergeById(
-        localData.cashInfusions || [],
-        remoteData.cashInfusions || [],
+        asItems(localData.cashInfusions),
+        asItems(remoteData.cashInfusions),
         deletedCashInfusionIds
       ),
       savingsGoals: this._mergeById(
-        localData.savingsGoals || [],
-        remoteData.savingsGoals || [],
+        asItems(localData.savingsGoals),
+        asItems(remoteData.savingsGoals),
         deletedSavingsGoalIds
       ),
       monthlyNotes: this._mergeMonthlyNotes(
-        localData.monthlyNotes,
-        remoteData.monthlyNotes
+        asMap(localData.monthlyNotes),
+        asMap(remoteData.monthlyNotes)
       ),
       debtSnowballSettings: this._mergeDebtSnowballSettings(
-        localData.debtSnowballSettings || { dailyFloor: 0, autoGenerate: false },
-        remoteData.debtSnowballSettings || { dailyFloor: 0, autoGenerate: false },
+        asMap(localData.debtSnowballSettings),
+        asMap(remoteData.debtSnowballSettings),
         localLastUpdated,
         remoteData.lastUpdated
       ),
@@ -1128,20 +1204,30 @@ class CloudSync {
         }
       }
 
-      // Step 1: Check if remote has changed using ETag
-      // Flush any pending debounced saves to ensure we export the latest data
-      this.store.flushPendingSave();
-      clearTimeout(this.saveTimeout);   // cancel any queued auto-sync — we're saving now
-
-      const exportedData = this.store.exportData();
-      // Genuine local save time, captured before we stamp lastUpdated to "now".
-      // Passed into _mergeData so the debtSnowballSettings winner is decided by
-      // real edit recency, not by the push timestamp (which would always win).
-      const localLastUpdated = exportedData.lastUpdated;
-      let dataToSave = {
-        ...exportedData,
-        lastUpdated: new Date().toISOString(),
-        autoSyncEnabled: this.autoSyncEnabled,
+      // Snapshot local state AFTER the remote round trip below, never before.
+      // The GET takes real time, and anything the user enters during it is part
+      // of "local" by the time we merge. Taking the snapshot first meant the
+      // merge could not see that edit, and then importing the merged result
+      // replaced the live map — destroying the entry in memory AND on disk,
+      // silently. Auto-sync pushes 10s after every change, so that window is
+      // open constantly. The snapshot is nothing but a read, so deferring it
+      // costs nothing.
+      const snapshotLocal = () => {
+        // Flush any pending debounced save so the snapshot is complete.
+        // Suppressed: whatever the flush writes is exported and pushed by THIS
+        // call, so its save callback must not queue another push. Unsuppressed
+        // it hit the _isSyncing branch of scheduleCloudSave, set
+        // _pendingSaveAfterSync, and the finally below scheduled a second,
+        // identical round trip — re-raising the ⌛ indicator right after
+        // "saved successfully".
+        this._suppressAutoSyncSchedule = true;
+        try {
+          this.store.flushPendingSave();
+        } finally {
+          this._suppressAutoSyncSchedule = false;
+        }
+        clearTimeout(this.saveTimeout); // cancel any queued auto-sync — saving now
+        return this.store.exportData();
       };
 
       // Always fetch-and-merge before pushing, even with no stored ETag. A null
@@ -1157,6 +1243,13 @@ class CloudSync {
       // merging would defeat the restore (newer remote rows win, items deleted
       // after the backup resurrect). The PATCH error path below still handles
       // 401/404 for this mode.
+      let dataToSave = null;
+      // Genuine local save time, captured before lastUpdated is stamped to
+      // "now". Passed into _mergeData so the debtSnowballSettings winner is
+      // decided by real edit recency, not by the push timestamp (which would
+      // always win).
+      let localLastUpdated = null;
+
       if (!skipMergeThisSave) {
         // Fetch (If-None-Match only when a stored ETag exists) to check for changes
         const { response: checkResponse, etag: newETag, notModified } =
@@ -1190,7 +1283,15 @@ class CloudSync {
             }
 
             if (remoteData && typeof remoteData === "object") {
-              const localData = dataToSave;
+              // Snapshot now — the fetch above is where a concurrent edit lands.
+              const exportedData = snapshotLocal();
+              localLastUpdated = exportedData.lastUpdated;
+              const localData = {
+                ...exportedData,
+                lastUpdated: new Date().toISOString(),
+                autoSyncEnabled: this.autoSyncEnabled,
+              };
+              dataToSave = localData;
 
               // Create shadow copy of local data before merge for recovery
               try {
@@ -1238,6 +1339,19 @@ class CloudSync {
           }
         }
         // If 304 (notModified), no merge needed, proceed with local data
+      }
+
+      // Every path that did not already snapshot (304 not-modified, a remote
+      // that could not be parsed, a replaceRemote push) takes it now — still
+      // after the network round trip, so a concurrent edit is included.
+      if (!dataToSave) {
+        const exportedData = snapshotLocal();
+        localLastUpdated = exportedData.lastUpdated;
+        dataToSave = {
+          ...exportedData,
+          lastUpdated: new Date().toISOString(),
+          autoSyncEnabled: this.autoSyncEnabled,
+        };
       }
 
       // Step 2: Save the data (original or merged)
