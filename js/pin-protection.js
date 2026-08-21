@@ -1,4 +1,10 @@
 class PinProtection {
+  // Sentinel resolved by showUnlockDialog when a newer dialog takes the shared
+  // #appModal from under it. Distinct from every real answer ("" is a blank
+  // PIN, null is "no modal at all", "reset" is the reset button), so
+  // promptUnlock can tell "nothing was entered" from "the wrong PIN".
+  static UNLOCK_PREEMPTED = Symbol("unlock-preempted");
+
   constructor() {
     this.currentPin = "";
     this.inactivityTimeout = null;
@@ -534,6 +540,18 @@ class PinProtection {
     // unlock or when biometric stored PIN was invalid).
     const result = await this.showUnlockDialog();
 
+    // Another dialog took the shared #appModal from under us (see
+    // showUnlockDialog). Nothing was entered, so this is not a failed attempt —
+    // put the unlock prompt back up once that dialog is done with the element.
+    // Re-prompting immediately would take it straight back and cancel a dialog
+    // the user can see and answer (it renders above the lock overlay), and some
+    // of those cancels are destructive — declining "Gist not found" clears the
+    // cloud credentials.
+    if (result === PinProtection.UNLOCK_PREEMPTED) {
+      await this._awaitSharedModalFree();
+      return this.promptUnlock();
+    }
+
     if (result === "reset") {
       // User chose to reset - confirm with DELETE
       const confirmation = await Utils.showModalPrompt(
@@ -576,6 +594,30 @@ class PinProtection {
     }
     await Utils.showModalAlert("Incorrect PIN", "Unlock Failed");
     return this.promptUnlock();
+  }
+
+  // Resolve once nothing is pending on the shared #appModal, so the unlock
+  // prompt can take it back without cancelling a dialog the user is answering.
+  // Bounded: after the cap we settle whatever is still there and take the
+  // element, because the lock screen must never be left with no way in.
+  _awaitSharedModalFree(pollMs = 150, maxWaitMs = 60000) {
+    return new Promise((resolve) => {
+      let waited = 0;
+      const tick = () => {
+        if (!Utils._activeModalClose) {
+          resolve();
+          return;
+        }
+        if (waited >= maxWaitMs) {
+          Utils.cancelActiveModalDialog();
+          resolve();
+          return;
+        }
+        waited += pollMs;
+        setTimeout(tick, pollMs);
+      };
+      tick();
+    });
   }
 
   showUnlockDialog() {
@@ -624,6 +666,19 @@ class PinProtection {
       // Ensure unlock dialog is above the lock overlay
       modal.style.zIndex = "10000";
 
+      // This dialog drives the SHARED #appModal directly rather than through
+      // Utils.showModalDialog, so it has to join that modal's hand-off protocol
+      // or it is invisible to it. Anything that raises an ordinary dialog while
+      // the unlock prompt is up — a cloud push that was still in flight when
+      // the inactivity lock fired and comes back 404, say — reconfigures the
+      // same element and stacks its own listeners on the same buttons. Our
+      // handlers stayed attached, so one click on THAT dialog also fired
+      // handleConfirm here and resolved the unlock with the (empty) shared
+      // input: a spurious "Incorrect PIN" on top of the dialog the user was
+      // actually answering. Publishing our teardown lets the newer dialog
+      // preempt us cleanly; PREEMPTED tells promptUnlock to re-prompt once the
+      // modal is free again rather than treating it as a failed entry.
+      const PREEMPTED = PinProtection.UNLOCK_PREEMPTED;
       const cleanup = () => {
         confirmButton.removeEventListener("click", handleConfirm);
         resetButton.removeEventListener("click", handleReset);
@@ -633,6 +688,13 @@ class PinProtection {
         modal.setAttribute("aria-hidden", "true");
         // Reset z-index to allow ModalManager to manage it normally
         modal.style.zIndex = "";
+        if (Utils._activeModalClose === forceCancel) {
+          Utils._activeModalClose = null;
+        }
+      };
+      const forceCancel = () => {
+        cleanup();
+        resolve(PREEMPTED);
       };
 
       const handleConfirm = () => {
@@ -656,6 +718,12 @@ class PinProtection {
       confirmButton.addEventListener("click", handleConfirm);
       resetButton.addEventListener("click", handleReset);
       modal.addEventListener("keydown", handleKeydown);
+      // Publish our teardown as the shared modal's pending dialog. We do NOT
+      // preempt whatever is there: every path into this method reaches it with
+      // #appModal already free (lockApp settles the active dialog before
+      // prompting, startup has none, and both re-prompt paths wait for it), so
+      // stealing could only orphan a dialog that has a right to be there.
+      Utils._activeModalClose = forceCancel;
 
       setTimeout(() => input.focus(), 50);
     });

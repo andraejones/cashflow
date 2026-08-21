@@ -815,12 +815,28 @@ class CloudSync {
       const localData = getTextAndTime(localNote);
       const remoteData = getTextAndTime(remoteNote);
 
+      // Both sides empty: the deletion has converged, so drop the key and let
+      // the empty tombstone records fall away with it.
       if (!localData.text && !remoteData.text) return;
 
-      if (!remoteData.text) {
-        merged[monthKey] = localNote;
-      } else if (!localData.text) {
-        merged[monthKey] = remoteNote;
+      // Exactly one side is empty. An empty record that is STRICTLY NEWER is a
+      // deletion the user made after the other side's text was written, so it
+      // wins — that is the whole point of keeping a timestamped empty record
+      // (see TransactionStore.setMonthlyNotes). Preferring the non-empty side
+      // unconditionally, as this did, meant a cleared note was restored from the
+      // other device on the very next sync and could never be deleted at all.
+      // A side that simply never had the note reads as time 0, so it can never
+      // out-rank a real note — which keeps the ordinary "the other device just
+      // hasn't seen it yet" case behaving exactly as before.
+      if (!remoteData.text || !localData.text) {
+        const emptyIsLocal = !localData.text;
+        const emptyTime = emptyIsLocal ? localData.time : remoteData.time;
+        const textTime = emptyIsLocal ? remoteData.time : localData.time;
+        if (emptyTime > textTime) {
+          merged[monthKey] = emptyIsLocal ? localNote : remoteNote;
+          return;
+        }
+        merged[monthKey] = emptyIsLocal ? remoteNote : localNote;
       } else if (localData.text === remoteData.text) {
         // Same content, keep whichever has timestamp
         merged[monthKey] = localData.time >= remoteData.time ? localNote : remoteNote;

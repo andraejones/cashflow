@@ -113,7 +113,15 @@ const Utils = {
   // ("3438.56" → "3,438.56"). Display-only — never feed the result back into
   // an input value or arithmetic; parseFloat stops at the first comma.
   formatAmount: function (amount) {
-    const n = typeof amount === "number" && isFinite(amount) ? amount : 0;
+    const raw = typeof amount === "number" && isFinite(amount) ? amount : 0;
+    // Normalize NEGATIVE ZERO. The balance walk rounds with
+    // Math.round(x * 100) / 100, and a day that lands exactly on zero by
+    // subtraction often gets there through a tiny negative float — 0.01 + 0.06
+    // - 0.07 is one — which rounds to -0. toLocaleString is the one formatter
+    // that renders that as "-0.00" (toFixed and String both normalize), so a
+    // zero balance showed a minus sign on the calendar, in the day modal and in
+    // the "Minimum" figure. `-0 === 0` is true, so this substitutes a plain 0.
+    const n = raw === 0 ? 0 : raw;
     return n.toLocaleString("en-US", {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,

@@ -21,6 +21,18 @@ Object.assign(TransactionStore.prototype, {
     return Number.isFinite(num) ? num : fallback;
   },
 
+  // The snowball's minimum daily cashflow, normalized the same way wherever it
+  // arrives from — the settings form, a restored backup, or a cloud merge. The
+  // form has always rejected a negative floor; nothing else did, and a negative
+  // one is not merely cosmetic: the projection asks whether
+  // `forwardMinChecking - dailyFloor` covers a payoff, so a negative floor lets
+  // it schedule payoffs that drive the projected balance BELOW zero and reports
+  // a payoff date that cannot happen.
+  _normalizeDailyFloor(value) {
+    const num = this._finiteNumber(value);
+    return num > 0 ? num : 0;
+  },
+
   // The domain collections (debts, infusions, goals, dailyFloor) normalize
   // their money on the way in. The three inputs the balance walk actually
   // steps through — the transactions map, the recurring definitions, and the
@@ -78,6 +90,16 @@ Object.assign(TransactionStore.prototype, {
       ...debt,
       id: debt.id || Utils.generateUniqueId(),
       _lastModified: debt._lastModified || new Date().toISOString(),
+      // A debt's name is compared with localeCompare in two tiebreaks — the
+      // snapshot's smallest-balance-first distribution and the plan list's
+      // clearance order — both of which fire whenever two debts sit at the same
+      // remaining balance. A non-string name threw there, and the snapshot path
+      // runs inside the CALENDAR RENDER (generateCalendar →
+      // ensureSnowballPaymentsForHorizon → the projection), so one bad name in
+      // an imported or merged dataset took the whole app down to a blank page.
+      // _normalizeSavingsGoal and _normalizeCashInfusion have always coerced
+      // their `name` this way; this one was the odd one out.
+      name: typeof debt.name === "string" ? debt.name : "",
       balance: Math.round(this._finiteNumber(debt.balance) * 100) / 100,
       minPayment: Math.round(this._finiteNumber(debt.minPayment) * 100) / 100,
       dueDay: this._finiteNumber(debt.dueDay) || 1,
@@ -296,11 +318,21 @@ Object.assign(TransactionStore.prototype, {
     return drafts.length;
   },
 
-  getMonthlyNotes(monthKey) {
+  // The stored text for a month, as a STRING, whatever shape the record is in:
+  // the legacy bare string, the current { text, _lastModified } object, or
+  // anything an import or a cloud merge left there. Both readers below go
+  // through this — hasMonthlyNotes used to do `(note.text || "").trim()` on its
+  // own, which threw on a numeric `text` and took the CALENDAR RENDER down with
+  // it (generateCalendar asks it for the ★ indicator on every render).
+  _monthlyNoteText(monthKey) {
     const note = this.monthlyNotes[monthKey];
     if (!note) return "";
-    // Handle both old format (string) and new format (object with text)
-    return typeof note === "string" ? note : (note.text || "");
+    const raw = typeof note === "string" ? note : note.text;
+    return typeof raw === "string" ? raw : "";
+  },
+
+  getMonthlyNotes(monthKey) {
+    return this._monthlyNoteText(monthKey);
   },
 
   setMonthlyNotes(monthKey, notes) {
@@ -308,25 +340,47 @@ Object.assign(TransactionStore.prototype, {
       console.error("Invalid monthKey for setMonthlyNotes");
       return false;
     }
-    if (notes && notes.trim()) {
+    // Coerce here too: this is a public store method, and the only thing that
+    // makes today's single caller safe is that it happens to pass a textarea's
+    // value.
+    const text = typeof notes === "string" ? notes.trim() : "";
+    if (text) {
       this.monthlyNotes[monthKey] = {
-        text: notes.trim(),
+        text,
         _lastModified: new Date().toISOString(),
       };
     } else {
-      // Remove empty notes
-      delete this.monthlyNotes[monthKey];
+      // Saving an empty note over a month that already has none is a no-op —
+      // don't stamp a record (or a cloud push) for it. Opening Notes on a blank
+      // month and pressing Save is a normal thing to do.
+      if (!this.hasMonthlyNotes(monthKey)) {
+        if (this.monthlyNotes[monthKey] !== undefined) {
+          // A legacy empty string / stale blank: normalize it away silently.
+          delete this.monthlyNotes[monthKey];
+          this.debouncedSave(false);
+        }
+        return true;
+      }
+      // Clearing a REAL note keeps a TIMESTAMPED EMPTY record rather than
+      // deleting the key. Deleting it made the clear invisible to the cloud
+      // merge, which sees only "local has no note, remote has one" and restores
+      // the remote copy — so a note the user deleted came back on the very next
+      // sync, every time, in both directions. The empty record is the
+      // deletion's tombstone: _mergeMonthlyNotes lets the newer side win, and
+      // drops the key entirely once BOTH sides are empty, so it self-prunes
+      // once the devices converge. getMonthlyNotes / hasMonthlyNotes already
+      // read an empty text as "none".
+      this.monthlyNotes[monthKey] = {
+        text: "",
+        _lastModified: new Date().toISOString(),
+      };
     }
     this.debouncedSave();
     return true;
   },
 
   hasMonthlyNotes(monthKey) {
-    const note = this.monthlyNotes[monthKey];
-    if (!note) return false;
-    // Handle both old format (string) and new format (object with text)
-    const text = typeof note === "string" ? note : (note.text || "");
-    return !!(text && text.trim());
+    return this._monthlyNoteText(monthKey).trim() !== "";
   },
 
   // Move a transaction from one date to another
@@ -453,7 +507,7 @@ Object.assign(TransactionStore.prototype, {
     }
     this.debtSnowballSettings = {
       ...this.debtSnowballSettings,
-      dailyFloor: this._finiteNumber(settings.dailyFloor),
+      dailyFloor: this._normalizeDailyFloor(settings.dailyFloor),
       extraPaymentStartMonth: this.normalizeExtraStartMonth(
         settings.extraPaymentStartMonth
       ),

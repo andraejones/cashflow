@@ -81,7 +81,15 @@ self.addEventListener("fetch", (event) => {
       .then((response) => {
         if (response && (response.ok || response.type === "opaque")) {
           const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+          // Refreshing the cache is best-effort and deliberately not awaited —
+          // but it CAN reject (storage quota, an evicted cache), and an
+          // unhandled rejection here fires on every intercepted request for the
+          // rest of the session. The response has already been returned either
+          // way; failing to re-cache only costs offline freshness.
+          caches
+            .open(CACHE_NAME)
+            .then((cache) => cache.put(request, copy))
+            .catch(() => {});
         }
         return response;
       })

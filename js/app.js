@@ -246,11 +246,19 @@ class CashflowApp {
       });
     });
 
-    items.sort((a, b) => {
-      const ta = new Date(a.transaction._lastModified || 0).getTime();
-      const tb = new Date(b.transaction._lastModified || 0).getTime();
-      return tb - ta;
-    });
+    // An unreadable _lastModified (nothing coerces it on the way in from an
+    // import or a cloud merge) parses to an Invalid Date, whose getTime() is
+    // NaN — and `tb - ta` is then NaN, which is not a valid comparator result:
+    // the list comes back in an arbitrary order, so the "recent" entries are
+    // not the recent ones. Sort unreadable stamps to the end instead.
+    const modifiedAt = (entry) => {
+      const time = new Date(entry.transaction._lastModified || 0).getTime();
+      // A finite sentinel, not -Infinity: two unreadable stamps would make
+      // `b - a` NaN again, which is the very thing this replaced. Real stamps
+      // are >= 0 (a missing one reads as the epoch), so -1 sorts them last.
+      return Number.isFinite(time) ? time : -1;
+    };
+    items.sort((a, b) => modifiedAt(b) - modifiedAt(a));
 
     const recent = items.slice(0, 25);
 
@@ -388,6 +396,10 @@ class CashflowApp {
       transactions[date].forEach((t) => {
         if (t.hidden === true || t.allocated !== true) return;
         if (t.autoCloseout === true || !t.recurringId) return;
+        // Skipped occurrences hold no reserve, so they are not the live bucket
+        // — matching getAllocations, the reserve index, and both supersede
+        // sweeps. Listing one here would show a bucket that cannot be drawn.
+        if (this.store.isTransactionSkipped(date, t.recurringId)) return;
         const cur = liveRollingDate.get(t.recurringId);
         if (!cur || date > cur) liveRollingDate.set(t.recurringId, date);
       });

@@ -74,7 +74,10 @@ global.Utils = {
   showNotification: () => {},
   formatDisplayDate: (str) => str,
   formatAmount: (amount) => {
-    const n = typeof amount === "number" && isFinite(amount) ? amount : 0;
+    const raw = typeof amount === "number" && isFinite(amount) ? amount : 0;
+    // Mirrors js/utils.js: a computed -0 (the walk's rounding produces it for a
+    // day that lands on zero by subtraction) must not render as "-0.00".
+    const n = raw === 0 ? 0 : raw;
     return n.toLocaleString("en-US", {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
@@ -87,6 +90,11 @@ global.Utils = {
   // exercising the path. Dialogs resolve to their CANCEL value so a test that
   // unexpectedly reaches one takes the "user declined" branch rather than
   // silently confirming something destructive.
+  // The shared #appModal hand-off protocol: PinProtection.showUnlockDialog
+  // drives that element directly and publishes its teardown here so a newer
+  // dialog can preempt it (see js/utils.js showModalDialog / js/pin-protection.js).
+  _activeModalClose: null,
+  showModalDialog: async () => undefined,
   showModalAlert: async () => undefined,
   showModalConfirm: async () => false,
   showModalPrompt: async () => null,
@@ -6850,7 +6858,14 @@ console.log("TEST 81: The Harness Utils Stubs Match The Real Utils");
     new Date(2026, 7, 20, 12, 0, 0), new Date(2024, 1, 29, 12, 0, 0),
     new Date(2026, 0, 1, 12, 0, 0), new Date(2026, 11, 31, 12, 0, 0),
   ];
-  const AMOUNTS = [0, 1, -1, 1234.5, 1234.567, -0.004, 1e6, NaN, Infinity, null, undefined, "12.3"];
+  const AMOUNTS = [
+    0, 1, -1, 1234.5, 1234.567, -0.004, 1e6, NaN, Infinity, null, undefined, "12.3",
+    // NEGATIVE ZERO. The balance walk rounds with Math.round(x * 100) / 100, and
+    // a day that lands exactly on zero by subtraction gets there through a tiny
+    // negative float (0.01 + 0.06 - 0.07 is one), which rounds to -0.
+    // toLocaleString is the only formatter that renders that as "-0.00".
+    -0, Math.round((0.01 + 0.06 - 0.07) * 100) / 100,
+  ];
   const HTML = ["<b>", "a&b", '"q"', "'s'", "plain", "", "<script>alert(1)</script>", "café ☕"];
 
   const shape = (v) =>
@@ -6887,7 +6902,22 @@ console.log("TEST 81: The Harness Utils Stubs Match The Real Utils");
     throw new Error(`only ${compared} stub comparisons ran; the stub extraction is not finding the methods`);
   }
 
-  console.log(`✅ Both stubs agree with the real Utils across ${compared} comparisons`);
+  // Agreement is not correctness: both sides could be wrong together. Money
+  // formatting has exactly one absolute rule — a zero never wears a minus sign.
+  [-0, 0, Math.round((0.01 + 0.06 - 0.07) * 100) / 100].forEach((zero) => {
+    const shown = realUtils.formatAmount(zero);
+    if (shown !== "0.00") {
+      throw new Error(
+        `formatAmount rendered a zero balance as "${shown}" — a zero must never show a minus sign`
+      );
+    }
+  });
+  // ...and a genuinely negative amount must still keep its sign.
+  if (realUtils.formatAmount(-12.34) !== "-12.34") {
+    throw new Error("formatAmount dropped the sign from a real negative amount");
+  }
+
+  console.log(`✅ Both stubs agree with the real Utils across ${compared} comparisons, and zero never shows a minus`);
 }
 
 // TEST 82: editing a debt's due date must not leave phantom minimum payments.
@@ -7101,6 +7131,2084 @@ console.log("TEST 83: Expansion And Cleanup Agree On The Recurrence Window");
   console.log("✅ A business-day-adjusted final payment survives every render, and forward-adjusted strays are still swept");
 }
 
+// TEST 84: one unreadable date KEY must not poison the whole balance chain.
+//
+// updateMonthlyBalances derives the month range from the transactions map's
+// raw KEYS. Nothing validates those on the way in from an import or a cloud
+// merge, and it built each one with `new Date(...split("-").map(Number))` — so
+// a junk key ("garbage") produced an Invalid Date. Every later `<` / `>`
+// against NaN is false, so once earliestDate/latestDate held it they never
+// recovered, and only when the junk key came FIRST in key-insertion order
+// (which makes the failure intermittent). allMonths then collapsed to the
+// single key "NaN-NaN": every real month lost its entry, so each month
+// restarted from 0 instead of carrying the prior month's close. A $500 August
+// income stopped funding September, silently.
+console.log("TEST 84: A Junk Date Key Doesn't Poison The Monthly Balance Chain");
+{
+  const buildPayload = (keys) => {
+    const transactions = {};
+    keys.forEach((k) => {
+      if (k === "junk") {
+        transactions["garbage"] = [
+          { id: "j", amount: 1, type: "income", description: "junk" },
+        ];
+      } else if (k === "aug") {
+        transactions["2026-08-10"] = [
+          { id: "a", amount: 500, type: "income", description: "Salary" },
+        ];
+      } else if (k === "sep") {
+        transactions["2026-09-05"] = [
+          { id: "b", amount: 120, type: "expense", description: "Bill" },
+        ];
+      }
+    });
+    return { transactions, monthlyBalances: {}, recurringTransactions: [] };
+  };
+
+  const septemberStart = (keys) => {
+    localStorage.clear();
+    const store = new TransactionStore();
+    store.resetData();
+    if (!store.importData(buildPayload(keys))) {
+      throw new Error("import of the fixture failed");
+    }
+    const manager = new RecurringTransactionManager(store);
+    const calc = new CalculationService(store, manager);
+    calc.updateMonthlyBalances(new Date(2026, 8, 15, 12, 0, 0));
+    return {
+      balances: store.getMonthlyBalances(),
+      summary: calc.calculateMonthlySummary(2026, 8),
+    };
+  };
+
+  const clean = septemberStart(["aug", "sep"]);
+  if (clean.balances["2026-09"].startingBalance !== 500) {
+    throw new Error(
+      `baseline broken: September should start at 500, got ${clean.balances["2026-09"].startingBalance}`
+    );
+  }
+
+  // The junk key in every insertion position — first is the one that used to break.
+  [
+    ["junk", "aug", "sep"],
+    ["aug", "junk", "sep"],
+    ["aug", "sep", "junk"],
+  ].forEach((keys) => {
+    const got = septemberStart(keys);
+    if (got.balances["NaN-NaN"]) {
+      throw new Error(`junk key at ${keys.indexOf("junk")} produced a "NaN-NaN" month`);
+    }
+    if (!got.balances["2026-08"] || !got.balances["2026-09"]) {
+      throw new Error(
+        `junk key at ${keys.indexOf("junk")} dropped real months: ${Object.keys(got.balances)}`
+      );
+    }
+    if (got.balances["2026-09"].startingBalance !== 500) {
+      throw new Error(
+        `junk key at ${keys.indexOf("junk")} broke the carry-forward: September started at ` +
+          `${got.balances["2026-09"].startingBalance}, expected 500`
+      );
+    }
+    if (got.summary.startingBalance !== clean.summary.startingBalance) {
+      throw new Error(
+        `junk key at ${keys.indexOf("junk")} changed the September summary: ` +
+          `${got.summary.startingBalance} vs ${clean.summary.startingBalance}`
+      );
+    }
+  });
+
+  // A key the OLD parse could not read but the shared guard can: an ISO
+  // date-time key must still count toward the month range, not be discarded.
+  {
+    localStorage.clear();
+    const store = new TransactionStore();
+    store.resetData();
+    store.importData({
+      transactions: {
+        "2026-08-10": [{ id: "a", amount: 500, type: "income", description: "Salary" }],
+      },
+      monthlyBalances: {},
+      recurringTransactions: [],
+    });
+    const manager = new RecurringTransactionManager(store);
+    const calc = new CalculationService(store, manager);
+    calc.updateMonthlyBalances(new Date(2026, 7, 15, 12, 0, 0));
+    if (!store.getMonthlyBalances()["2026-08"]) {
+      throw new Error("a healthy single-month dataset lost its month entry");
+    }
+  }
+
+  console.log("✅ An unreadable date key is skipped; every real month keeps its balance");
+}
+
+// TEST 85: the free-funds designation must follow a "this and future" split.
+//
+// editTransaction's future scope rewrites the series: it ends the old
+// definition and creates a new one from the edit forward, carrying `allocated`,
+// `autoCloseout` and the floor-suggestion settings across. `freeFunds` was not
+// carried, so the designation stayed on the ENDED series. getFreeFundsRecurringId
+// still reported a holder — free-funds mode stayed ON and the ⭐ toggle still
+// read as active — while getFreeFundsAllocation resolved the old series' LAST
+// bucket (a stale amount), and then nothing at all once that series had no
+// instance on/before today. The free-funds figure is the number the family
+// spends against.
+console.log("TEST 85: Free Funds Follows A This-And-Future Split");
+{
+  const setup = (defOverrides = {}) => {
+    localStorage.clear();
+    const store = new TransactionStore();
+    store.resetData();
+    const manager = new RecurringTransactionManager(store);
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth();
+    const startStr = `${year}-${String(month + 1).padStart(2, "0")}-01`;
+    const id = manager.addRecurringTransaction({
+      amount: 200,
+      type: "expense",
+      description: "Free Funds",
+      recurrence: "weekly",
+      startDate: startStr,
+      allocated: true,
+      ...defOverrides,
+    });
+    store.setFreeFundsAllocation(id);
+    manager.applyRecurringTransactions(year, month);
+    return { store, manager, id, year, month };
+  };
+
+  const firstInstanceOf = (store, recurringId) => {
+    const transactions = store.getTransactions();
+    const dates = Object.keys(transactions).sort();
+    for (const d of dates) {
+      const i = transactions[d].findIndex((t) => t.recurringId === recurringId);
+      if (i !== -1) return { date: d, index: i };
+    }
+    return null;
+  };
+
+  // (a) amount edit, scope "future": the designation moves to the new series
+  // and the live bucket reports the NEW amount.
+  {
+    const { store, manager, id, year, month } = setup();
+    if (store.getFreeFundsRecurringId() !== id) {
+      throw new Error("baseline: the series was not designated");
+    }
+    const hit = firstInstanceOf(store, id);
+    if (!hit) throw new Error("baseline: no instance materialized to edit");
+    manager.editTransaction(
+      hit.date,
+      hit.index,
+      { amount: 250, type: "expense", description: "Free Funds" },
+      "future"
+    );
+    const holder = store.getFreeFundsRecurringId();
+    if (!holder) {
+      throw new Error("the free-funds designation was lost entirely by the split");
+    }
+    if (holder === id) {
+      throw new Error("the designation was stranded on the ended series");
+    }
+    const holders = store
+      .getRecurringTransactions()
+      .filter((rt) => rt.freeFunds === true);
+    if (holders.length !== 1) {
+      throw new Error(`expected exactly one free-funds holder, found ${holders.length}`);
+    }
+    const newDef = store.getRecurringTransactions().find((rt) => rt.id === holder);
+    if (newDef.allocated !== true) {
+      throw new Error("the new series carries freeFunds without allocated");
+    }
+    manager.applyRecurringTransactions(year, month);
+    const bucket = store.getFreeFundsAllocation();
+    if (!bucket) {
+      throw new Error("no live free-funds bucket after the split");
+    }
+    if (bucket.recurringId !== holder) {
+      throw new Error(
+        `the live bucket still points at the old series (${bucket.recurringId})`
+      );
+    }
+    if (bucket.remaining !== 250) {
+      throw new Error(
+        `the live bucket reports the stale amount ${bucket.remaining}, expected 250`
+      );
+    }
+  }
+
+  // (b) the same split moving the type OFF expense leaves no allocation series,
+  // so the designation is dropped rather than transferred to a phantom one.
+  {
+    const { store, manager, id } = setup();
+    const hit = firstInstanceOf(store, id);
+    manager.editTransaction(
+      hit.date,
+      hit.index,
+      { amount: 250, type: "income", description: "Free Funds" },
+      "future"
+    );
+    if (store.getFreeFundsRecurringId() !== null) {
+      throw new Error(
+        "a split onto income left a free-funds holder with no allocation series"
+      );
+    }
+    if (store.getRecurringTransactions().some((rt) => rt.freeFunds === true)) {
+      throw new Error("a stale freeFunds flag survived the type change");
+    }
+  }
+
+  // (c) scope "all" moving the type off expense clears the flag too.
+  {
+    const { store, manager, id } = setup();
+    const hit = firstInstanceOf(store, id);
+    manager.editTransaction(
+      hit.date,
+      hit.index,
+      { amount: 250, type: "income", description: "Free Funds" },
+      "all"
+    );
+    if (store.getRecurringTransactions().some((rt) => rt.freeFunds === true)) {
+      throw new Error('scope "all" left freeFunds on a series that is no longer an allocation');
+    }
+    if (store.getFreeFundsRecurringId() !== null) {
+      throw new Error('scope "all" left a free-funds holder after the type change');
+    }
+  }
+
+  console.log("✅ The free-funds designation moves with the series a split keeps running");
+}
+
+// TEST 86: the balance chain must not depend on which months were visited.
+//
+// updateMonthlyBalances derived its month range from the transactions map's
+// keys alone. A recurring series can START before the oldest row in that map,
+// and its early occurrences only exist once their month is expanded — which is
+// what this range drives. Those months were therefore never expanded, their
+// income/expense never joined the chain, and the first time the user paged back
+// to one it materialized permanently: every balance from that month forward,
+// including today's and the 30-day Minimum, jumped. Users who enter an Ending
+// Balance never saw it (the anchor resets the walk, so pre-anchor months can't
+// reach today) — which is exactly why it could sit there unnoticed.
+console.log("TEST 86: The Balance Chain Doesn't Depend On Where You Navigated");
+{
+  const now = new Date();
+  const Y = now.getFullYear();
+  const M = now.getMonth();
+  const ds = (y, m, d) =>
+    `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+
+  const build = (withAnchor) => {
+    const transactions = {
+      // The only one-time row lives in the CURRENT month, so the map's earliest
+      // key is months later than the series' start date.
+      [ds(Y, M, 5)]: [
+        { id: "a", amount: 300, type: "expense", description: "Rent",
+          _lastModified: new Date().toISOString() },
+      ],
+    };
+    if (withAnchor) {
+      transactions[ds(Y, M, 1)] = [
+        { id: "anch", amount: 2500, type: "balance", description: "Ending Balance",
+          _lastModified: new Date().toISOString() },
+      ];
+    }
+    return {
+      transactions,
+      monthlyBalances: {},
+      recurringTransactions: [
+        { id: "pay", amount: 1000, type: "income", description: "Paycheck",
+          recurrence: "monthly", startDate: ds(Y, M - 4, 1),
+          _lastModified: new Date().toISOString() },
+      ],
+      debts: [], cashInfusions: [], savingsGoals: [],
+      skippedTransactions: {}, movedTransactions: {}, monthlyNotes: {},
+      debtSnowballSettings: { dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false },
+      lastUpdated: new Date().toISOString(),
+    };
+  };
+
+  [true, false].forEach((withAnchor) => {
+    localStorage.clear();
+    const store = new TransactionStore();
+    store.resetData();
+    store.importData(build(withAnchor));
+    const manager = new RecurringTransactionManager(store);
+    const calc = new CalculationService(store, manager);
+    const render = (vy, vm) => {
+      manager.applyRecurringTransactions(vy, vm);
+      calc.updateMonthlyBalances(new Date(vy, vm, 1, 12, 0, 0));
+    };
+
+    render(Y, M);
+    const before = calc.calculateMinimum();
+    const beforeBalance = calc.getRunningBalanceForDate(ds(Y, M, 20));
+
+    render(Y, M - 3); // page back past the series' start
+    render(Y, M);     // and come home
+
+    const after = calc.calculateMinimum();
+    const afterBalance = calc.getRunningBalanceForDate(ds(Y, M, 20));
+
+    const label = withAnchor ? "with an Ending Balance" : "with no Ending Balance";
+    if (Math.abs(before - after) > 0.005) {
+      throw new Error(
+        `${label}: the 30-day Minimum moved just by navigating: ${before} -> ${after}`
+      );
+    }
+    if (Math.abs(beforeBalance - afterBalance) > 0.005) {
+      throw new Error(
+        `${label}: the running balance moved just by navigating: ${beforeBalance} -> ${afterBalance}`
+      );
+    }
+  });
+
+  // And the un-navigated answer must be the COMPLETE one: four monthly
+  // paychecks before the current month are part of the chain, not missing from it.
+  {
+    localStorage.clear();
+    const store = new TransactionStore();
+    store.resetData();
+    store.importData(build(false));
+    const manager = new RecurringTransactionManager(store);
+    const calc = new CalculationService(store, manager);
+    manager.applyRecurringTransactions(Y, M);
+    calc.updateMonthlyBalances(new Date(Y, M, 1, 12, 0, 0));
+    const months = Object.keys(store.getMonthlyBalances());
+    const seriesMonth = `${Y}-${String(M - 4 + 1).padStart(2, "0")}`;
+    const seriesStart = new Date(Y, M - 4, 1);
+    const expectedKey = `${seriesStart.getFullYear()}-${String(seriesStart.getMonth() + 1).padStart(2, "0")}`;
+    if (!months.includes(expectedKey)) {
+      throw new Error(
+        `the series' own start month ${expectedKey} is missing from the chain: ${months}`
+      );
+    }
+    void seriesMonth;
+  }
+
+  // An unusable startDate must not poison the range (TEST 76's class of input).
+  {
+    localStorage.clear();
+    const store = new TransactionStore();
+    store.resetData();
+    const payload = build(false);
+    payload.recurringTransactions.push({
+      id: "broken", amount: 5, type: "expense", description: "Broken",
+      recurrence: "monthly", startDate: "not-a-date",
+      _lastModified: new Date().toISOString(),
+    });
+    store.importData(payload);
+    const manager = new RecurringTransactionManager(store);
+    const calc = new CalculationService(store, manager);
+    calc.updateMonthlyBalances(new Date(Y, M, 1, 12, 0, 0));
+    const months = Object.keys(store.getMonthlyBalances());
+    if (months.some((k) => k.includes("NaN"))) {
+      throw new Error(`an unusable startDate produced a junk month: ${months}`);
+    }
+  }
+
+  console.log("✅ Paging back and returning leaves every balance exactly where it was");
+}
+
+// TEST 87: a superseded rolling-allocation bucket must not come back on the
+// second render.
+//
+// A rolling recurring allocation keeps only its latest occurrence on/before
+// today live; earlier periods are collapsed. But the collapse can only run once
+// the SUPERSEDOR has been materialized, which happens when a LATER month is
+// expanded — after the earlier month's expansion cache entry was already
+// captured with the bucket still in it. The next render hits that cache, and
+// _applyCachedTransactions replays it verbatim without re-running the collapse.
+// Nothing removed the row again: the dead period's reserve was subtracted from
+// every projected balance, so the forward plan and the 30-day Minimum dropped by
+// the bucket amount from the second render on — permanently, and with nothing on
+// screen to explain it.
+console.log("TEST 87: A Superseded Allocation Bucket Stays Collapsed");
+{
+  const now = new Date();
+  const Y = now.getFullYear();
+  const M = now.getMonth();
+  const ds = (y, m, d) =>
+    `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+
+  [
+    { label: "quarterly", recurrence: "quarterly", startsBack: 4, amount: 265.83 },
+    { label: "monthly", recurrence: "monthly", startsBack: 5, amount: 120 },
+  ].forEach(({ label, recurrence, startsBack, amount }) => {
+    localStorage.clear();
+    const store = new TransactionStore();
+    store.resetData();
+    const start = new Date(Y, M - startsBack, 23);
+    store.importData({
+      transactions: {
+        [ds(Y, M, 5)]: [
+          { id: "a", amount: 300, type: "expense", description: "Rent",
+            _lastModified: new Date().toISOString() },
+        ],
+      },
+      monthlyBalances: {},
+      recurringTransactions: [
+        { id: "bucket", amount, type: "expense", description: "Groceries bucket",
+          recurrence,
+          startDate: ds(start.getFullYear(), start.getMonth(), start.getDate()),
+          allocated: true, settled: true,
+          _lastModified: new Date().toISOString() },
+      ],
+      debts: [], cashInfusions: [], savingsGoals: [],
+      skippedTransactions: {}, movedTransactions: {}, monthlyNotes: {},
+      debtSnowballSettings: { dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false },
+      lastUpdated: new Date().toISOString(),
+    });
+    const manager = new RecurringTransactionManager(store);
+    const calc = new CalculationService(store, manager);
+    const todayStr = Utils.formatDateString(new Date(Y, M, now.getDate(), 12, 0, 0));
+
+    const render = () => {
+      manager.applyRecurringTransactions(Y, M);
+      calc.updateMonthlyBalances(new Date(Y, M, 1, 12, 0, 0));
+      return calc.calculateMinimum();
+    };
+    const liveBuckets = () => {
+      const transactions = store.getTransactions();
+      return Object.keys(transactions)
+        .filter((d) => d <= todayStr)
+        .filter((d) => transactions[d].some((t) => t.recurringId === "bucket"))
+        .sort();
+    };
+
+    const min1 = render();
+    const live1 = liveBuckets();
+    if (live1.length !== 1) {
+      throw new Error(
+        `${label}: render 1 left ${live1.length} past buckets live (${live1}); exactly one should be`
+      );
+    }
+    for (let pass = 2; pass <= 4; pass++) {
+      const min = render();
+      const live = liveBuckets();
+      if (live.length !== 1 || live[0] !== live1[0]) {
+        throw new Error(
+          `${label}: render ${pass} resurrected superseded buckets — ${live} vs ${live1}`
+        );
+      }
+      if (Math.abs(min - min1) > 0.005) {
+        throw new Error(
+          `${label}: the 30-day Minimum moved on render ${pass}: ${min1} -> ${min}`
+        );
+      }
+    }
+  });
+
+  // The cache-HIT half. Any path that replaces the transactions map wholesale —
+  // a cloud merge importing the merged copy — drops the ephemeral expansions
+  // while leaving the expansion caches populated. The next render replays those
+  // cached months, and the supersede rule is cross-month: re-adding the LIVE
+  // bucket is what retires the earlier ones. The collapse ran only on the
+  // full-expansion path, so when the live bucket's month came back as a cache
+  // HIT nothing retired the earlier bucket, and its reserve was subtracted from
+  // every projected balance for good.
+  {
+    const now = new Date();
+    const Y = now.getFullYear();
+    const M = now.getMonth();
+    const ds = (y, m, d) =>
+      `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    const todayStr = ds(Y, M, now.getDate());
+
+    localStorage.clear();
+    const store = new TransactionStore();
+    store.resetData();
+    // Three past periods, so the live one is two supersedors deep.
+    const start = new Date(Y, M - 3, 29);
+    store.importData({
+      transactions: {
+        [ds(Y, M, 5)]: [
+          { id: "a", amount: 300, type: "expense", description: "Rent",
+            _lastModified: new Date().toISOString() },
+        ],
+      },
+      monthlyBalances: {},
+      recurringTransactions: [
+        { id: "bucket", amount: 194.63, type: "expense", description: "Groceries bucket",
+          recurrence: "monthly",
+          startDate: ds(start.getFullYear(), start.getMonth(), start.getDate()),
+          allocated: true, settled: true,
+          _lastModified: new Date().toISOString() },
+      ],
+      debts: [], cashInfusions: [], savingsGoals: [],
+      skippedTransactions: {}, movedTransactions: {}, monthlyNotes: {},
+      debtSnowballSettings: { dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false },
+      lastUpdated: new Date().toISOString(),
+    });
+    const manager = new RecurringTransactionManager(store);
+    const calc = new CalculationService(store, manager);
+    const sync = new CloudSync(store, () => {});
+    // The harness has no real DOM, so let the save callbacks stay quiet rather
+    // than reaching CloudSync's pending-indicator markup.
+    sync.autoSyncEnabled = false;
+    const render = () => {
+      store.closeOutExpiredAllocations();
+      store.rollForwardAllocations();
+      manager.applyRecurringTransactions(Y, M);
+      calc.updateMonthlyBalances(new Date(Y, M, 1, 12, 0, 0));
+      return calc.calculateMinimum();
+    };
+    const pastBuckets = () => {
+      const transactions = store.getTransactions();
+      return Object.keys(transactions)
+        .filter((d) => d <= todayStr)
+        .filter((d) => transactions[d].some((t) => t.recurringId === "bucket"))
+        .sort();
+    };
+
+    // ONE render, then merge — the shape a real auto-sync produces. A second
+    // render before the merge would have re-expanded (and re-cached) the
+    // superseded months cleanly, hiding the very state this pins.
+    const min1 = render();
+    const live1 = pastBuckets();
+    if (live1.length !== 1) {
+      throw new Error(
+        `setup: expected exactly one live past bucket before the merge, got ${live1}`
+      );
+    }
+
+    // A push that merges the remote copy in and imports the result — the map is
+    // replaced, the expansion caches are not.
+    const local = store.exportData();
+    const merged = sync._mergeData(
+      local, JSON.parse(JSON.stringify(local)), local.lastUpdated
+    );
+    store.importData(merged);
+
+    // The FIRST render after the merge is the one the user is looking at. It
+    // self-healed on the next render, which is exactly what made this invisible.
+    for (let pass = 1; pass <= 3; pass++) {
+      const min = render();
+      const live = pastBuckets();
+      if (live.length !== 1 || live[0] !== live1[0]) {
+        throw new Error(
+          `render ${pass} after a merge resurrected superseded buckets — ${live} vs ${live1}`
+        );
+      }
+      if (Math.abs(min - min1) > 0.005) {
+        throw new Error(
+          `the 30-day Minimum moved after a merge (render ${pass}): ${min1} -> ${min}`
+        );
+      }
+    }
+    store.cancelPendingSave();
+  }
+
+  console.log("✅ Rolling allocation buckets stay collapsed across repeated renders");
+}
+
+// TEST 88: a "this and future" split must never uncap a capped series.
+//
+// The split carries the remaining occurrence count to the new definition as
+// `maxOccurrences - occurrencesBefore`, but only when that subtraction is
+// strictly positive — otherwise it wrote nothing, and "no maxOccurrences" does
+// not mean "none left", it means NO CAP. countOccurrencesBefore is an
+// arithmetic estimate (business-day adjustments and Nth-weekday rules can put
+// it a step out), so over-counting by one on the final occurrence turned a
+// series the user capped at N into one that repeats forever — and every
+// projected balance carried the phantom occurrences.
+console.log("TEST 88: A This-And-Future Split Never Uncaps A Capped Series");
+{
+  const makeStore = () => {
+    localStorage.clear();
+    const store = new TransactionStore();
+    store.resetData();
+    return store;
+  };
+
+  // Normal case: the remainder is carried exactly.
+  {
+    const store = makeStore();
+    const manager = new RecurringTransactionManager(store);
+    const id = manager.addRecurringTransaction({
+      amount: 100, type: "expense", description: "Capped",
+      recurrence: "monthly", startDate: "2026-01-15", maxOccurrences: 12,
+    });
+    manager.applyRecurringTransactions(2026, 3); // April 2026 = occurrence #4
+    const transactions = store.getTransactions();
+    const date = Object.keys(transactions).sort().find((d) =>
+      d.startsWith("2026-04") && transactions[d].some((t) => t.recurringId === id)
+    );
+    if (!date) throw new Error("setup: no April occurrence materialized");
+    const index = transactions[date].findIndex((t) => t.recurringId === id);
+    manager.editTransaction(
+      date, index,
+      { amount: 150, type: "expense", description: "Capped" },
+      "future"
+    );
+    const created = store.getRecurringTransactions().find((rt) => rt.id !== id);
+    if (!created) throw new Error("the split created no new series");
+    if (created.maxOccurrences !== 9) {
+      throw new Error(
+        `expected 9 remaining occurrences (12 minus the 3 before April), got ${created.maxOccurrences}`
+      );
+    }
+  }
+
+  // The regression: whenever the count-so-far reaches or passes the cap, the new
+  // series must still be capped — never left open-ended. Driven by stubbing
+  // countOccurrencesBefore, which is exactly the estimate that can run over.
+  [12, 13, 40].forEach((over) => {
+    const store = makeStore();
+    const manager = new RecurringTransactionManager(store);
+    const id = manager.addRecurringTransaction({
+      amount: 100, type: "expense", description: "Capped",
+      recurrence: "monthly", startDate: "2026-01-15", maxOccurrences: 12,
+    });
+    manager.applyRecurringTransactions(2026, 3);
+    const transactions = store.getTransactions();
+    const date = Object.keys(transactions).sort().find((d) =>
+      d.startsWith("2026-04") && transactions[d].some((t) => t.recurringId === id)
+    );
+    const index = transactions[date].findIndex((t) => t.recurringId === id);
+    manager.countOccurrencesBefore = () => over;
+    manager.editTransaction(
+      date, index,
+      { amount: 150, type: "expense", description: "Capped" },
+      "future"
+    );
+    const created = store.getRecurringTransactions().find((rt) => rt.id !== id);
+    if (!created) throw new Error("the split created no new series");
+    if (!created.maxOccurrences || created.maxOccurrences < 1) {
+      throw new Error(
+        `count-so-far ${over} against a cap of 12 left the new series uncapped ` +
+          `(maxOccurrences = ${JSON.stringify(created.maxOccurrences)})`
+      );
+    }
+    // The clicked occurrence is itself one occurrence of the new series, so the
+    // floor is exactly 1 — never more than the original cap.
+    if (created.maxOccurrences > 12) {
+      throw new Error(`the split widened the cap to ${created.maxOccurrences}`);
+    }
+  });
+
+  // And an uncapped series must stay uncapped — the floor must not invent one.
+  {
+    const store = makeStore();
+    const manager = new RecurringTransactionManager(store);
+    const id = manager.addRecurringTransaction({
+      amount: 100, type: "expense", description: "Open ended",
+      recurrence: "monthly", startDate: "2026-01-15",
+    });
+    manager.applyRecurringTransactions(2026, 3);
+    const transactions = store.getTransactions();
+    const date = Object.keys(transactions).sort().find((d) =>
+      d.startsWith("2026-04") && transactions[d].some((t) => t.recurringId === id)
+    );
+    const index = transactions[date].findIndex((t) => t.recurringId === id);
+    manager.editTransaction(
+      date, index,
+      { amount: 150, type: "expense", description: "Open ended" },
+      "future"
+    );
+    const created = store.getRecurringTransactions().find((rt) => rt.id !== id);
+    if (created.maxOccurrences !== undefined) {
+      throw new Error(
+        `an uncapped series gained a cap of ${created.maxOccurrences} across the split`
+      );
+    }
+  }
+
+  console.log("✅ A split carries the remaining cap, floors it at 1, and never invents one");
+}
+
+// TEST 89: deleting a monthly note must survive the cloud merge.
+//
+// Clearing a note DELETED its key, which makes the deletion invisible to the
+// merge: it sees only "local has no note, remote has one" and restores the
+// remote copy. The note came back on the very next sync, in both directions —
+// a monthly note could not be deleted at all while cloud sync was on. The fix
+// keeps a timestamped EMPTY record as the deletion's tombstone; the merge lets
+// the newer side win and drops the key once both sides are empty, so the
+// tombstone self-prunes after the devices converge.
+console.log("TEST 89: A Deleted Monthly Note Stays Deleted Across A Merge");
+{
+  const base = {
+    transactions: {}, monthlyBalances: {}, recurringTransactions: [],
+    skippedTransactions: {}, movedTransactions: {}, debts: [],
+    cashInfusions: [], savingsGoals: [], monthlyNotes: {},
+    debtSnowballSettings: { dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false },
+    _deletedItems: {}, lastUpdated: "2026-08-01T00:00:00.000Z",
+  };
+  const note = (text, at) => ({ text, _lastModified: at });
+  const OLD = "2026-08-01T00:00:00.000Z";
+  const NEW = "2026-08-20T00:00:00.000Z";
+  const fresh = () => {
+    localStorage.clear();
+    const store = new TransactionStore();
+    store.resetData();
+    return [store, new CloudSync(store, () => {})];
+  };
+  const textOf = (merged) =>
+    (merged.monthlyNotes["2026-08"] && merged.monthlyNotes["2026-08"].text) || "";
+
+  // The deletion, in each direction.
+  {
+    const [store, sync] = fresh();
+    store.setMonthlyNotes("2026-08", "Car insurance due");
+    store.setMonthlyNotes("2026-08", "");
+    const merged = sync._mergeData(store.exportData(), {
+      ...base, monthlyNotes: { "2026-08": note("Car insurance due", OLD) },
+    });
+    if (textOf(merged)) {
+      throw new Error(`a locally cleared note was restored from remote: "${textOf(merged)}"`);
+    }
+    store.cancelPendingSave();
+  }
+  {
+    const [store, sync] = fresh();
+    store.setMonthlyNotes("2026-08", "Car insurance due");
+    const local = store.exportData();
+    local.monthlyNotes["2026-08"]._lastModified = OLD;
+    const merged = sync._mergeData(local, {
+      ...base, monthlyNotes: { "2026-08": note("", NEW) },
+    });
+    if (textOf(merged)) {
+      throw new Error(`a remotely cleared note was restored from local: "${textOf(merged)}"`);
+    }
+    store.cancelPendingSave();
+  }
+
+  // A note the other side simply has not seen yet must still be kept — that is
+  // the ordinary case, and it reads as "empty with time 0" on the naive side.
+  {
+    const [store, sync] = fresh();
+    const merged = sync._mergeData(store.exportData(), {
+      ...base, monthlyNotes: { "2026-08": note("Remote only", NEW) },
+    });
+    if (textOf(merged) !== "Remote only") {
+      throw new Error(`a remote-only note was dropped: "${textOf(merged)}"`);
+    }
+    store.cancelPendingSave();
+  }
+  {
+    const [store, sync] = fresh();
+    store.setMonthlyNotes("2026-08", "Local only");
+    const merged = sync._mergeData(store.exportData(), base);
+    if (textOf(merged) !== "Local only") {
+      throw new Error(`a local-only note was dropped: "${textOf(merged)}"`);
+    }
+    store.cancelPendingSave();
+  }
+
+  // Re-writing a note after the other side cleared it must win.
+  {
+    const [store, sync] = fresh();
+    store.setMonthlyNotes("2026-08", "Rewritten");
+    const merged = sync._mergeData(store.exportData(), {
+      ...base, monthlyNotes: { "2026-08": note("", OLD) },
+    });
+    if (textOf(merged) !== "Rewritten") {
+      throw new Error(`a rewrite after a remote clear was lost: "${textOf(merged)}"`);
+    }
+    store.cancelPendingSave();
+  }
+
+  // Once both sides agree the note is gone, the tombstone itself is dropped.
+  {
+    const [store, sync] = fresh();
+    store.setMonthlyNotes("2026-08", "Gone");
+    store.setMonthlyNotes("2026-08", "");
+    const merged = sync._mergeData(store.exportData(), {
+      ...base, monthlyNotes: { "2026-08": note("", OLD) },
+    });
+    if (merged.monthlyNotes["2026-08"] !== undefined) {
+      throw new Error("a converged deletion left its tombstone behind forever");
+    }
+    store.cancelPendingSave();
+  }
+
+  // Two genuine, different edits still produce the conflict marker.
+  {
+    const [store, sync] = fresh();
+    store.setMonthlyNotes("2026-08", "Local text");
+    const merged = sync._mergeData(store.exportData(), {
+      ...base, monthlyNotes: { "2026-08": note("Remote text", NEW) },
+    });
+    const text = textOf(merged);
+    if (!text.includes("SYNC CONFLICT") || !text.includes("Local text") || !text.includes("Remote text")) {
+      throw new Error(`conflicting edits stopped producing a conflict marker: "${text}"`);
+    }
+    store.cancelPendingSave();
+  }
+
+  // And the store still reports a cleared month as having no notes.
+  {
+    const [store] = fresh();
+    store.setMonthlyNotes("2026-08", "Something");
+    store.setMonthlyNotes("2026-08", "");
+    if (store.hasMonthlyNotes("2026-08") !== false) {
+      throw new Error("a cleared month still reports as having notes (the ★ would stay)");
+    }
+    if (store.getMonthlyNotes("2026-08") !== "") {
+      throw new Error("a cleared month reads back non-empty text");
+    }
+    store.cancelPendingSave();
+  }
+
+  // A tombstone is only for a REAL deletion. Opening Notes on a blank month and
+  // pressing Save must not stamp a record (or schedule a push) for nothing.
+  {
+    const [store] = fresh();
+    store.setMonthlyNotes("2026-09", "");
+    store.setMonthlyNotes("2026-10", "   ");
+    const stamped = Object.keys(store.monthlyNotes);
+    if (stamped.length !== 0) {
+      throw new Error(
+        `saving an empty note over a blank month created record(s): ${stamped}`
+      );
+    }
+    store.cancelPendingSave();
+  }
+
+  console.log("✅ Note deletions propagate both ways, self-prune, and don't disturb real edits");
+}
+
+// TEST 90: one non-string description must not kill bank reconciliation.
+//
+// _appPayeeVocabulary reads descriptions STRAIGHT off stored transactions and
+// fed them to _normalizeMerchant, which called .replace on them. Nothing
+// coerces `description` on the way in from an import or a cloud merge — which
+// is why every other read surface in the app guards with
+// `typeof === "string"` — so one number or object in the dataset threw a
+// TypeError out of _run(). _handleFile catches that and reports "Could not read
+// that CSV file", blaming a statement that is perfectly fine, and
+// reconciliation stays dead until the offending row is found by hand.
+console.log("TEST 90: A Non-String Description Doesn't Break Reconciliation");
+{
+  const BAD = [42, {}, [], true, { text: "x" }, 0.5];
+
+  BAD.forEach((badDescription) => {
+    localStorage.clear();
+    const store = new TransactionStore();
+    store.resetData();
+    store.importData({
+      transactions: {
+        "2026-08-10": [
+          { id: "good", amount: 25, type: "expense", description: "PUBLIX",
+            _lastModified: new Date().toISOString() },
+          { id: "bad", amount: 30, type: "expense", description: badDescription,
+            _lastModified: new Date().toISOString() },
+        ],
+      },
+      monthlyBalances: {},
+      recurringTransactions: [
+        { id: "r1", amount: 50, type: "expense", description: badDescription,
+          recurrence: "monthly", startDate: "2026-08-01",
+          _lastModified: new Date().toISOString() },
+      ],
+      debts: [], cashInfusions: [], savingsGoals: [],
+      skippedTransactions: {}, movedTransactions: {}, monthlyNotes: {},
+      debtSnowballSettings: { dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false },
+      lastUpdated: new Date().toISOString(),
+    });
+    const manager = new RecurringTransactionManager(store);
+    const reconcile = new BankReconcileUI(store, manager, () => {}, () => {});
+    const bankRows = [
+      { date: "2026-08-10", postedDate: "2026-08-10", signed: -25,
+        description: "PUBLIX #1234", pending: false, matched: false },
+      { date: "2026-08-11", postedDate: "2026-08-11", signed: -99.5,
+        description: "AMAZON MKTPLACE", pending: false, matched: false },
+    ];
+    try {
+      reconcile._run(bankRows);
+    } catch (error) {
+      throw new Error(
+        `a description of ${JSON.stringify(badDescription)} broke reconciliation: ${error.message}`
+      );
+    }
+    if (!reconcile.result) {
+      throw new Error(
+        `reconciliation produced no report with a description of ${JSON.stringify(badDescription)}`
+      );
+    }
+    // The good line still reconciles — the bad row must not suppress matching.
+    if (reconcile.result.matchedCount < 1) {
+      throw new Error(
+        `the healthy PUBLIX line stopped matching alongside a description of ` +
+          `${JSON.stringify(badDescription)}`
+      );
+    }
+    // ...and the junk never becomes a payee the block guard trusts.
+    const vocab = reconcile._appPayeeVocabulary();
+    if (vocab.has("OBJECT") || vocab.has("TRUE")) {
+      throw new Error(
+        `a coerced non-string description seeded the payee vocabulary: ${[...vocab]}`
+      );
+    }
+    store.cancelPendingSave();
+  });
+
+  console.log(`✅ ${BAD.length} non-string description shapes reconcile cleanly`);
+}
+
+// TEST 91: the render must be stable on every awkward "today".
+//
+// Almost every rule in this app is written against `new Date()` — the
+// projection starts at today+1, allocations roll forward to today, buckets are
+// superseded by the latest occurrence on/before today, minimums before the
+// projection start are historical facts. Those boundaries are only ever
+// exercised on whatever day the suite happens to run, so a month-end,
+// leap-day, DST or year-end bug can sit for months. (One already did: on the
+// last day of a month the projection starts next month, so the daily walk never
+// visits the view month — that produced "$0 / all paid off".) Freeze the clock
+// and re-assert the invariants the rest of the suite pins for "some Tuesday".
+console.log("TEST 91: Every Awkward 'Today' Renders Stably");
+{
+  const RealDate = global.Date;
+  const freeze = (y, m, d) => {
+    const fixedMs = new RealDate(y, m, d, 10, 0, 0).getTime();
+    class FrozenDate extends RealDate {
+      constructor(...args) {
+        if (args.length === 0) super(fixedMs);
+        else super(...args);
+      }
+      static now() { return fixedMs; }
+    }
+    global.Date = FrozenDate;
+  };
+
+  const BOUNDARIES = [
+    [2026, 0, 31, "Jan 31 — last day of a 31-day month"],
+    [2026, 1, 28, "Feb 28 — last day of a short month"],
+    [2028, 1, 29, "Feb 29 — leap day"],
+    [2026, 2, 8, "Mar 8 — US DST spring forward"],
+    [2026, 10, 1, "Nov 1 — US DST fall back"],
+    [2026, 11, 31, "Dec 31 — last day of the year"],
+    [2027, 0, 1, "Jan 1 — first day of the year"],
+    [2026, 3, 30, "Apr 30 — last day of a 30-day month"],
+    [2026, 5, 15, "Jun 15 — an ordinary mid-month control"],
+  ];
+
+  try {
+    BOUNDARIES.forEach(([year, month, day, label]) => {
+      freeze(year, month, day);
+      const ds = (y, m, d) =>
+        `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+      const stamp = new Date().toISOString();
+
+      localStorage.clear();
+      const store = new TransactionStore();
+      store.resetData();
+      store.importData({
+        transactions: {
+          [ds(year, month, Math.min(day, 5))]: [
+            { id: "anchor", amount: 2500, type: "balance",
+              description: "Ending Balance", _lastModified: stamp },
+            { id: "unsettled", amount: 300, type: "expense", description: "Rent",
+              settled: false, _lastModified: stamp },
+          ],
+        },
+        monthlyBalances: {},
+        recurringTransactions: [
+          { id: "pay", amount: 1000, type: "income", description: "Paycheck",
+            recurrence: "bi-weekly", startDate: ds(year, month - 2, 3),
+            _lastModified: stamp },
+          { id: "bucket", amount: 150, type: "expense", description: "Bucket",
+            recurrence: "monthly", startDate: ds(year, month - 3, 28),
+            allocated: true, settled: true, _lastModified: stamp },
+          { id: "lastday", amount: 40, type: "expense", description: "Last day bill",
+            recurrence: "monthly", startDate: ds(year, month - 2, 28),
+            lastDayOfMonth: true, businessDayAdjustment: "previous",
+            _lastModified: stamp },
+        ],
+        debts: [
+          { id: "d0", name: "Card", balance: 1200, minPayment: 60, dueDay: 12,
+            recurrence: "monthly", dueStartDate: ds(year, month - 1, 12),
+            interestRate: 18, _lastModified: stamp },
+        ],
+        cashInfusions: [], savingsGoals: [], skippedTransactions: {},
+        movedTransactions: {}, monthlyNotes: {},
+        debtSnowballSettings: { dailyFloor: 50, extraPaymentStartMonth: "", autoGenerate: true },
+        lastUpdated: stamp,
+      });
+
+      const manager = new RecurringTransactionManager(store);
+      const calc = new CalculationService(store, manager);
+      const snowball = new DebtSnowballUI(store, manager, () => {}, calc);
+      const render = (vy = year, vm = month) => {
+        store.autoSettleExpiredRecurring();
+        const closed = store.closeOutExpiredAllocations();
+        store.rollForwardAllocations();
+        if (closed) manager.invalidateCache();
+        manager.applyRecurringTransactions(vy, vm);
+        snowball.ensureSnowballPaymentsForHorizon(vy, vm);
+        calc.updateMonthlyBalances(new Date(vy, vm, 1, 12, 0, 0));
+      };
+      const persisted = () =>
+        JSON.stringify(store._filterPersistedTransactions(store.getTransactions()));
+
+      render();
+      const min1 = calc.calculateMinimum();
+      const shape1 = persisted();
+
+      render();
+      const min2 = calc.calculateMinimum();
+      const shape2 = persisted();
+
+      render(year, month + 2);
+      render(year, month - 2);
+      render(year, month);
+      const min3 = calc.calculateMinimum();
+
+      if (!Number.isFinite(min1)) {
+        throw new Error(`${label}: the 30-day Minimum is not finite (${min1})`);
+      }
+      if (Math.abs(min1 - min2) > 0.005) {
+        throw new Error(`${label}: the Minimum moved on a repeat render: ${min1} -> ${min2}`);
+      }
+      if (shape1 !== shape2) {
+        throw new Error(`${label}: a repeat render changed the persisted data`);
+      }
+      if (Math.abs(min1 - min3) > 0.005) {
+        throw new Error(`${label}: the Minimum moved just by navigating: ${min1} -> ${min3}`);
+      }
+      const balances = store.getMonthlyBalances();
+      Object.keys(balances).forEach((key) => {
+        if (key.includes("NaN")) {
+          throw new Error(`${label}: produced a junk month key ${key}`);
+        }
+        if (
+          !Number.isFinite(balances[key].startingBalance) ||
+          !Number.isFinite(balances[key].endingBalance)
+        ) {
+          throw new Error(`${label}: month ${key} has a non-finite balance`);
+        }
+      });
+      // Exactly one past bucket of the rolling series stays live on any day.
+      const todayStr = Utils.formatDateString(new Date());
+      const transactions = store.getTransactions();
+      const liveBuckets = Object.keys(transactions)
+        .filter((d) => d <= todayStr)
+        .filter((d) => transactions[d].some((t) => t.recurringId === "bucket"));
+      if (liveBuckets.length !== 1) {
+        throw new Error(
+          `${label}: ${liveBuckets.length} past rolling buckets live (${liveBuckets}); expected 1`
+        );
+      }
+      store.cancelPendingSave();
+    });
+  } finally {
+    global.Date = RealDate;
+  }
+
+  console.log(`✅ ${BOUNDARIES.length} boundary dates render stably (month ends, leap day, DST, year turn)`);
+}
+
+// TEST 92: a non-string debt name must not take the calendar down.
+//
+// `debt.name` is compared with localeCompare in two tiebreaks — the historical
+// snapshot's smallest-balance-first infusion distribution, and the plan list's
+// clearance ordering — and both fire whenever two debts sit at the SAME
+// remaining balance. _normalizeDebt coerced every other field but not `name`
+// (its siblings _normalizeSavingsGoal / _normalizeCashInfusion always have), so
+// a number or object from an import or a cloud merge threw there. The snapshot
+// path runs inside the calendar render (generateCalendar →
+// ensureSnowballPaymentsForHorizon → the projection), so one bad name took the
+// whole app down to a blank page — the same failure shape as the unparseable
+// recurring startDate.
+console.log("TEST 92: A Non-String Debt Name Doesn't Break The Render");
+{
+  const BAD_NAMES = [42, {}, [], true, null, undefined, 0, { name: "x" }];
+  const now = new Date();
+  const Y = now.getFullYear();
+  const M = now.getMonth();
+  const ds = (y, m, d) =>
+    `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+
+  BAD_NAMES.forEach((badName) => {
+    localStorage.clear();
+    const store = new TransactionStore();
+    store.resetData();
+    const stamp = new Date().toISOString();
+    store.importData({
+      transactions: {
+        [ds(Y, M, 5)]: [
+          { id: "a", amount: 300, type: "expense", description: "Rent", _lastModified: stamp },
+        ],
+      },
+      monthlyBalances: {},
+      recurringTransactions: [],
+      // EQUAL balances on purpose: that is what reaches the name tiebreak.
+      debts: [
+        { id: "d0", name: "Real Card", balance: 1000, minPayment: 50, dueDay: 5,
+          recurrence: "monthly", dueStartDate: ds(Y, M - 1, 5), interestRate: 12,
+          _lastModified: stamp },
+        { id: "d1", name: badName, balance: 1000, minPayment: 40, dueDay: 9,
+          recurrence: "monthly", dueStartDate: ds(Y, M - 1, 9), interestRate: 9,
+          _lastModified: stamp },
+      ],
+      // An untargeted infusion is what triggers distributeAuto's ordering.
+      cashInfusions: [
+        { id: "c0", name: "Bonus", amount: 500, date: ds(Y, M, 10), targetDebtId: null },
+      ],
+      savingsGoals: [], skippedTransactions: {}, movedTransactions: {}, monthlyNotes: {},
+      debtSnowballSettings: { dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: true },
+      lastUpdated: stamp,
+    });
+
+    const stored = store.getDebts().find((d) => d.id === "d1");
+    if (typeof stored.name !== "string") {
+      throw new Error(
+        `_normalizeDebt left a ${typeof stored.name} name on the debt (${JSON.stringify(badName)})`
+      );
+    }
+
+    const manager = new RecurringTransactionManager(store);
+    const calc = new CalculationService(store, manager);
+    const snowball = new DebtSnowballUI(store, manager, () => {}, calc);
+    try {
+      // The exact chain a calendar render walks.
+      snowball.ensureSnowballPaymentsForHorizon(Y, M);
+      calc.updateMonthlyBalances(new Date(Y, M, 1, 12, 0, 0));
+      const minimum = calc.calculateMinimum();
+      if (!Number.isFinite(minimum)) {
+        throw new Error(`the 30-day Minimum went non-finite (${minimum})`);
+      }
+      // ...and the two paths that actually reach the tiebreak.
+      snowball.getHistoricalDebtSnapshot(new Date(Y, M + 1, 1));
+      const projection = snowball.calculateSnowballProjection(Y, M, true);
+      snowball.calculateInfusionAllocations(projection);
+    } catch (error) {
+      throw new Error(
+        `a debt name of ${JSON.stringify(badName)} broke the render chain: ${error.message}`
+      );
+    }
+    store.cancelPendingSave();
+  });
+
+  console.log(`✅ ${BAD_NAMES.length} non-string debt-name shapes render cleanly`);
+}
+
+// TEST 93: every stored field, in every wrong shape, across every surface.
+//
+// Nothing coerces most fields on the way in from an import or a cloud merge —
+// only the money guards (_repairWalkAmounts) and the domain normalizers do —
+// so every read surface has to defend itself with `typeof`. Three separate
+// bugs came from a surface that forgot: _normalizeMerchant's `.replace` (bank
+// reconciliation reported "Could not read that CSV file" about a perfectly good
+// statement), the debt-name localeCompare tiebreak (the CALENDAR RENDER threw),
+// and hasMonthlyNotes' `.trim()` (the render again). Each was one field, one
+// shape, one call — invisible to a reader and to every scenario test, because
+// the scenario tests all build well-typed fixtures.
+//
+// So: put a wrong-typed value in EVERY field the app reads, one field at a
+// time, and walk every surface that can be driven headlessly. The dataset is
+// deliberately small (debts clear within a few projected months) to keep this
+// affordable; validated non-vacuous by reverting each fix and watching the
+// matching field/shape pair light up.
+console.log("TEST 93: Every Stored Field Survives Every Wrong Shape");
+{
+  const now = new Date();
+  const Y = now.getFullYear();
+  const M = now.getMonth();
+  const ds = (y, m, d) =>
+    `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  // A number and a plain object cover every failure this has ever produced;
+  // more shapes only multiply the runtime.
+  const BAD = [42, {}];
+
+  const basePayload = () => {
+    const stamp = new Date().toISOString();
+    return {
+      transactions: {
+        [ds(Y, M, 3)]: [
+          { id: "anchor", amount: 2000, type: "balance", description: "Ending Balance", _lastModified: stamp },
+        ],
+        [ds(Y, M, 5)]: [
+          { id: "t1", amount: 120, type: "expense", description: "Rent", settled: false, _lastModified: stamp },
+          { id: "t2", amount: 80, type: "expense", description: "Bucket", allocated: true,
+            settled: true, autoCloseout: true, closeoutDate: ds(Y, M, 20), _lastModified: stamp },
+          { id: "t3", amount: 30, type: "expense", description: "Draw", settled: true,
+            drawsFromAllocationId: "t2", drawsFromRecurringId: "r1",
+            drawsFromPeriodDate: ds(Y, M, 5), _lastModified: stamp },
+          { id: "t4", amount: 900, type: "income", description: "Pay", _lastModified: stamp },
+        ],
+        [ds(Y, M, 9)]: [
+          { id: "t5", amount: 60, type: "expense", description: "Debt Payment: Card",
+            debtId: "d0", debtRole: "minimum", recurringId: "rd", modifiedInstance: true,
+            originalDate: ds(Y, M, 8), _lastModified: stamp },
+        ],
+      },
+      monthlyBalances: {},
+      recurringTransactions: [
+        { id: "r1", amount: 150, type: "expense", description: "Bucket series",
+          recurrence: "monthly", startDate: ds(Y, M - 2, 5), allocated: true, settled: true,
+          _lastModified: stamp },
+        { id: "r2", amount: 500, type: "income", description: "Salary", recurrence: "bi-weekly",
+          startDate: ds(Y, M - 2, 1), businessDayAdjustment: "previous", _lastModified: stamp },
+        { id: "rd", amount: 60, type: "expense", description: "Debt Payment: Card",
+          recurrence: "monthly", startDate: ds(Y, M - 1, 8), debtId: "d0", debtRole: "minimum",
+          debtName: "Card", _lastModified: stamp },
+      ],
+      debts: [
+        { id: "d0", name: "Card", balance: 120, minPayment: 60, dueDay: 8, recurrence: "monthly",
+          dueStartDate: ds(Y, M - 1, 8), interestRate: 18, minRecurringId: "rd", _lastModified: stamp },
+        { id: "d1", name: "Loan", balance: 100, minPayment: 40, dueDay: 15, recurrence: "monthly",
+          dueStartDate: ds(Y, M - 1, 15), interestRate: 9, _lastModified: stamp },
+        // Two debts IDENTICAL apart from their id, so nothing can make their
+        // balances diverge and the smallest-first ordering MUST fall through to
+        // the name tiebreak. Without a guaranteed tie this sweep never reaches
+        // localeCompare and quietly proves nothing there.
+        { id: "d2", name: "Twin A", balance: 70, minPayment: 0, dueDay: 20, recurrence: "monthly",
+          dueStartDate: ds(Y, M - 1, 20), interestRate: 0, _lastModified: stamp },
+        { id: "d3", name: "Twin B", balance: 70, minPayment: 0, dueDay: 20, recurrence: "monthly",
+          dueStartDate: ds(Y, M - 1, 20), interestRate: 0, _lastModified: stamp },
+      ],
+      // An UNtargeted infusion is what makes the snapshot distribute (and tie).
+      cashInfusions: [
+        { id: "c0", name: "Bonus", amount: 400, date: ds(Y, M, 12), targetDebtId: null, _lastModified: stamp },
+      ],
+      savingsGoals: [
+        { id: "g0", name: "Trip", targetAmount: 1000, targetDate: ds(Y, M + 3, 1), saved: 200, _lastModified: stamp },
+      ],
+      skippedTransactions: { [ds(Y, M - 1, 5)]: ["r1"] },
+      movedTransactions: {
+        ["r2-" + ds(Y, M, 1)]: { recurringId: "r2", fromDate: ds(Y, M, 1), toDate: ds(Y, M, 2), movedAt: stamp },
+      },
+      monthlyNotes: { [`${Y}-${String(M + 1).padStart(2, "0")}`]: { text: "note", _lastModified: stamp } },
+      debtSnowballSettings: { dailyFloor: 5, extraPaymentStartMonth: "", autoGenerate: true },
+      lastUpdated: stamp,
+    };
+  };
+
+  const exercise = (payload) => {
+    localStorage.clear();
+    const store = new TransactionStore();
+    store.resetData();
+    store.importData(payload);
+    const manager = new RecurringTransactionManager(store);
+    const calc = new CalculationService(store, manager);
+    const snowball = new DebtSnowballUI(store, manager, () => {}, calc);
+    const reconcile = new BankReconcileUI(store, manager, () => {}, () => {});
+    const monthKey = `${Y}-${String(M + 1).padStart(2, "0")}`;
+
+    store.autoSettleExpiredRecurring();
+    store.closeOutExpiredAllocations();
+    store.rollForwardAllocations();
+    manager.applyRecurringTransactions(Y, M);
+    snowball.ensureSnowballPaymentsForHorizon(Y, M);
+    calc.updateMonthlyBalances(new Date(Y, M, 1, 12, 0, 0));
+    calc.calculateMinimum();
+    calc.getMinimumBalanceThrough(ds(Y, M + 3, 1));
+    calc.getDayBalanceBreakdown(ds(Y, M, 5));
+    calc.getCarriedUnsettledList(ds(Y, M, 20));
+    store.getAllocations();
+    store.getFreeFundsAllocation();
+    store.getUnsettledTransactions();
+    store.getAllocationFloorSuggestion("r1");
+    store.hasMonthlyNotes(monthKey);
+    store.getMonthlyNotes(monthKey);
+    snowball.getHistoricalDebtSnapshot(new Date(Y, M + 1, 1));
+    snowball.getDebtSummaries(new Date(Y, M + 1, 1));
+    const projection = snowball.calculateSnowballProjection(Y, M, true);
+    snowball.calculateInfusionAllocations(projection);
+    snowball.getPayoffDates();
+    snowball.cleanupOrphanedDebtMinimums();
+    reconcile._appPayeeVocabulary();
+    reconcile._run([
+      { date: ds(Y, M, 5), postedDate: ds(Y, M, 5), signed: -120, description: "RENT CO", pending: false, matched: false },
+      { date: ds(Y, M, 9), postedDate: ds(Y, M, 10), signed: -60, description: "CARD PMT", pending: false, matched: false },
+    ]);
+    store.cancelPendingSave();
+  };
+
+  const SURFACES = [
+    ["transaction", ["type", "description", "settled", "allocated", "hidden", "recurringId",
+      "originalDate", "movedFrom", "originalRecurringId", "drawsFromAllocationId",
+      "drawsFromRecurringId", "drawsFromPeriodDate", "drawAmount", "debtId", "debtRole",
+      "debtName", "closeoutDate", "autoCloseout", "snowballMonth", "snowballGenerated",
+      "modifiedInstance", "_lastModified", "id"],
+      (p, f, v) => Object.values(p.transactions).forEach((list) => list.forEach((t) => { t[f] = v; }))],
+    ["recurring", ["type", "description", "recurrence", "startDate", "endDate", "daySpecific",
+      "daySpecificData", "semiMonthlyDays", "semiMonthlyLastDay", "customInterval",
+      "lastDayOfMonth", "businessDayAdjustment", "allocated", "autoCloseout", "freeFunds",
+      "autoAdjustFloor", "floorAmount", "settled", "debtId", "debtRole", "debtName",
+      "maxOccurrences", "_lastModified", "id"],
+      (p, f, v) => p.recurringTransactions.forEach((r) => { r[f] = v; })],
+    ["debt", ["name", "balance", "minPayment", "dueDay", "dueDayPattern", "recurrence",
+      "dueStartDate", "businessDayAdjustment", "semiMonthlyDays", "semiMonthlyLastDay",
+      "customInterval", "endDate", "maxOccurrences", "interestRate", "minRecurringId",
+      "_lastModified", "id"],
+      (p, f, v) => p.debts.forEach((d) => { d[f] = v; })],
+    ["infusion", ["name", "amount", "date", "targetDebtId", "_lastModified", "id"],
+      (p, f, v) => p.cashInfusions.forEach((i) => { i[f] = v; })],
+    ["goal", ["name", "targetAmount", "targetDate", "saved", "_lastModified", "id"],
+      (p, f, v) => p.savingsGoals.forEach((g) => { g[f] = v; })],
+    ["move", ["recurringId", "fromDate", "toDate", "movedAt"],
+      (p, f, v) => Object.values(p.movedTransactions).forEach((mv) => { mv[f] = v; })],
+    ["note", ["text", "_lastModified"],
+      (p, f, v) => Object.values(p.monthlyNotes).forEach((n) => { n[f] = v; })],
+  ];
+
+  let runs = 0;
+  SURFACES.forEach(([label, fields, mutate]) => {
+    fields.forEach((field) => {
+      BAD.forEach((bad) => {
+        const payload = basePayload();
+        mutate(payload, field, bad);
+        runs++;
+        try {
+          exercise(payload);
+        } catch (error) {
+          const frame = ((error.stack || "").split("\n")[1] || "").trim();
+          throw new Error(
+            `${label}.${field} = ${JSON.stringify(bad)} threw: ${error.message}` +
+              (frame ? `\n    ${frame}` : "")
+          );
+        }
+      });
+    });
+  });
+
+  console.log(`✅ ${runs} field/shape combinations walk every headless surface without throwing`);
+}
+
+// TEST 94: bank-reconcile actions must leave every other component consistent.
+//
+// The reconcile report's buttons are the app's only mutations that reach across
+// three components at once: they rewrite the transactions map through
+// TransactionStore, skip/move recurring occurrences through
+// RecurringTransactionManager, and then re-render. Each one is covered
+// individually somewhere; what is NOT covered is what they leave behind for
+// everyone else — an allocation whose reserve no longer matches what was spent,
+// a persisted row that lost its id (which _mergeById silently drops on the next
+// sync), a duplicate id across two dates, or a balance that only survives until
+// the next reload.
+console.log("TEST 94: Reconcile Actions Leave Every Component Consistent");
+{
+  const now = new Date();
+  const Y = now.getFullYear();
+  const M = now.getMonth();
+  const ds = (y, m, d) =>
+    `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+
+  const makeContext = () => {
+    localStorage.clear();
+    const stamp = new Date().toISOString();
+    const store = new TransactionStore();
+    store.resetData();
+    store.importData({
+      transactions: {
+        [ds(Y, M, 3)]: [
+          { id: "anchor", amount: 1800, type: "balance", description: "Ending Balance", _lastModified: stamp },
+        ],
+        [ds(Y, M, 7)]: [
+          { id: "u1", amount: 64.2, type: "expense", description: "PUBLIX", settled: false, _lastModified: stamp },
+          { id: "b1", amount: 150, type: "expense", description: "Grocery Bucket",
+            allocated: true, settled: true, _lastModified: stamp },
+        ],
+        [ds(Y, M, 12)]: [
+          { id: "i1", amount: 1200, type: "income", description: "Paycheck", _lastModified: stamp },
+        ],
+      },
+      monthlyBalances: {},
+      recurringTransactions: [
+        { id: "rw", amount: 22.5, type: "expense", description: "NETFLIX",
+          recurrence: "monthly", startDate: ds(Y, M - 1, 9), _lastModified: stamp },
+        // First occurrence THIS month, so _seriesShiftable actually offers the
+        // whole-series shift — otherwise that mutation path is silently skipped.
+        { id: "rs", amount: 15.75, type: "expense", description: "SPOTIFY",
+          recurrence: "monthly", startDate: ds(Y, M, 18), _lastModified: stamp },
+      ],
+      debts: [], cashInfusions: [], savingsGoals: [],
+      skippedTransactions: {}, movedTransactions: {}, monthlyNotes: {},
+      debtSnowballSettings: { dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false },
+      lastUpdated: stamp,
+    });
+    // The drawing expense goes in through addTransaction, NOT the import, so
+    // the bucket is actually debited — importing a row that merely CLAIMS a
+    // draw leaves the store inconsistent and the first mutation then "fixes"
+    // it, which reads as a change and masks what the mutation really did.
+    store.addTransaction(ds(Y, M, 7), {
+      amount: 40, type: "expense", description: "Groceries", settled: false,
+      drawsFromAllocationId: "b1",
+    });
+    const manager = new RecurringTransactionManager(store);
+    const calc = new CalculationService(store, manager);
+    const render = () => {
+      manager.applyRecurringTransactions(Y, M);
+      calc.updateMonthlyBalances(new Date(Y, M, 1, 12, 0, 0));
+    };
+    const reconcile = new BankReconcileUI(store, manager, render, () => {});
+    render();
+    return { store, manager, calc, reconcile, render };
+  };
+
+  const bucketRemaining = (store) => {
+    const bucket = store.getAllocations().find((a) => a.description === "Grocery Bucket");
+    return bucket ? bucket.remaining : null;
+  };
+  const drawnTotal = (store) => {
+    let total = 0;
+    const transactions = store.getTransactions();
+    Object.keys(transactions).forEach((d) =>
+      transactions[d].forEach((t) => {
+        if (t.drawsFromAllocationId) total += Number(t.drawAmount) || 0;
+      })
+    );
+    return Math.round(total * 100) / 100;
+  };
+  // Conservation alone cannot tell "the draw moved with the row" from "the draw
+  // was dropped and the bucket refunded" — both keep bucket+drawn constant.
+  const drawerCount = (store) => {
+    let n = 0;
+    const transactions = store.getTransactions();
+    Object.keys(transactions).forEach((d) =>
+      transactions[d].forEach((t) => { if (t.drawsFromAllocationId) n++; })
+    );
+    return n;
+  };
+  const persistedIds = (store) => {
+    const persisted = store._filterPersistedTransactions(store.getTransactions());
+    const ids = [];
+    Object.keys(persisted).forEach((d) => persisted[d].forEach((t) => ids.push(t.id)));
+    return ids;
+  };
+  const monthBalances = (calc) => {
+    const daysInMonth = new Date(Y, M + 1, 0).getDate();
+    const out = [];
+    for (let d = 1; d <= daysInMonth; d++) out.push(calc.getRunningBalanceForDate(ds(Y, M, d)));
+    return out;
+  };
+  const sameBalances = (a, b) =>
+    a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) < 0.005);
+
+  const ACTIONS = {
+    "settle on the same day": (c) => {
+      c.reconcile._run([
+        { date: ds(Y, M, 7), postedDate: ds(Y, M, 7), signed: -64.2, description: "PUBLIX #123", pending: false, matched: false },
+        { date: ds(Y, M, 7), postedDate: ds(Y, M, 7), signed: -40.0, description: "GROCERIES CO", pending: false, matched: false },
+      ]);
+      const pairs = c.reconcile.result.clearedUnsettled || [];
+      pairs.slice().forEach((p) => c.reconcile._settle(p));
+      return pairs.length;
+    },
+    "settle onto a later posted date (relocates)": (c) => {
+      c.reconcile._run([
+        { date: ds(Y, M, 7), postedDate: ds(Y, M, 9), signed: -64.2, description: "PUBLIX #123", pending: false, matched: false },
+        { date: ds(Y, M, 7), postedDate: ds(Y, M, 10), signed: -40.0, description: "GROCERIES CO", pending: false, matched: false },
+      ]);
+      const pairs = c.reconcile.result.clearedUnsettled || [];
+      pairs.slice().forEach((p) => c.reconcile._settle(p));
+      return pairs.length;
+    },
+    "fix a drifted date": (c) => {
+      c.reconcile._run([
+        { date: ds(Y, M, 11), postedDate: ds(Y, M, 11), signed: -22.5, description: "NETFLIX.COM", pending: false, matched: false },
+      ]);
+      const pair = (c.reconcile.result.dateDrifted || [])[0];
+      if (pair) c.reconcile._fixDate(pair);
+      return pair ? 1 : 0;
+    },
+    "shift a whole series": (c) => {
+      c.reconcile._run([
+        { date: ds(Y, M, 20), postedDate: ds(Y, M, 20), signed: -15.75, description: "SPOTIFY USA", pending: false, matched: false },
+      ]);
+      const pair = (c.reconcile.result.dateDrifted || []).find((p) => p.seriesShiftable);
+      if (pair) c.reconcile._shiftSeries(pair);
+      return pair ? 1 : 0;
+    },
+    "fix an amount": (c) => {
+      c.reconcile._run([
+        { date: ds(Y, M, 7), postedDate: ds(Y, M, 7), signed: -70.0, description: "PUBLIX #123", pending: false, matched: false },
+      ]);
+      const pair = (c.reconcile.result.reviewPairs || [])[0];
+      if (pair) c.reconcile._fixAmount(pair);
+      return pair ? 1 : 0;
+    },
+    "add a missing bank row": (c) => {
+      c.reconcile._run([
+        { date: ds(Y, M, 15), postedDate: ds(Y, M, 15), signed: -31.99, description: "WAWA 4412", pending: false, matched: false },
+      ]);
+      const row = (c.reconcile.result.missingFromApp || [])[0];
+      if (row) c.reconcile._addBankRow(row, true);
+      return row ? 1 : 0;
+    },
+  };
+
+  Object.entries(ACTIONS).forEach(([label, run]) => {
+    const c = makeContext();
+    const bucketBefore = bucketRemaining(c.store);
+    const drawnBefore = drawnTotal(c.store);
+    const drawersBefore = drawerCount(c.store);
+
+    const applied = run(c);
+    // A scenario that produces no pair proves nothing — fail loudly rather than
+    // reporting a pass for a path that never ran.
+    if (!applied) {
+      throw new Error(`"${label}" produced no actionable pair; the path was never exercised`);
+    }
+    c.render();
+
+    const bucketAfter = bucketRemaining(c.store);
+    const drawnAfter = drawnTotal(c.store);
+    if (
+      bucketAfter !== null &&
+      Math.abs(bucketAfter + drawnAfter - (bucketBefore + drawnBefore)) > 0.005
+    ) {
+      throw new Error(
+        `"${label}": the allocation reserve was not conserved — ` +
+          `${bucketBefore}+${drawnBefore} became ${bucketAfter}+${drawnAfter}`
+      );
+    }
+    // None of these actions changes what was SPENT, so the bucket must not move
+    // and no row may quietly stop being billed against it.
+    if (bucketAfter !== null && Math.abs(bucketAfter - bucketBefore) > 0.005) {
+      throw new Error(`"${label}": the bucket's remaining moved ${bucketBefore} -> ${bucketAfter}`);
+    }
+    const drawersAfter = drawerCount(c.store);
+    if (drawersAfter < drawersBefore) {
+      throw new Error(
+        `"${label}": a row stopped drawing from its bucket (${drawersBefore} -> ${drawersAfter})`
+      );
+    }
+
+    const ids = persistedIds(c.store);
+    if (ids.some((id) => !id)) {
+      throw new Error(`"${label}": a persisted row lost its id — _mergeById would drop it on sync`);
+    }
+    const duplicates = [...new Set(ids.filter((id, i) => ids.indexOf(id) !== i))];
+    if (duplicates.length) {
+      throw new Error(`"${label}": the same id lives at two dates: ${duplicates.join(", ")}`);
+    }
+
+    const live = monthBalances(c.calc);
+    if (live.some((v) => !Number.isFinite(v))) {
+      throw new Error(`"${label}": produced a non-finite balance`);
+    }
+    c.render();
+    if (!sameBalances(live, monthBalances(c.calc))) {
+      throw new Error(`"${label}": a repeat render changed the balances`);
+    }
+
+    c.store.saveData(true);
+    const reloaded = new TransactionStore();
+    const reloadedManager = new RecurringTransactionManager(reloaded);
+    const reloadedCalc = new CalculationService(reloaded, reloadedManager);
+    reloadedManager.applyRecurringTransactions(Y, M);
+    reloadedCalc.updateMonthlyBalances(new Date(Y, M, 1, 12, 0, 0));
+    const afterReload = monthBalances(reloadedCalc);
+    if (!sameBalances(live, afterReload)) {
+      const i = live.findIndex((v, j) => Math.abs(v - afterReload[j]) >= 0.005);
+      throw new Error(
+        `"${label}": a reload changed the balance on day ${i + 1}: ${live[i]} -> ${afterReload[i]}`
+      );
+    }
+    c.store.cancelPendingSave();
+    reloaded.cancelPendingSave();
+  });
+
+  console.log(
+    `✅ ${Object.keys(ACTIONS).length} reconcile actions conserve reserves, ids, balances and reloads`
+  );
+}
+
+// TEST 95: an edit made at ANY await boundary of a sync must survive it.
+//
+// TEST 67 pins one such moment (during the merge GET). This walks EVERY await
+// in both saveToCloud and loadFromCloud and injects the user's next keystroke
+// there. That matters because the failure is not "the push is wrong" — it is
+// "the edit is destroyed in memory AND on disk", silently, because the merged
+// result is imported over the live map. Auto-sync pushes ten seconds after
+// every change, so this window is open constantly. Validated by moving the
+// local snapshot back before the round trip (the shape this bug had), which
+// lights up boundaries 2 and 3 with "lost from memory; lost from localStorage".
+async function runAwaitBoundaryRaceTest() {
+  console.log("TEST 95: An Edit At Any Sync Await Boundary Survives");
+
+  const MARK = "TYPED MID-FLIGHT";
+  const EDIT_DATE = "2026-08-20";
+  const hasEdit = (map) =>
+    !!map &&
+    Array.isArray(map[EDIT_DATE]) &&
+    map[EDIT_DATE].some((t) => t.description === MARK);
+
+  const remoteData = () => ({
+    transactions: {
+      "2026-07-01": [
+        { id: "r1", amount: 5, type: "expense", description: "Remote only",
+          _lastModified: "2026-07-01T00:00:00Z" },
+      ],
+    },
+    monthlyBalances: {}, recurringTransactions: [], skippedTransactions: {},
+    movedTransactions: {}, debts: [], cashInfusions: [], savingsGoals: [], monthlyNotes: {},
+    debtSnowballSettings: { dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false },
+    _deletedItems: { transactions: [], recurringTransactions: [], debts: [], cashInfusions: [], savingsGoals: [], skips: [] },
+    lastUpdated: "2026-07-01T00:00:00Z",
+  });
+
+  const prevFetch = global.fetch;
+  const prevDoc = global.document;
+  const prevShow = Utils.showLoading;
+  const prevHide = Utils.hideLoading;
+  Utils.showLoading = () => {};
+  Utils.hideLoading = () => {};
+  global.document = {
+    addEventListener: () => {}, removeEventListener: () => {},
+    querySelector: () => null, getElementById: () => null, querySelectorAll: () => [],
+    createElement: () => ({
+      style: {}, setAttribute() {}, addEventListener() {},
+      textContent: "", title: "", remove() {}, appendChild() {},
+      classList: { add() {}, remove() {} },
+    }),
+    body: { appendChild() {}, classList: { contains: () => false } },
+  };
+
+  const runScenario = async (operation, injectAtStep) => {
+    localStorage.clear();
+    const store = new TransactionStore();
+    store.resetData();
+    store.cancelPendingSave();
+    store.addTransaction("2026-08-01", { amount: 10, type: "expense", description: "Before" });
+    store.flushPendingSave();
+
+    const sync = new CloudSync(store, () => {});
+    if (operation === "load") {
+      // loadFromCloud only merges when it believes local has moved on.
+      sync._lastSyncTime = new Date(Date.now() - 60000);
+      // ...and a merge schedules a push-back 500ms later. That timer would fire
+      // long after this test restored the fetch/document stubs, so the process
+      // would die on a stray saveToCloud with nothing left to talk to.
+      sync.autoSyncEnabled = false;
+    }
+
+    let step = 0;
+    let injected = false;
+    let patchBody = null;
+    const injectEdit = () => {
+      if (injected) return;
+      injected = true;
+      store.addTransaction(EDIT_DATE, { amount: 77.77, type: "expense", description: MARK });
+      store.flushPendingSave();
+    };
+    const boundary = async () => {
+      await new Promise((resolve) => setImmediate(resolve));
+      step++;
+      if (step === injectAtStep) injectEdit();
+    };
+
+    sync.getCloudCredentialsAsync = async () => {
+      await boundary();
+      return { token: "tok", gistId: "gid" };
+    };
+
+    const etagHeaders = { get: () => '"etag-x"' };
+    global.fetch = async (url, opts) => {
+      if (opts && opts.method === "PATCH") {
+        await boundary();
+        patchBody = JSON.parse(opts.body);
+        return { ok: true, status: 200, headers: etagHeaders };
+      }
+      await boundary();
+      return {
+        ok: true, status: 200, headers: etagHeaders,
+        json: async () => {
+          await boundary();
+          return {
+            files: { "cashflow_data.json": { content: JSON.stringify(remoteData()), truncated: false } },
+          };
+        },
+      };
+    };
+
+    if (operation === "save") await sync.saveToCloud(true);
+    else await sync.loadFromCloud(true);
+
+    sync.cancelPendingCloudSave();
+    sync.stopHeartbeat();
+    return { store, injected, patchBody };
+  };
+
+  try {
+    let exercised = 0;
+    for (const operation of ["save", "load"]) {
+      for (let at = 1; at <= 8; at++) {
+        const result = await runScenario(operation, at);
+        // Past the last await of this operation — nothing to test there.
+        if (!result.injected) continue;
+        exercised++;
+        const label = `${operation} @ await #${at}`;
+
+        if (!hasEdit(result.store.getTransactions())) {
+          throw new Error(`${label}: the edit was destroyed in memory`);
+        }
+        const stored = JSON.parse(localStorage.getItem("transactions") || "{}");
+        if (!hasEdit(stored)) {
+          throw new Error(`${label}: the edit was destroyed on disk`);
+        }
+        if (operation === "save") {
+          const pushed = result.patchBody
+            ? JSON.parse(result.patchBody.files["cashflow_data.json"].content).transactions
+            : null;
+          // A push that already happened cannot carry a later edit — but then
+          // the edit must still be pending, so the next sync takes it.
+          const queued =
+            !!result.store.lastUpdated && new Date(result.store.lastUpdated).getTime() > 0;
+          if (!hasEdit(pushed) && !queued) {
+            throw new Error(`${label}: the edit reached neither the cloud copy nor the queue`);
+          }
+        }
+        // ...and the merge itself must not be lost to the race.
+        if (!(result.store.getTransactions()["2026-07-01"] || []).some((t) => t.id === "r1")) {
+          throw new Error(`${label}: the remote-only row was lost`);
+        }
+        result.store.cancelPendingSave();
+      }
+    }
+    if (exercised < 6) {
+      throw new Error(`Setup: only ${exercised} await boundaries were exercised`);
+    }
+    console.log(`✅ ${exercised} sync await boundaries keep a concurrent edit in memory, on disk and in flight`);
+  } finally {
+    global.fetch = prevFetch;
+    global.document = prevDoc;
+    Utils.showLoading = prevShow;
+    Utils.hideLoading = prevHide;
+  }
+}
+
+// TEST 96: a SKIPPED occurrence never supersedes a live allocation bucket.
+//
+// "Which instance of a rolling allocation series is live?" is answered in four
+// places: getAllocations (the drawable list), _reservedTotalIndex (the money the
+// anchors hold back), _collapseSupersededRollingAllocations and
+// closeOutExpiredAllocations (the two sweeps that retire old periods), plus the
+// Allocated modal's own list. The first two excluded SKIPPED occurrences — a
+// skipped period set nothing aside, so it holds no reserve — and the sweeps did
+// not. So skipping this period made the sweeps treat the skipped date as "live"
+// and FORFEIT the previous bucket: the one getAllocations was still offering,
+// with money already drawn from it. It was deleted and tombstoned (so every
+// device followed), its remaining reserve was released into every projected
+// balance, and the expenses billed against it were left dangling.
+console.log("TEST 96: A Skipped Occurrence Never Supersedes A Live Bucket");
+{
+  const now = new Date();
+  const Y = now.getFullYear();
+  const M = now.getMonth();
+  const D = now.getDate();
+  const ds = (y, m, d) =>
+    `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  const todayStr = ds(Y, M, D);
+
+  const setup = () => {
+    localStorage.clear();
+    const stamp = new Date().toISOString();
+    const store = new TransactionStore();
+    store.resetData();
+    store.importData({
+      transactions: {
+        [ds(Y, M, 1)]: [
+          { id: "x", amount: 2000, type: "balance", description: "Ending Balance", _lastModified: stamp },
+        ],
+      },
+      monthlyBalances: {},
+      recurringTransactions: [
+        { id: "rb", amount: 200, type: "expense", description: "Grocery Bucket",
+          recurrence: "weekly", startDate: ds(Y, M - 1, 1),
+          allocated: true, settled: true, _lastModified: stamp },
+      ],
+      debts: [], cashInfusions: [], savingsGoals: [],
+      skippedTransactions: {}, movedTransactions: {}, monthlyNotes: {},
+      debtSnowballSettings: { dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false },
+      lastUpdated: stamp,
+    });
+    const manager = new RecurringTransactionManager(store);
+    const calc = new CalculationService(store, manager);
+    const render = () => {
+      store.closeOutExpiredAllocations();
+      store.rollForwardAllocations();
+      manager.applyRecurringTransactions(Y, M);
+      calc.updateMonthlyBalances(new Date(Y, M, 1, 12, 0, 0));
+    };
+    render();
+    return { store, manager, calc, render };
+  };
+  const bucketOf = (store) => store.getAllocations().find((a) => a.recurringId === "rb");
+
+  // (a) A bucket that has been DRAWN from must survive a skipped later period.
+  {
+    const { store, manager, calc, render } = setup();
+    const live = bucketOf(store);
+    if (!live) throw new Error("setup: no live bucket materialized");
+    store.addTransaction(todayStr, {
+      amount: 50, type: "expense", description: "Groceries",
+      settled: true, drawsFromAllocationId: live.id,
+    });
+    render();
+    const drawn = bucketOf(store);
+    if (!drawn || Math.abs(drawn.remaining - 150) > 0.005) {
+      throw new Error(`setup: the draw did not debit the bucket (${drawn && drawn.remaining})`);
+    }
+    const drawnDate = drawn.date;
+    const drawnId = drawn.id;
+
+    // The next period lands and the user skips it — "we didn't set money aside".
+    const transactions = store.getTransactions();
+    const nextDate = ds(Y, M, Math.min(28, Number(drawnDate.slice(8)) + 1));
+    (transactions[nextDate] = transactions[nextDate] || []).push({
+      amount: 200, type: "expense", description: "Grocery Bucket",
+      recurringId: "rb", allocated: true, settled: true,
+    });
+    manager.toggleSkipTransaction(nextDate, "rb");
+
+    const tombstonesBefore = store._deletedItems.transactions.length;
+    const changed = store.closeOutExpiredAllocations();
+    const after = bucketOf(store);
+    if (!after || after.date !== drawnDate) {
+      throw new Error(
+        `a skipped later occurrence forfeited the drawn-from bucket (was ${drawnDate}, now ${after && after.date})`
+      );
+    }
+    if (Math.abs(after.remaining - 150) > 0.005) {
+      throw new Error(`the drawn-from bucket's remaining changed to ${after.remaining}`);
+    }
+    if (!store.findTransactionById(drawnId)) {
+      throw new Error("the drawn-from bucket row was deleted outright");
+    }
+    if (store._deletedItems.transactions.length > tombstonesBefore) {
+      throw new Error("the sweep tombstoned the live bucket — every device would follow");
+    }
+    void changed;
+
+    // ...and the collapse pass must agree with the sweep.
+    render();
+    const afterRender = bucketOf(store);
+    if (!afterRender || afterRender.date !== drawnDate) {
+      throw new Error("a render collapsed the drawn-from bucket away");
+    }
+    // The reserve the anchors hold back must match the drawable bucket.
+    const reserved = calc.getReservedTotalOnOrBefore(todayStr);
+    if (Math.abs(reserved - afterRender.remaining) > 0.005) {
+      throw new Error(
+        `the reserve index (${reserved}) disagrees with the drawable bucket (${afterRender.remaining})`
+      );
+    }
+    store.cancelPendingSave();
+  }
+
+  // (b) Skipping the LATEST period falls back to the previous one, which still
+  //     holds its reserve — and every reader must say the same thing.
+  {
+    const { store, manager, calc, render } = setup();
+    const transactions = store.getTransactions();
+    const dates = Object.keys(transactions)
+      .filter((d) => d <= todayStr)
+      .filter((d) => transactions[d].some((t) => t.recurringId === "rb"))
+      .sort();
+    const latest = dates[dates.length - 1];
+    if (!latest) throw new Error("setup: no past bucket instance");
+    manager.toggleSkipTransaction(latest, "rb");
+    render();
+
+    const live = bucketOf(store);
+    if (!live) {
+      throw new Error("skipping this period left no drawable bucket at all");
+    }
+    if (live.date === latest) {
+      throw new Error("a skipped occurrence was offered as the drawable bucket");
+    }
+    const reserved = calc.getReservedTotalOnOrBefore(todayStr);
+    if (Math.abs(reserved - live.remaining) > 0.005) {
+      throw new Error(
+        `the reserve index (${reserved}) disagrees with the drawable bucket (${live.remaining})`
+      );
+    }
+    // Stable across renders.
+    render();
+    const again = bucketOf(store);
+    if (!again || again.date !== live.date || Math.abs(again.remaining - live.remaining) > 0.005) {
+      throw new Error("the live bucket moved on a repeat render");
+    }
+    store.cancelPendingSave();
+  }
+
+  console.log("✅ Skipped periods hold no reserve and retire nothing; all five readers agree");
+}
+
+// TEST 97: the snowball's daily floor is normalized wherever it arrives from.
+//
+// The settings form has always rejected a negative floor. Nothing else did:
+// loadData, importData and setDebtSnowballSettings each coerced it with
+// _finiteNumber, which happily keeps a negative. That is not cosmetic — the
+// projection asks whether `forwardMinChecking - dailyFloor` covers a payoff, so
+// a negative floor lets it schedule payoffs that drive the projected balance
+// BELOW zero and then reports a payoff date that cannot happen. One choke point
+// now (_normalizeDailyFloor), used by all three.
+console.log("TEST 97: The Daily Floor Is Normalized Everywhere It Arrives");
+{
+  const CASES = [
+    [-50, 0], [-0.01, 0], [0, 0], [75, 75], [12.5, 12.5],
+    ["-1e999", 0], ["1e999", 0], ["abc", 0], [null, 0], [undefined, 0],
+    [NaN, 0], [-Infinity, 0], [-0, 0],
+  ];
+
+  const base = {
+    transactions: {}, monthlyBalances: {}, recurringTransactions: [], debts: [],
+    cashInfusions: [], savingsGoals: [], skippedTransactions: {},
+    movedTransactions: {}, monthlyNotes: {}, lastUpdated: new Date().toISOString(),
+  };
+
+  CASES.forEach(([input, expected]) => {
+    // (a) through importData
+    localStorage.clear();
+    const imported = new TransactionStore();
+    imported.resetData();
+    imported.importData({
+      ...base,
+      debtSnowballSettings: { dailyFloor: input, extraPaymentStartMonth: "", autoGenerate: false },
+    });
+    const viaImport = imported.getDebtSnowballSettings().dailyFloor;
+    if (viaImport !== expected || Object.is(viaImport, -0)) {
+      throw new Error(
+        `importData kept dailyFloor ${JSON.stringify(input)} as ${viaImport}, expected ${expected}`
+      );
+    }
+
+    // (b) through the setter
+    imported.setDebtSnowballSettings({
+      dailyFloor: input, extraPaymentStartMonth: "", autoGenerate: false,
+    });
+    const viaSetter = imported.getDebtSnowballSettings().dailyFloor;
+    if (viaSetter !== expected || Object.is(viaSetter, -0)) {
+      throw new Error(
+        `setDebtSnowballSettings kept dailyFloor ${JSON.stringify(input)} as ${viaSetter}, expected ${expected}`
+      );
+    }
+
+    // (c) through a reload (loadData reads the value it just wrote, but a blob
+    //     written by an older build can still carry a negative)
+    imported.saveData(false);
+    localStorage.setItem(
+      "debtSnowballSettings",
+      JSON.stringify({ dailyFloor: input, extraPaymentStartMonth: "", autoGenerate: false })
+    );
+    const reloaded = new TransactionStore();
+    const viaLoad = reloaded.getDebtSnowballSettings().dailyFloor;
+    if (viaLoad !== expected || Object.is(viaLoad, -0)) {
+      throw new Error(
+        `loadData kept dailyFloor ${JSON.stringify(input)} as ${viaLoad}, expected ${expected}`
+      );
+    }
+    imported.cancelPendingSave();
+    reloaded.cancelPendingSave();
+  });
+
+  console.log(`✅ ${CASES.length} daily-floor inputs normalize identically through load, import and the setter`);
+}
+
+// TEST 98: two long-standing latent hazards — a null-coerced date comparison,
+// and comparators that never return 0.
+//
+// (a) `Utils.parseDateString(x) <= Utils.parseDateString(y)` looks like a date
+// comparison and is not: `null <= aDate` coerces null to 0 and the date to its
+// timestamp, so it is ALWAYS true. That exact shape blanked the calendar once
+// already (the startDate gate in applyRecurringTransactions). One more site had
+// it — importData's pre-2.0 `isRecurring` binding — where a series with an
+// unparseable startDate matched every legacy row and bound it to the wrong
+// series.
+//
+// (b) `a < b ? -1 : 1` never returns 0, so it tells the engine that two EQUAL
+// keys are each greater than the other. That is an inconsistent comparator: the
+// engine may order them however it likes, and equal keys can come back in a
+// different order than they went in. Three sorts had it. This is a source
+// guard, because the comparators are inline arrow functions with no seam to
+// call — and because the point is to stop the pattern coming back.
+console.log("TEST 98: No Null-Coerced Date Comparisons Or Two-Way Comparators");
+{
+  const jsFiles = fs
+    .readdirSync(jsDir)
+    .filter((f) => f.endsWith(".js"))
+    .map((f) => ({ file: f, src: fs.readFileSync(path.join(jsDir, f), "utf8") }));
+
+  // (a) A parseDateString result compared with <, <=, > or >= against another
+  //     parseDateString result, on one line, with no null guard between them.
+  // Comments are stripped before both scans: the fixes explain each pattern by
+  // quoting it, and a guard that trips on its own explanation is useless.
+  const codeOf = (line) => line.replace(/\/\/.*$/, "");
+  const coerced = [];
+  jsFiles.forEach(({ file, src: source }) => {
+    source.split("\n").forEach((line, i) => {
+      const code = codeOf(line);
+      if (!/parseDateString\([^)]*\)\s*(<=|>=|<|>)\s*(Utils\.)?parseDateString\(/.test(code)) {
+        return;
+      }
+      coerced.push(`${file}:${i + 1}  ${line.trim()}`);
+    });
+  });
+  if (coerced.length) {
+    throw new Error(
+      "parseDateString results compared directly — `null <= aDate` is `0 <= ms`, " +
+        "which is always true:\n  " + coerced.join("\n  ")
+    );
+  }
+
+  // (b) Two-way comparators.
+  const twoWay = [];
+  jsFiles.forEach(({ file, src: source }) => {
+    source.split("\n").forEach((line, i) => {
+      const code = codeOf(line);
+      if (!/\?\s*-1\s*:\s*1\b/.test(code)) return;
+      twoWay.push(`${file}:${i + 1}  ${line.trim()}`);
+    });
+  });
+  if (twoWay.length) {
+    throw new Error(
+      "comparator(s) that never return 0 — equal keys claim to be greater than " +
+        "each other, so their order is implementation-defined:\n  " + twoWay.join("\n  ")
+    );
+  }
+
+  // Vacuity guard: both scans must actually be looking at the sources.
+  const totalLines = jsFiles.reduce((n, f) => n + f.src.split("\n").length, 0);
+  if (jsFiles.length < 20 || totalLines < 15000) {
+    throw new Error(
+      `only ${jsFiles.length} files / ${totalLines} lines scanned; the sweep is not reading the sources`
+    );
+  }
+
+  // And the behaviour behind (a): a series whose startDate cannot be read must
+  // not claim every legacy row.
+  {
+    localStorage.clear();
+    const store = new TransactionStore();
+    store.resetData();
+    store.importData({
+      transactions: {
+        "2026-08-10": [
+          // A pre-2.0 row: no recurringId, just the isRecurring flag.
+          { amount: 50, type: "expense", description: "Gym", isRecurring: true },
+        ],
+      },
+      monthlyBalances: {},
+      recurringTransactions: [
+        { id: "broken", amount: 50, type: "expense", description: "Gym",
+          recurrence: "monthly", startDate: "not-a-date" },
+      ],
+      debts: [], cashInfusions: [], savingsGoals: [], skippedTransactions: {},
+      movedTransactions: {}, monthlyNotes: {},
+      debtSnowballSettings: { dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false },
+      lastUpdated: new Date().toISOString(),
+    });
+    const rows = store.getTransactions()["2026-08-10"] || [];
+    const bound = rows.find((t) => t.recurringId === "broken");
+    if (bound) {
+      throw new Error(
+        "a legacy row was bound to a series whose startDate cannot be read"
+      );
+    }
+    store.cancelPendingSave();
+  }
+
+  console.log(
+    `✅ ${jsFiles.length} source files carry no null-coerced date comparison and no two-way comparator`
+  );
+}
+
 // Run the async network tests sequentially (shared global.fetch mock): TEST 32
 // first, then TEST 30, which prints the final banner.
 runTest48Savings()
@@ -7108,6 +9216,7 @@ runTest48Savings()
   .then(runBackupAbortTest)
   .then(runCredentialsTeardownTest)
   .then(runPushRaceTest)
+  .then(runAwaitBoundaryRaceTest)
   .then(runPinRekeyTest)
   .then(runTest30Final)
   .catch((err) => {

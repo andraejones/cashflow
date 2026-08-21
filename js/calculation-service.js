@@ -184,8 +184,20 @@ class CalculationService {
     let earliestDate = null;
     let latestDate = null;
     for (const dateString in transactions) {
-      const [year, month, day] = dateString.split("-").map(Number);
-      const transactionDate = new Date(year, month - 1, day, 12, 0, 0);
+      // Parse through the shared guard, and skip anything it can't read. These
+      // are raw MAP KEYS: nothing validates them on the way in from an import
+      // or a cloud merge, so one junk key ("garbage", a truncated "2026-08")
+      // used to become an Invalid Date here. Every later `<` / `>` against NaN
+      // is false, so once earliestDate/latestDate held that Invalid Date they
+      // never recovered — and only when the junk key happened to come FIRST in
+      // key-insertion order, which makes it intermittent. The month list then
+      // collapsed to the single key "NaN-NaN": every real month lost its entry,
+      // so each month restarted from 0 instead of carrying the prior month's
+      // close. Silent, and wrong by the whole balance.
+      const transactionDate = Utils.parseDateString(dateString);
+      if (!transactionDate) {
+        continue;
+      }
       if (earliestDate === null || transactionDate < earliestDate) {
         earliestDate = transactionDate;
       }
@@ -193,6 +205,34 @@ class CalculationService {
         latestDate = transactionDate;
       }
     }
+    // A recurring series can begin BEFORE the oldest row in the map, and its
+    // early occurrences only exist once the month is expanded — which happens
+    // here, for the months in this range. Deriving the range from map keys
+    // alone therefore left those months unexpanded and their income/expense out
+    // of the chain, until the user happened to page back to one: expanding it
+    // then was permanent, so every balance from that month forward — including
+    // today's and the 30-day Minimum — jumped. A monthly $1000 paycheck started
+    // four months before the oldest entry moved the Minimum from 700 to 3700
+    // just by paging back and returning. (Anchored users never saw it: an
+    // Ending Balance resets the walk, so pre-anchor months can't reach today.)
+    //
+    // Including every series' startDate makes the range depend only on the data
+    // itself, so the chain is the same however the user navigated to get here.
+    // Symmetric with the map-key scan above, including its unbounded reach: a
+    // 1990 startDate costs the same extra months a 1990 transaction already
+    // does (~0.5 ms per empty month).
+    this.store.getRecurringTransactions().forEach((rt) => {
+      const start = rt && Utils.parseDateString(rt.startDate);
+      if (!start) {
+        return;
+      }
+      if (earliestDate === null || start < earliestDate) {
+        earliestDate = start;
+      }
+      if (latestDate === null || start > latestDate) {
+        latestDate = start;
+      }
+    });
     if (viewedDate) {
       const viewedMonthStart = new Date(viewedDate.getFullYear(), viewedDate.getMonth(), 1, 12, 0, 0);
 

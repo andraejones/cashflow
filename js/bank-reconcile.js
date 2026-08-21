@@ -746,7 +746,12 @@ class BankReconcileUI {
       });
     });
 
-    suggestions.sort((a, b) => (a.nextDate < b.nextDate ? -1 : 1));
+    // Soonest next-occurrence first; suggestions sharing a date keep the order
+    // they were detected in (see the note in SavingsGoalsUI._renderList — a
+    // comparator that never returns 0 is inconsistent).
+    suggestions.sort((a, b) =>
+      a.nextDate < b.nextDate ? -1 : a.nextDate > b.nextDate ? 1 : 0
+    );
     return suggestions;
   }
 
@@ -1113,7 +1118,10 @@ class BankReconcileUI {
   _appPayeeVocabulary() {
     const vocab = new Set();
     const addDesc = (desc) => {
-      if (!desc) return;
+      // Strings only. This vocabulary feeds the HARD match block in
+      // _blockMatch, so coercing a stray object to "[object Object]" would seed
+      // it with tokens that belong to no payee at all.
+      if (typeof desc !== "string" || !desc) return;
       this._nameTokens(desc).forEach((t) => vocab.add(t));
       this._nameTokens(this._normalizeMerchant(desc)).forEach((t) => vocab.add(t));
     };
@@ -1839,6 +1847,16 @@ class BankReconcileUI {
 
   _normalizeMerchant(desc) {
     if (!desc) return "";
+    // Coerce like its sibling _nameTokens already does. Bank descriptions come
+    // from the CSV parser and are always strings, but app-side ones are read
+    // straight off stored transactions, and nothing coerces `description` on
+    // the way in from an import or a cloud merge — every other read surface in
+    // the app guards with `typeof === "string"`. A number or object here threw
+    // "s.replace is not a function" out of _appPayeeVocabulary, i.e. out of
+    // _run: uploading a perfectly good statement reported "Could not read that
+    // CSV file", and reconciliation stayed broken until the offending row was
+    // found by hand.
+    desc = typeof desc === "string" ? desc : String(desc);
     const map = [
       [/CHICK-?FIL-?A/i, "Chick-fil-A"],
       [/WM SUPERCENTER|WAL-?MART|WAL WAL-MART|MURPHY\d*ATWALMRT/i, "Walmart"],

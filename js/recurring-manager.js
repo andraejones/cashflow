@@ -610,6 +610,9 @@ class RecurringTransactionManager {
     }
 
     // Apply cached transactions (but skip if modified instance exists)
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    let addedLiveRollingBucket = false;
     for (const item of cachedData) {
       const { dateString, transaction } = item;
 
@@ -630,7 +633,36 @@ class RecurringTransactionManager {
       );
       if (!existsAlready) {
         transactions[dateString].push({ ...transaction });
+        if (
+          transaction.type === "expense" &&
+          transaction.allocated === true &&
+          transaction.autoCloseout !== true &&
+          transaction.recurringId &&
+          dateString <= todayStr
+        ) {
+          addedLiveRollingBucket = true;
+        }
       }
+    }
+
+    // Replaying a cached month can put a rolling-allocation bucket back on the
+    // board, and the supersede rule is cross-month: whichever occurrence is the
+    // LATEST on/before today wins, so re-adding one can retire an occurrence in
+    // some OTHER month. The collapse pass ran only on the full-expansion path,
+    // so when the supersedor's month happened to be a cache HIT nothing ever
+    // retired the earlier bucket — its reserve was subtracted from every
+    // projected balance for good. That is not hypothetical: any path that
+    // replaces the transactions map wholesale (a cloud merge importing the
+    // merged copy) drops the ephemeral expansions while leaving these caches
+    // populated, so the very next render replays them in this exact shape.
+    //
+    // Gated on actually having re-added a live-eligible bucket, which is an
+    // O(cached rows) check: without that guard this would run a full-dataset
+    // pass per expanded month on every render — the quadratic cost the
+    // single-pass rewrite removed. Users with no rolling allocation never even
+    // reach the guard's true branch.
+    if (addedLiveRollingBucket) {
+      this._collapseSupersededRollingAllocations();
     }
   }
 
@@ -670,10 +702,11 @@ class RecurringTransactionManager {
 
     // ONE pass over the dataset, collecting both things the collapse needs:
     //
-    //  - liveDate: per rolling series, the latest occurrence dated on/before
-    //    today. Every materialized instance counts (including drawn, id-bearing
-    //    ones) so the live date is right even when the latest period was drawn
-    //    from.
+    //  - liveDate: per rolling series, the latest UNSKIPPED occurrence dated
+    //    on/before today. Drawn, id-bearing instances count, so the live date is
+    //    right even when the latest period was drawn from; skipped ones do not,
+    //    because a skipped period set nothing aside (see the note below, and
+    //    closeOutExpiredAllocations, which applies the same rule).
     //  - collapsible: per series, the dates carrying a PURE expansion (no id,
     //    not a modified instance) — the only rows this pass may remove.
     //
@@ -701,6 +734,12 @@ class RecurringTransactionManager {
         ) {
           continue;
         }
+        // A skipped occurrence holds no reserve, so it cannot be the live
+        // bucket and cannot supersede an earlier one. getAllocations and the
+        // reserve index already exclude it; this rule must agree or the two
+        // halves disagree about which bucket is live (see
+        // closeOutExpiredAllocations for what that cost).
+        if (this.isTransactionSkipped(date, t.recurringId)) continue;
         const cur = liveDate.get(t.recurringId);
         if (!cur || date > cur) liveDate.set(t.recurringId, date);
         if (!t.id && !t.modifiedInstance) {
@@ -725,6 +764,13 @@ class RecurringTransactionManager {
       });
     });
 
+    // Months this pass actually took rows out of. Their cached expansion was
+    // captured BEFORE the supersedor existed, so it still lists the row — and
+    // _applyCachedTransactions replays a cached month verbatim without running
+    // this pass. Drop those cache entries so the next expansion of that month
+    // is a miss that re-derives (and re-collapses) it. See the note below.
+    const staleMonths = new Set();
+
     affected.forEach((date) => {
       const arr = transactions[date];
       if (!Array.isArray(arr)) return;
@@ -741,9 +787,31 @@ class RecurringTransactionManager {
           continue;
         }
         const live = liveDate.get(t.recurringId);
-        if (live && date < live) arr.splice(i, 1);
+        if (live && date < live) {
+          arr.splice(i, 1);
+          staleMonths.add(date.slice(0, 7));
+        }
       }
       if (arr.length === 0) delete transactions[date];
+    });
+
+    // A superseded bucket is collapsed only once its SUPERSEDOR has been
+    // materialized, which happens when a LATER month is expanded — after the
+    // earlier month's cache entry was already captured with the bucket still in
+    // it. On the next render that month is a cache hit, _applyCachedTransactions
+    // re-adds the row verbatim (it does not run this pass), and nothing removes
+    // it again: the superseded period's reserve is subtracted from every
+    // projected balance, so the whole forward plan and the 30-day Minimum drop
+    // by the bucket amount from the second render on, permanently and with
+    // nothing on screen to explain it. A monthly rolling allocation resurrects
+    // one bucket per elapsed period.
+    //
+    // Invalidating just the affected months is what keeps this cheap: re-running
+    // the collapse on every cache HIT would make it O(months x whole dataset)
+    // per render again — the quadratic cost the single-pass rewrite removed.
+    // Each month pays one extra expansion, once.
+    staleMonths.forEach((monthKey) => {
+      this.expansionCache.delete(monthKey);
     });
   }
 
@@ -1529,8 +1597,8 @@ class RecurringTransactionManager {
           // latest occurrence on/before today and must persist even though its
           // date is in the past. Earlier, superseded periods are forfeited by
           // closeOutExpiredAllocations and must not be re-materialized (else
-          // re-expansion would resurrect them). A period is superseded when a
-          // sibling instance already exists in (dateString, today].
+          // re-expansion would resurrect them). A period is superseded when an
+          // UNSKIPPED sibling instance already exists in (dateString, today].
           // for...in rather than Object.keys().some(): this runs once per
           // materialized past occurrence of every allocated series, and
           // Object.keys allocates a fresh array of EVERY date in the dataset
@@ -1542,6 +1610,10 @@ class RecurringTransactionManager {
             const siblings = transactions[d];
             if (
               Array.isArray(siblings) &&
+              // A skipped sibling set nothing aside, so it does not supersede
+              // this period (same rule as getAllocations / the reserve index /
+              // the collapse pass).
+              !this.isTransactionSkipped(d, rt.id) &&
               siblings.some(
                 (t) => t.recurringId === rt.id && t.allocated === true
               )
@@ -1859,6 +1931,28 @@ class RecurringTransactionManager {
           }
         }
       }
+      // TRANSFER the free-funds designation — it must move, not be copied, and
+      // it must not be left behind. The store enforces a single holder, so
+      // leaving the flag on the old (now-ended) series while the new one also
+      // carried it would put the most-recently-modified tie-break in charge of
+      // which series the calendar reads. Left behind entirely (the original
+      // bug), the calendar stayed in free-funds mode but resolved the ENDED
+      // series: it showed that series' last bucket — a stale figure — and once
+      // the ended series had no instance on/before today it showed nothing at
+      // all, while the ⭐ toggle still reported the designation as active. The
+      // free-funds number is what the family spends against, so it has to
+      // follow the series they are actually still running. A split that moves
+      // the type off expense leaves no allocation series to designate, so the
+      // flag is dropped rather than transferred.
+      if (recurringTransaction.freeFunds === true) {
+        delete recurringTransaction.freeFunds;
+        if (
+          updatedTransaction.type === "expense" &&
+          newRecurringTransaction.allocated === true
+        ) {
+          newRecurringTransaction.freeFunds = true;
+        }
+      }
       if (recurringTransaction.debtId) {
         newRecurringTransaction.debtId = recurringTransaction.debtId;
       }
@@ -1884,10 +1978,18 @@ class RecurringTransactionManager {
           scheduledStart
         );
 
-        if (recurringTransaction.maxOccurrences > occurrencesBefore) {
-          newRecurringTransaction.maxOccurrences =
-            recurringTransaction.maxOccurrences - occurrencesBefore;
-        }
+        // Floor at 1, never "leave it off". The occurrence being edited IS an
+        // occurrence of the new series, so the remainder can never legitimately
+        // be zero — and omitting the field doesn't mean "none left", it means
+        // NO CAP: the capped series the user set up would silently become one
+        // that repeats forever. countOccurrencesBefore is an arithmetic
+        // estimate (business-day adjustments and Nth-weekday rules can put it a
+        // step out), so over-counting by one on the final occurrence is exactly
+        // the case that reached this.
+        newRecurringTransaction.maxOccurrences = Math.max(
+          1,
+          recurringTransaction.maxOccurrences - occurrencesBefore
+        );
       }
       if (recurringTransaction) {
         const endDate = new Date(splitCutoff);
@@ -1948,6 +2050,11 @@ class RecurringTransactionManager {
           // Floor-suggestion settings only make sense on an allocation series.
           recurringUpdates.autoAdjustFloor = undefined;
           recurringUpdates.floorAmount = undefined;
+          // Same for the free-funds designation. getFreeFundsRecurringId also
+          // requires `allocated`, so the holder already lapses — but a flag
+          // left lying on the definition would re-designate this series the
+          // moment anything set `allocated` on it again.
+          recurringUpdates.freeFunds = undefined;
         }
         this.store.updateRecurringTransaction(recurringId, recurringUpdates);
         Object.keys(transactions).forEach((dateKey) => {

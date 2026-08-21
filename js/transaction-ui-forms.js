@@ -24,7 +24,15 @@ Object.assign(TransactionUI.prototype, {
         // Allocations are set-aside buckets, not everyday expenses — keep them
         // out of the quick-input suggestion list.
         if (t.allocated === true) return;
-        const description = (t.description || "").trim();
+        // `typeof`, not `|| ""`: a non-string description (nothing coerces the
+        // field on the way in from an import or a cloud merge) made this
+        // `.trim()` throw. This scans the WHOLE transactions map and runs at
+        // the top of showTransactionDetails, so one bad row anywhere dropped
+        // EVERY day modal into the read-only fallback — no Edit, Delete,
+        // Settle, Skip or working add form, on any day. Same guard the other
+        // read surfaces use.
+        const description =
+          typeof t.description === "string" ? t.description.trim() : "";
         if (!description || description === "Ending Balance") return;
         const key = description.toLowerCase();
         const existing = counts.get(key);
@@ -383,8 +391,15 @@ Object.assign(TransactionUI.prototype, {
   },
 
   formatShortDisplayDate(dateString) {
-    if (!dateString) return "";
+    // Callers pass map keys (always well-formed) but also stored FIELDS —
+    // `originalDate`, `closeoutDate` — which nothing coerces on the way in from
+    // an import or a cloud merge. A non-string threw on .split, and this runs
+    // inside showTransactionDetails' loop, so that day's modal fell back to the
+    // read-only version. Anything that isn't a Y-M-D string formats as empty
+    // rather than as "undefined-undefined-…".
+    if (typeof dateString !== "string" || !dateString) return "";
     const [year, month, day] = dateString.split("-");
+    if (!year || !month || !day) return "";
     return `${month}-${day}-${year.slice(2)}`;
   },
 
@@ -536,7 +551,18 @@ Object.assign(TransactionUI.prototype, {
         } else if (radio.value === "occurrence") {
           const maxOccurrences = document.getElementById("maxOccurrences");
           if (maxOccurrences) {
-            recurringTransaction.maxOccurrences = parseInt(maxOccurrences.value, 10);
+            // Only a usable cap is written. parseInt("") is NaN, which
+            // JSON.stringify persists as null and the expansion engine reads
+            // through `rt.maxOccurrences || null` as "no end" — so clearing the
+            // field turned "end after N occurrences" into a series that never
+            // ends, silently, and every projected balance carried it forever.
+            // addTransaction rejects that input before we get here (as it does
+            // for the custom interval); this is the belt to that brace, and it
+            // matches collectDebtAdvancedOptions, which has always guarded.
+            const parsed = parseInt(maxOccurrences.value, 10);
+            if (Number.isFinite(parsed) && parsed > 0) {
+              recurringTransaction.maxOccurrences = parsed;
+            }
           }
         }
         break;

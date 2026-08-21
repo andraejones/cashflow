@@ -82,6 +82,25 @@ Object.assign(TransactionUI.prototype, {
           }
         }
       }
+      // Same rule, the other free-form recurrence number. An empty or
+      // zero/negative occurrence count is not "no cap" — the user explicitly
+      // chose "End after N occurrences", and persisting NaN there quietly gave
+      // them a series that never ends (the expansion reads
+      // `rt.maxOccurrences || null`).
+      if (recurrence !== "once") {
+        const occurrenceRadio = document.getElementById("endConditionOccurrence");
+        const maxOccurrencesEl = document.getElementById("maxOccurrences");
+        if (occurrenceRadio && occurrenceRadio.checked && maxOccurrencesEl) {
+          const maxVal = parseInt(maxOccurrencesEl.value, 10);
+          if (!Number.isFinite(maxVal) || maxVal < 1) {
+            Utils.showNotification(
+              "Number of occurrences must be a whole number of 1 or more",
+              "error"
+            );
+            return false;
+          }
+        }
+      }
       if (recurrence === "once") {
         const newTransaction = {
           amount: amount,

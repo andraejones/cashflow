@@ -11,8 +11,30 @@ CashFlow Calendar is an offline-first, single-page personal finance application 
 **No build process required.** Open `index.html` directly in a browser or serve via any static server.
 
 **Tests:** `npm test` (or run the two scripts directly with Node) — it must pass before every commit:
-- `node scripts/verify-logic.js` — 78 numbered integration tests over vm-loaded sources
-  (numbered up to TEST 83; the numbering has gaps where tests were merged).
+- `node scripts/verify-logic.js` — 97 numbered integration tests over vm-loaded sources
+  (numbered up to TEST 98; the numbering has gaps where tests were merged).
+  Four of them are SWEEPS rather than scenarios, and they are the ones worth
+  extending when something new is added:
+    - TEST 93 puts a wrong-typed value in every field the app reads, one field
+      at a time, and walks every headless surface. Nothing coerces most stored
+      fields on the way in from an import or a cloud merge, so each read surface
+      has to guard itself — three separate crashes (two of which took the
+      calendar render down) came from one that forgot.
+    - TEST 94 drives every bank-reconcile action and asserts what it leaves
+      behind for the OTHER components: allocation reserves conserved, persisted
+      ids intact and unique, balances stable across a re-render and a reload.
+    - TEST 95 injects the user's next keystroke at every await boundary of
+      saveToCloud and loadFromCloud. The failure mode there is not a bad push,
+      it is the edit being destroyed in memory and on disk by the merged import.
+    - TEST 96 pins the one rule five different readers have to agree on: which
+      instance of a rolling allocation series is live (see below).
+    - TEST 98 is a SOURCE sweep for two shapes that read as correct and are not:
+      `parseDateString(a) <= parseDateString(b)` (a null coerces to 0, so the
+      comparison is always true — this blanked the calendar once) and
+      `a < b ? -1 : 1` (never returns 0, so equal keys each claim to be greater
+      and the engine may order them either way).
+  Each was validated by reverting the fix it guards and watching it fail; keep
+  doing that, or a sweep that cannot fail pins nothing.
 - `node scripts/verify-walk-parity.js` — randomized cross-path invariants for the balance walk (~140k assertions; reproduce failures with `node scripts/verify-walk-parity.js <seed>`). Includes a source guard: calendar-ui must consume `CalculationService.walkDays` and never re-implement anchor math.
 
 **Optional browser harnesses** (both puppeteer-gated, both exit 0 with a
@@ -103,7 +125,27 @@ DOMContentLoaded
 
 Settled/unsettled support: `setTransactionSettled(date, index, isSettled)` toggles expense settlement status. `getUnsettledTransactions()` returns expenses marked `settled: false` that carry forward until resolved.
 
-Money entering the store is normalized, never trusted: the domain collections go through `_normalizeDebt` / `_normalizeSavingsGoal` / `_normalizeCashInfusion` (all built on `_finiteNumber`), and the three inputs the balance walk steps through — the transactions map, the recurring definitions, and the monthly anchors — are swept by `_repairWalkAmounts()` in both `loadData` and `importData`. That sweep is the only guard covering data that never passed a form: `"1e999"` is valid JSON that parses to `Infinity`, so an imported backup can otherwise put a non-finite amount straight into the walk. It rewrites non-finite values only, so finite money is never re-rounded. Use `Number.isFinite`, never bare `isNaN`, on any amount that gets persisted.
+Money display has one absolute rule: **a zero never wears a minus sign.** The
+walk rounds with `Math.round(x * 100) / 100`, and a day that lands exactly on
+zero by subtraction usually gets there through a tiny negative float
+(`0.01 + 0.06 - 0.07` is one), which rounds to `-0`. `toLocaleString` is the
+only formatter that keeps that sign — `toFixed` and `String` both normalize —
+and it is what `Utils.formatAmount` and the snowball hero's `formatWhole` use,
+so both collapse `-0` explicitly. TEST 81 asserts the rule, not just that the
+two harness stubs agree with the real Utils.
+
+Money entering the store is normalized, never trusted: the domain collections go through `_normalizeDebt` / `_normalizeSavingsGoal` / `_normalizeCashInfusion` (all built on `_finiteNumber`), and the three inputs the balance walk steps through — the transactions map, the recurring definitions, and the monthly anchors — are swept by `_repairWalkAmounts()` in both `loadData` and `importData`. That sweep is the only guard covering data that never passed a form: `"1e999"` is valid JSON that parses to `Infinity`, so an imported backup can otherwise put a non-finite amount straight into the walk. It rewrites non-finite values only, so finite money is never re-rounded. Use `Number.isFinite`, never bare `isNaN`, on any amount that gets persisted. A value the FORM rejects has to be rejected on every other path too: the snowball's `dailyFloor` was coerced with `_finiteNumber` in `loadData`, `importData` and `setDebtSnowballSettings`, none of which refused a negative — and a negative floor makes the projection schedule payoffs that drive the projected balance below zero. `_normalizeDailyFloor` is the single choke point now (TEST 97).
+
+Shape is guarded per FIELD too, and that is the reader's job. Only money
+(`_repairWalkAmounts`) and the domain collections (`_normalizeDebt` /
+`_normalizeSavingsGoal` / `_normalizeCashInfusion`) are coerced on the way in —
+nothing else is, so **every surface that calls a string or number method on a
+stored field must guard it with `typeof` first**. Three crashes came from one
+that didn't: `_normalizeMerchant`'s `.replace` (bank reconciliation blamed a
+perfectly good CSV), a `localeCompare` on `debt.name` and a `.trim()` in
+`hasMonthlyNotes` (both took the CALENDAR RENDER down). `_normalizeDebt` now
+coerces `name` like its siblings always have; TEST 93 sweeps every field in
+every wrong shape across every headless surface.
 
 Shape is guarded separately from value: `JSON.parse` accepting a stored blob is
 not the same as the app being able to use it, so `loadData` runs every parsed
@@ -128,6 +170,44 @@ be short — the anchor then resets the balance too HIGH, silently. Two sites do
 this today: `walkDays({ ensureRecurringExpansion: true })` and the snowball
 projection's `getDayFlow`. `updateMonthlyBalances` does not need it (it expands
 every month up front, before walking). TEST 78 pins both.
+
+`updateMonthlyBalances` derives its month range from the transactions map's keys
+**and every recurring definition's `startDate`** — both parsed through
+`Utils.parseDateString`, skipping anything unreadable. Both halves are
+load-bearing. A series can begin before the oldest row in the map, and its early
+occurrences only exist once their month is expanded HERE; deriving the range
+from keys alone left those months out of the chain until the user happened to
+page back to one, which materialized them permanently and moved every later
+balance (TEST 86). And a single unparseable KEY used to become an Invalid Date,
+which every later `<`/`>` silently ignored, collapsing the whole table to one
+`"NaN-NaN"` entry (TEST 84).
+
+"Which instance of a rolling allocation series is LIVE?" is answered in five
+places — `getAllocations` (the drawable list), `_reservedTotalIndex` (what the
+anchors hold back), `closeOutExpiredAllocations` and
+`_collapseSupersededRollingAllocations` (the two sweeps that retire old
+periods), plus the Allocated modal's list — and **all five must apply the same
+rule: the latest occurrence dated on/before today that is NOT skipped.** A
+skipped period set nothing aside, so it holds no reserve and supersedes nothing.
+The first two excluded skips and the rest did not, so skipping this period made
+the sweeps treat the skipped date as live and FORFEIT the previous bucket: the
+one `getAllocations` was still offering, with money already drawn from it. It
+was deleted and tombstoned (so every device followed), its reserve was released
+into every projected balance, and its drawers were left dangling. TEST 96.
+
+The expansion cache and the rolling-allocation collapse are coupled, in both
+directions. A superseded bucket can only be collapsed once its SUPERSEDOR has
+been materialized — which happens when a LATER month is expanded, after the
+earlier month's cache entry was already captured with the bucket still in it. So
+`_collapseSupersededRollingAllocations` drops the cache entry of every month it
+took a row out of, AND `_applyCachedTransactions` re-runs the collapse whenever
+replaying a cached month re-adds a live-eligible rolling bucket (gated on an
+O(cached rows) check, so the full-dataset pass does not return to every render).
+Without the first, the dead bucket came back on render 2 and stayed; without the
+second, it came back on the first render after any path that replaces the
+transactions map wholesale — i.e. after every auto-sync push, which imports the
+merged copy. Either way its reserve was subtracted from every projected balance
+with nothing on screen to explain it. TEST 87 pins both halves.
 
 **CalendarUI** (`calendar-ui.js`) - Renders monthly calendar grid with daily balances, month navigation, and highlighting (lowest balance, negative balance, minimum balance ranges). The per-day balance-variant figures ("Balance before holdbacks", "Balance excluding allocations") live in the day-detail modal via `CalculationService.getDayBalanceBreakdown`, not in the calendar cells.
 
@@ -154,6 +234,17 @@ expansion and cleanup fight forever over a business-day-adjusted final payment
 **CloudSync** (`cloud-sync.js`) - GitHub Gist integration with bi-directional sync and debounced saves. Also owns the GitHub token at rest: it encrypts/decrypts `github_token_encrypted` with an AES-GCM key derived from the plaintext `_device_id` (PinProtection is not involved in token storage).
 
 **PinProtection** (`pin-protection.js`) - PIN setup/verification, XOR encryption of the TransactionStore data (transactions, debts, etc.) keyed by the current PIN, and session inactivity monitoring (120s timeout). It does **not** read or write `github_token_encrypted` — that is CloudSync's, encrypted separately via `_device_id`.
+
+`showUnlockDialog` drives the shared `#appModal` directly rather than through
+`Utils.showModalDialog`, so it has to join that element's hand-off protocol:
+it publishes its teardown as `Utils._activeModalClose` and resolves the
+`PinProtection.UNLOCK_PREEMPTED` sentinel when a newer dialog takes the modal.
+`promptUnlock` then waits for the modal to be free and re-prompts. Without it, a
+dialog raised while the lock was up (an in-flight cloud push coming back 404)
+stacked its listeners on the same buttons and, once answered, left the modal
+CLOSED with no unlock prompt — the lock overlay with no way in short of a
+reload. It must not PREEMPT what it finds, only publish: every path reaches it
+with `#appModal` already free.
 
 ### Key Patterns
 
@@ -189,7 +280,7 @@ local_last_sync, _backup_before_merge, calendar_view_mode
 
 - `styles.css` - CSS variables for theming (primary, accent, error colors)
 - `README.md` - Project documentation and feature overview
-- `scripts/verify-logic.js` - Standalone logic verification utility (78 tests)
+- `scripts/verify-logic.js` - Standalone logic verification utility (97 tests)
 - `scripts/verify-walk-parity.js` - Randomized balance-walk parity harness + source guard
 - `scripts/verify-ui.js` - Optional headless-Chromium UI harness (`npm run test:ui`)
 - `scripts/verify-sync.js` - Optional two-device cloud-sync harness (`npm run test:sync`)

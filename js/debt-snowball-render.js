@@ -138,8 +138,13 @@ Object.assign(DebtSnowballUI.prototype, {
 
     const dailyFloor = Number(projection.dailyFloor) || 0;
 
-    const formatWhole = (value) =>
-      `$${Math.round(Number(value) || 0).toLocaleString("en-US")}`;
+    // `|| 0` also collapses a -0 input, and the `=== 0` guard collapses a -0
+    // that Math.round produces from a small negative — toLocaleString is the
+    // one formatter that would render either as "-0" (see Utils.formatAmount).
+    const formatWhole = (value) => {
+      const rounded = Math.round(Number(value) || 0);
+      return `$${(rounded === 0 ? 0 : rounded).toLocaleString("en-US")}`;
+    };
 
     const makeCard = ({ label, value, sub, primary }) => {
       const card = document.createElement("div");

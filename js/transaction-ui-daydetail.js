@@ -755,6 +755,20 @@ Object.assign(TransactionUI.prototype, {
                   movedFrom: u.date,
                   originalRecurringId: recId,
                 };
+                // Carry the debt link. A minimum payment can be sitting in
+                // this list because the user marked it unsettled while waiting
+                // for it to clear; settling it must not un-credit the debt.
+                // Without this the money still leaves the balance walk but the
+                // debt's "paid so far" drops by the payment, so its remaining
+                // reads high and the snowball plans a payoff that is already
+                // further along than it thinks. BankReconcile._relocateEntry
+                // preserves these for exactly this reason — the copy carries no
+                // recurringId, so cleanupOrphanedDebtMinimums leaves it be.
+                if (u.transaction.debtId) {
+                  movedCopy.debtId = u.transaction.debtId;
+                  if (u.transaction.debtRole) movedCopy.debtRole = u.transaction.debtRole;
+                  if (u.transaction.debtName) movedCopy.debtName = u.transaction.debtName;
+                }
                 // Carry the allocation link forward. Deleting the original
                 // refunds the bucket via _reverseAllocationDraw, so the settled
                 // copy must re-draw or the spend stands while the bucket is
@@ -787,6 +801,12 @@ Object.assign(TransactionUI.prototype, {
                   description: u.transaction.description,
                   settled: true,
                 };
+                // Carry the debt link (see recurring branch).
+                if (u.transaction.debtId) {
+                  settledCopy.debtId = u.transaction.debtId;
+                  if (u.transaction.debtRole) settledCopy.debtRole = u.transaction.debtRole;
+                  if (u.transaction.debtName) settledCopy.debtName = u.transaction.debtName;
+                }
                 // Carry the allocation link forward (see recurring branch).
                 if (u.transaction.drawsFromAllocationId) {
                   settledCopy.drawsFromAllocationId = u.transaction.drawsFromAllocationId;

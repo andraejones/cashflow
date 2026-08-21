@@ -80,7 +80,10 @@ global.Utils = {
   showNotification: () => {},
   formatDisplayDate: (str) => str,
   formatAmount: (amount) => {
-    const n = typeof amount === "number" && isFinite(amount) ? amount : 0;
+    const raw = typeof amount === "number" && isFinite(amount) ? amount : 0;
+    // Mirrors js/utils.js: a computed -0 (the walk's rounding produces it for a
+    // day that lands on zero by subtraction) must not render as "-0.00".
+    const n = raw === 0 ? 0 : raw;
     return n.toLocaleString("en-US", {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
@@ -93,6 +96,11 @@ global.Utils = {
   // exercising the path. Dialogs resolve to their CANCEL value so a test that
   // unexpectedly reaches one takes the "user declined" branch rather than
   // silently confirming something destructive.
+  // The shared #appModal hand-off protocol: PinProtection.showUnlockDialog
+  // drives that element directly and publishes its teardown here so a newer
+  // dialog can preempt it (see js/utils.js showModalDialog / js/pin-protection.js).
+  _activeModalClose: null,
+  showModalDialog: async () => undefined,
   showModalAlert: async () => undefined,
   showModalConfirm: async () => false,
   showModalPrompt: async () => null,

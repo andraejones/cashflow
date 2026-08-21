@@ -269,6 +269,97 @@ async function dismissAlert(page) {
       )
     );
 
+    // ---- The recurrence end-condition number must be validated -----------
+    // "End after N occurrences" reads a free-form number input. A blank field
+    // gives parseInt("") === NaN, JSON.stringify persists that as null, and the
+    // expansion engine reads `rt.maxOccurrences || null` as "no end" — so the
+    // user's bounded series became one that repeats forever, silently, and
+    // every projected balance carried it. The custom-interval field next to it
+    // has always been rejected; this one was not. Driven through the real form
+    // because the advanced-recurrence fields only exist once the recurrence
+    // select fires its change handler.
+    const openDayForm = async () => {
+      await page.evaluate((d) => {
+        const cell = document.querySelector(`[data-date="${d}"]`);
+        if (cell) cell.click();
+      }, todayStr);
+      await sleep(250);
+    };
+
+    const submitRecurring = async (occurrenceValue) => {
+      await openDayForm();
+      await page.evaluate(() => {
+        const rec = document.getElementById("transactionRecurrence");
+        rec.value = "monthly";
+        rec.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      await sleep(150);
+      const built = await page.evaluate(() => !!document.getElementById("maxOccurrences"));
+      if (!built) return { built: false };
+      await page.evaluate((value) => {
+        document.getElementById("transactionAmount").value = "12.00";
+        document.getElementById("transactionDescription").value = "UI Harness Capped";
+        const radio = document.getElementById("endConditionOccurrence");
+        radio.checked = true;
+        radio.dispatchEvent(new Event("change", { bubbles: true }));
+        const max = document.getElementById("maxOccurrences");
+        max.disabled = false;
+        max.value = value;
+      }, occurrenceValue);
+      await page.evaluate(() =>
+        document.querySelector("#transactionForm button").click()
+      );
+      await sleep(400);
+      return {
+        built: true,
+        series: await page.evaluate(() =>
+          window.app.store
+            .getRecurringTransactions()
+            .filter((rt) => rt.description === "UI Harness Capped")
+            .map((rt) => rt.maxOccurrences)
+        ),
+      };
+    };
+
+    const blank = await submitRecurring("");
+    check("advanced recurrence options are built on demand", blank.built !== false);
+    if (blank.built !== false) {
+      check(
+        "a blank occurrence count is rejected, not stored as 'never ends'",
+        blank.series.length === 0,
+        `stored ${JSON.stringify(blank.series)}`
+      );
+      // The dialog stays open on a rejected submit; close it before reusing it.
+      await page.evaluate(() => window.app.transactionUI.closeModals());
+      await sleep(150);
+
+      const zero = await submitRecurring("0");
+      check(
+        "a zero occurrence count is rejected too",
+        zero.series.length === 0,
+        `stored ${JSON.stringify(zero.series)}`
+      );
+      await page.evaluate(() => window.app.transactionUI.closeModals());
+      await sleep(150);
+
+      const good = await submitRecurring("3");
+      check(
+        "a valid occurrence count is still stored",
+        good.series.length === 1 && good.series[0] === 3,
+        `stored ${JSON.stringify(good.series)}`
+      );
+      // Leave no capped series behind for the later phases to trip over.
+      await page.evaluate(() => {
+        window.app.store
+          .getRecurringTransactions()
+          .filter((rt) => rt.description === "UI Harness Capped")
+          .forEach((rt) => window.app.store.deleteRecurringTransaction(rt.id));
+        window.app.recurringManager.invalidateCache();
+        window.app.updateUI();
+      });
+      await sleep(200);
+    }
+
     // ---- Escape belongs to the autocomplete while its list is open -------
     // The suggestion list is dismissed by the DOCUMENT-level capture handler in
     // TransactionUI, not by the input's own keydown listener: the input is a
@@ -671,6 +762,396 @@ async function dismissAlert(page) {
     );
     await page.evaluate(() => window.app.searchUI.hideSearchModal());
 
+    // ---- Settling a carried-forward payment keeps its debt link ----------
+    // A debt minimum can sit in the carried-forward list because the user marked
+    // it unsettled while waiting for it to clear. The Settle button rebuilds the
+    // row on the day it actually cleared — and it rebuilt it WITHOUT
+    // debtId/debtRole/debtName. The money still left the balance walk, but the
+    // debt stopped being credited for it: its remaining read a whole payment too
+    // high and the snowball planned around a debt further behind than it really
+    // was. BankReconcile._relocateEntry preserves those fields for exactly this
+    // reason; this path did not. Driven through the real button because the
+    // carried-forward section only exists in the rendered day modal.
+    const debtSettle = await page.evaluate(async () => {
+      const store = window.app.store;
+      const now = new Date();
+      const pad = (n) => String(n).padStart(2, "0");
+      const ds = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+      const today = ds(now);
+      const past = ds(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 3));
+      const stamp = new Date().toISOString();
+
+      const debtId = store.addDebt({
+        name: "UI Harness Card", balance: 1000, minPayment: 60, dueDay: 5,
+        recurrence: "monthly",
+        dueStartDate: ds(new Date(now.getFullYear(), now.getMonth() - 1, 5)),
+        interestRate: 0,
+      });
+      const recurringId = window.app.recurringManager.addRecurringTransaction({
+        amount: 60, type: "expense", description: "Debt Payment: UI Harness Card",
+        recurrence: "monthly",
+        startDate: ds(new Date(now.getFullYear(), now.getMonth() - 1, 5)),
+        debtId, debtRole: "minimum", debtName: "UI Harness Card",
+      });
+      store.updateDebt(debtId, { minRecurringId: recurringId });
+      // A past, UNSETTLED minimum payment: exactly what lands in the carried list.
+      const map = store.getTransactions();
+      (map[past] = map[past] || []).push({
+        id: "ui-min", amount: 60, type: "expense",
+        description: "Debt Payment: UI Harness Card",
+        debtId, debtRole: "minimum", recurringId, modifiedInstance: true,
+        settled: false, _lastModified: stamp,
+      });
+      window.app.updateUI();
+      await new Promise((r) => setTimeout(r, 300));
+
+      const paidThrough = () =>
+        window.app.debtSnowball.getHistoricalDebtSnapshot(
+          new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+        ).paidByDebtId[debtId] || 0;
+      const before = paidThrough();
+
+      window.app.transactionUI.showTransactionDetails(today);
+      await new Promise((r) => setTimeout(r, 300));
+      const carried = [...document.querySelectorAll(".carried-forward-transaction")]
+        .find((row) => row.textContent.includes("UI Harness Card"));
+      const button = carried && carried.querySelector(".settle-btn");
+      if (button) button.click();
+      await new Promise((r) => setTimeout(r, 500));
+
+      const settledRow = (store.getTransactions()[today] || []).find(
+        (t) => t.description === "Debt Payment: UI Harness Card" && t.settled === true
+      );
+      const after = paidThrough();
+      return {
+        debtId, recurringId, today, past,
+        foundCarriedRow: !!carried,
+        clicked: !!button,
+        settledRowHasDebtId: !!(settledRow && settledRow.debtId === debtId),
+        before, after,
+      };
+    });
+    check("the unsettled debt payment appears in the carried-forward list",
+      debtSettle.foundCarriedRow && debtSettle.clicked);
+    // Vacuity guard: if it was never counted, "unchanged" would prove nothing.
+    check("the debt was credited for it before settling",
+      debtSettle.before > 0, `paid ${debtSettle.before}`);
+    check("the settled copy keeps its debt link", debtSettle.settledRowHasDebtId);
+    check("settling it does not un-credit the debt",
+      Math.abs(debtSettle.after - debtSettle.before) < 0.005,
+      `paid ${debtSettle.before} -> ${debtSettle.after}`);
+    await page.evaluate((info) => {
+      window.app.transactionUI.closeModals();
+      const store = window.app.store;
+      store.deleteRecurringTransaction(info.recurringId);
+      store.deleteDebt(info.debtId);
+      [info.today, info.past].forEach((date) => {
+        const map = store.getTransactions();
+        if (!map[date]) return;
+        map[date] = map[date].filter((t) => t.debtId !== info.debtId);
+        if (map[date].length === 0) delete map[date];
+      });
+      window.app.recurringManager.invalidateCache();
+      store.flushPendingSave();
+      window.app.updateUI();
+    }, debtSettle);
+    await sleep(300);
+
+    // ---- Corrupt field shapes must not disable the UI ---------------------
+    // Nothing coerces `description` (or a monthly note's `text`) on the way in
+    // from an import or a cloud merge, which is why every read surface in the
+    // app guards with `typeof === "string"`. Two did not:
+    //   - populateDescriptionSuggestions did `(t.description || "").trim()`. It
+    //     scans the WHOLE map and runs at the top of showTransactionDetails, so
+    //     one numeric description anywhere dropped EVERY day modal into the
+    //     read-only fallback — no Edit/Delete/Settle/Skip, on any day.
+    //   - hasMonthlyNotes did `(note.text || "").trim()`, and generateCalendar
+    //     calls it on every render for the ★ indicator, so a numeric note text
+    //     threw the render itself.
+    // Both are invisible to the vm harnesses (neither class is loaded there),
+    // and both fail as "the app just stopped working", not as an error message.
+    const corrupt = await page.evaluate(async () => {
+      const store = window.app.store;
+      const today = Utils.formatDateString(new Date());
+      const monthKey = today.slice(0, 7);
+      // Bypass the setters on purpose: this is the shape a merge leaves behind.
+      const map = store.getTransactions();
+      (map[today] = map[today] || []).push({
+        id: "corrupt-desc", amount: 9.99, type: "expense",
+        description: 42, settled: true,
+        _lastModified: new Date().toISOString(),
+      });
+      store.monthlyNotes[monthKey] = { text: 7, _lastModified: new Date().toISOString() };
+
+      let renderError = null;
+      try { window.app.updateUI(); } catch (e) { renderError = e.message; }
+      await new Promise((r) => setTimeout(r, 250));
+
+      const rendered =
+        document.getElementById("calendarAgenda").children.length > 0 ||
+        document.getElementById("calendarDays").children.length > 0;
+
+      const cell = document.querySelector(`[data-date="${today}"]`);
+      if (cell) cell.click();
+      await new Promise((r) => setTimeout(r, 300));
+
+      const modal = document.getElementById("transactionModal");
+      const rows = document.getElementById("modalTransactions");
+      return {
+        renderError,
+        rendered,
+        summaryText: document.getElementById("monthSummary").textContent,
+        modalOpen: modal.style.display === "block",
+        // The fallback modal renders plain rows with no action controls; the
+        // real one always has them for an editable one-time transaction.
+        hasEditControls: rows.querySelectorAll(".edit-btn").length > 0,
+        hasDeleteControls: rows.querySelectorAll(".delete-btn").length > 0,
+        monthKey,
+        today,
+      };
+    });
+    check("a corrupt description doesn't throw the calendar render",
+      corrupt.renderError === null, String(corrupt.renderError));
+    check("the calendar still renders with corrupt field shapes", corrupt.rendered);
+    check("the monthly summary still renders (hasMonthlyNotes survives)",
+      corrupt.summaryText.includes("Monthly Summary"), corrupt.summaryText.slice(0, 60));
+    check("the day modal still opens", corrupt.modalOpen);
+    check("the day modal is the real one, not the read-only fallback",
+      corrupt.hasEditControls && corrupt.hasDeleteControls,
+      `edit=${corrupt.hasEditControls} delete=${corrupt.hasDeleteControls}`);
+
+    // Recent Transactions sorts on `_lastModified`. An unreadable one parses to
+    // an Invalid Date, whose getTime() is NaN — and a comparator that returns
+    // NaN is not a valid comparator: the list comes back in an arbitrary order,
+    // so the "recent" 25 are not the recent ones.
+    const recent = await page.evaluate(async () => {
+      const store = window.app.store;
+      const today = Utils.formatDateString(new Date());
+      const map = store.getTransactions();
+      const list = (map[today] = map[today] || []);
+      list.push(
+        { id: "stamp-bad-a", amount: 1.11, type: "expense", description: "Corrupt Stamp A",
+          settled: true, _lastModified: "not-a-timestamp" },
+        { id: "stamp-bad-b", amount: 2.22, type: "expense", description: "Corrupt Stamp B",
+          settled: true, _lastModified: 42 },
+        { id: "stamp-old", amount: 3.33, type: "expense", description: "Older Real Stamp",
+          settled: true, _lastModified: "2020-01-01T00:00:00.000Z" },
+        { id: "stamp-new", amount: 4.44, type: "expense", description: "Newer Real Stamp",
+          settled: true, _lastModified: new Date().toISOString() }
+      );
+      window.app.showRecentTransactions();
+      await new Promise((r) => setTimeout(r, 300));
+      const rows = [...document.querySelectorAll("#recentTransactionsList .recent-transaction-row")]
+        .map((row) => row.textContent);
+      const indexOf = (name) => rows.findIndex((t) => t.includes(name));
+      return {
+        rendered: rows.length > 0,
+        newer: indexOf("Newer Real Stamp"),
+        older: indexOf("Older Real Stamp"),
+        corruptA: indexOf("Corrupt Stamp A"),
+        corruptB: indexOf("Corrupt Stamp B"),
+        today,
+      };
+    });
+    check("Recent Transactions renders with corrupt timestamps", recent.rendered);
+    check("all four seeded rows are listed",
+      recent.newer >= 0 && recent.older >= 0 && recent.corruptA >= 0 && recent.corruptB >= 0,
+      `newer=${recent.newer} older=${recent.older} A=${recent.corruptA} B=${recent.corruptB}`);
+    check("the newest real stamp still sorts above the older one",
+      recent.newer < recent.older, `newer at ${recent.newer}, older at ${recent.older}`);
+    check("unreadable stamps sort below every real one",
+      recent.corruptA > recent.older && recent.corruptB > recent.older,
+      `older=${recent.older} A=${recent.corruptA} B=${recent.corruptB}`);
+    await page.evaluate((info) => {
+      window.app.hideRecentTransactions();
+      const map = window.app.store.getTransactions();
+      if (map[info.today]) {
+        map[info.today] = map[info.today].filter((t) => !String(t.id).startsWith("stamp-"));
+        if (map[info.today].length === 0) delete map[info.today];
+      }
+      window.app.store.flushPendingSave();
+      window.app.updateUI();
+    }, recent);
+    await sleep(250);
+    await page.evaluate((info) => {
+      window.app.transactionUI.closeModals();
+      const map = window.app.store.getTransactions();
+      if (map[info.today]) {
+        map[info.today] = map[info.today].filter((t) => t.id !== "corrupt-desc");
+        if (map[info.today].length === 0) delete map[info.today];
+      }
+      delete window.app.store.monthlyNotes[info.monthKey];
+      window.app.store.flushPendingSave();
+      window.app.updateUI();
+    }, corrupt);
+    await sleep(300);
+
+    // ---- Allocations, free funds, what-if, savings goals -------------------
+    // Four feature surfaces the vm harnesses can drive only as data. Here they
+    // go through the real DOM: the modals that build their own markup, the
+    // draw dropdown that is populated from live buckets, and the calendar
+    // substitution free-funds mode performs. Each is asserted on what the page
+    // actually shows, not on what the store holds.
+    const allocSetup = await page.evaluate(() => {
+      const store = window.app.store;
+      const today = Utils.formatDateString(new Date());
+      const id = store.addTransaction(today, {
+        amount: 200, type: "expense", description: "UI Grocery Bucket",
+        allocated: true, settled: true,
+      });
+      store.addTransaction(today, {
+        amount: 60, type: "expense", description: "UI Groceries",
+        settled: true, drawsFromAllocationId: id,
+      });
+      window.app.updateUI();
+      const bucket = store.getAllocations().find((a) => a.id === id);
+      return { id, remaining: bucket ? bucket.remaining : null };
+    });
+    check("a draw debits its bucket by exactly the spend",
+      allocSetup.remaining === 140, `bucket at ${allocSetup.remaining}`);
+
+    await page.evaluate(() => window.app.showAllocatedTransactions());
+    await sleep(350);
+    const allocModal = await page.evaluate(() => {
+      const modal = document.getElementById("allocatedTransactionsModal");
+      const list = document.getElementById("allocatedTransactionsList");
+      return {
+        open: modal.style.display === "block",
+        text: list.textContent,
+        // The purple, unsigned reserve styling is the documented convention.
+        unsigned: [...list.querySelectorAll(".recent-transaction-amount")]
+          .every((el) => !el.textContent.trim().startsWith("-")),
+        overflow: document.documentElement.scrollWidth <= window.innerWidth + 1,
+      };
+    });
+    check("the Allocated modal lists the live bucket",
+      allocModal.open && allocModal.text.includes("UI Grocery Bucket"));
+    check("allocation amounts render unsigned", allocModal.unsigned);
+    check("the Allocated modal doesn't scroll the page sideways", allocModal.overflow);
+    await page.keyboard.press("Escape");
+    await sleep(250);
+    check("Escape closes the Allocated modal",
+      await page.evaluate(() =>
+        document.getElementById("allocatedTransactionsModal").style.display !== "block"));
+
+    // Free funds: the calendar replaces the current day's running balance with
+    // the designated bucket's remaining amount, and hides past-day balances.
+    const freeFunds = await page.evaluate(async () => {
+      const store = window.app.store;
+      const today = Utils.formatDateString(new Date());
+      const id = window.app.recurringManager.addRecurringTransaction({
+        amount: 300, type: "expense", description: "UI Free Funds",
+        recurrence: "weekly",
+        startDate: Utils.formatDateString(new Date(Date.now() - 3 * 86400000)),
+        allocated: true, settled: true,
+      });
+      store.setFreeFundsAllocation(id);
+      window.app.updateUI();
+      await new Promise((r) => setTimeout(r, 200));
+      const row = document.querySelector(`[data-date="${today}"]`);
+      return {
+        id,
+        holder: store.getFreeFundsRecurringId(),
+        shown: row ? !!row.querySelector(".balance.free-funds") : false,
+        text: row ? row.textContent : "",
+      };
+    });
+    check("designating a free-funds bucket takes effect",
+      freeFunds.holder === freeFunds.id);
+    check("the current day shows the free-funds figure instead of a balance",
+      freeFunds.shown, freeFunds.text.slice(0, 80));
+    await page.evaluate((id) => {
+      window.app.store.setFreeFundsAllocation(null);
+      window.app.store.deleteRecurringTransaction(id);
+      window.app.recurringManager.invalidateCache();
+      window.app.updateUI();
+    }, freeFunds.id);
+    await sleep(250);
+
+    // What-if: a draft must move the banner's minimum and must never reach
+    // localStorage, and Discard must put everything back.
+    await page.evaluate(() => window.app.whatIf.openForm());
+    await sleep(250);
+    await page.evaluate(() => {
+      document.getElementById("whatIfDate").value =
+        Utils.formatDateString(new Date(Date.now() + 3 * 86400000));
+      document.getElementById("whatIfAmount").value = "5000";
+      document.getElementById("whatIfType").value = "expense";
+      document.getElementById("whatIfDescription").value = "UI Draft";
+      document.getElementById("whatIfAddButton").click();
+    });
+    await sleep(450);
+    const draft = await page.evaluate(() => {
+      const banner = document.getElementById("whatIfBanner");
+      return {
+        bannerShown: !banner.hidden,
+        bannerText: banner.textContent.replace(/\s+/g, " ").trim().slice(0, 120),
+        inStore: window.app.store.getWhatIfTransactions().length,
+        persisted: String(localStorage.getItem("transactions")).includes("UI Draft"),
+        inExport: JSON.stringify(window.app.store.exportData()).includes("UI Draft"),
+      };
+    });
+    check("a what-if draft raises the banner", draft.bannerShown && draft.inStore === 1,
+      draft.bannerText);
+    check("a what-if draft never reaches localStorage", !draft.persisted);
+    check("a what-if draft never reaches an export", !draft.inExport);
+    await page.evaluate(() => window.app.whatIf.discardAll());
+    await sleep(350);
+    check("discarding removes the draft and the banner",
+      await page.evaluate(() =>
+        window.app.store.getWhatIfTransactions().length === 0 &&
+        document.getElementById("whatIfBanner").hidden === true));
+
+    // Savings goals: the modal builds its rows at runtime, including the
+    // feasibility line that reuses the balance walk.
+    await page.evaluate(() => {
+      window.app.store.addSavingsGoal({
+        name: "UI Trip Fund", targetAmount: 500, saved: 100,
+        targetDate: Utils.formatDateString(new Date(Date.now() + 90 * 86400000)),
+      });
+      window.app.savingsGoals.show();
+    });
+    await sleep(400);
+    const goals = await page.evaluate(() => {
+      const list = document.getElementById("savingsGoalsList");
+      return {
+        open: document.getElementById("savingsGoalsModal").style.display === "block",
+        text: list.textContent.replace(/\s+/g, " ").trim(),
+        rows: list.querySelectorAll(".savings-goal-row").length,
+        bars: list.querySelectorAll(".savings-goal-bar-fill").length,
+        overflow: document.documentElement.scrollWidth <= window.innerWidth + 1,
+      };
+    });
+    check("the Savings Goals modal renders the goal",
+      goals.open && goals.rows === 1 && goals.text.includes("UI Trip Fund"));
+    check("the goal shows a progress bar and a status line",
+      goals.bars === 1 && /to go|On track|Tight|funded/.test(goals.text),
+      goals.text.slice(0, 120));
+    check("the Savings Goals modal doesn't scroll the page sideways", goals.overflow);
+    await page.keyboard.press("Escape");
+    await sleep(250);
+    check("Escape closes the Savings Goals modal",
+      await page.evaluate(() =>
+        document.getElementById("savingsGoalsModal").style.display !== "block"));
+
+    // Clean up everything this phase added so the PIN phase below sees a
+    // dataset it recognises.
+    await page.evaluate(() => {
+      const store = window.app.store;
+      store.getSavingsGoals().slice().forEach((g) => store.deleteSavingsGoal(g.id));
+      const transactions = store.getTransactions();
+      Object.keys(transactions).forEach((date) => {
+        for (let i = transactions[date].length - 1; i >= 0; i--) {
+          if (/^UI (Grocery Bucket|Groceries)$/.test(transactions[date][i].description || "")) {
+            store.deleteTransaction(date, i);
+          }
+        }
+      });
+      store.flushPendingSave();
+      window.app.updateUI();
+    });
+    await sleep(300);
+
     // ---- PIN lifecycle ----------------------------------------------------
     // Set -> reload -> unlock -> change -> reload -> unlock -> disable, checking
     // at every step that the stored blob is encrypted when it should be, that
@@ -765,6 +1246,48 @@ async function dismissAlert(page) {
     check("the dialog is reachable above the lock overlay", buried.reachable,
       buried.hits.join(", "));
     await dismissAlert(page);
+
+    // ---- A dialog raised while the unlock prompt is up must not answer it ---
+    // showUnlockDialog drives the SHARED #appModal directly rather than through
+    // Utils.showModalDialog. Anything that raises an ordinary dialog while the
+    // lock is up — a cloud push still in flight when the inactivity lock fired,
+    // coming back 404 — reconfigures the same element and stacks its own
+    // listeners on the same buttons, while the unlock dialog's stayed attached.
+    // One click on THAT dialog then also fired the unlock's confirm handler and
+    // resolved the unlock with the (now empty) shared input, so the user got a
+    // spurious "Incorrect PIN" on top of the dialog they were actually
+    // answering. Only a real click through the shared DOM shows this.
+    const preempt = await page.evaluate(async () => {
+      const seen = [];
+      const answered = Utils.showModalConfirm(
+        "Gist not found. Would you like to create a new one?",
+        "Gist Not Found",
+        { confirmText: "Create New", cancelText: "Cancel" }
+      );
+      await new Promise((r) => setTimeout(r, 250));
+      seen.push(document.getElementById("appModalTitle").textContent);
+      document.getElementById("appModalCancel").click();
+      const result = await answered;
+      await new Promise((r) => setTimeout(r, 900));
+      return {
+        titleWhileOpen: seen[0],
+        confirmResult: result,
+        titleAfter: document.getElementById("appModalTitle").textContent,
+        modalOpen: document.getElementById("appModal").style.display === "block",
+        stillLocked: window.pinProtection.isLocked === true,
+      };
+    });
+    check("a dialog raised over the lock takes the shared modal",
+      preempt.titleWhileOpen === "Gist Not Found", preempt.titleWhileOpen);
+    check("answering it returns its own answer, not the unlock's",
+      preempt.confirmResult === false, String(preempt.confirmResult));
+    check("the unlock prompt comes back once that dialog is done",
+      preempt.titleAfter === "Unlock" && preempt.modalOpen,
+      `${preempt.titleAfter} / open=${preempt.modalOpen}`);
+    check("the app is still locked after the interruption", preempt.stillLocked);
+    // No stray "Incorrect PIN" was raised by the interruption: the dialog on
+    // screen is the unlock prompt itself, which the assertions above pin.
+
     await page.evaluate(() => {
       document.getElementById("appModalInput").value = "4321";
       document.getElementById("appModalConfirm").click();

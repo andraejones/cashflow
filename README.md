@@ -8,7 +8,7 @@ Plan and monitor monthly cash movement and debts.
 
 ## Documentation status
 
-Updated for appVersion 2.0.0 on 2026-06-24 (source of truth: `js/transaction-store.js`). The running build timestamp is shown at the bottom of the menu and lives in `js/build.js`.
+Updated for appVersion 2.0.0 on 2026-08-21 (source of truth: `js/transaction-store.js`). The running build timestamp is shown at the bottom of the menu and lives in `js/build.js`.
 
 ## Features
 
@@ -18,12 +18,17 @@ Updated for appVersion 2.0.0 on 2026-06-24 (source of truth: `js/transaction-sto
 - Authorized recurring payments: a recurring occurrence that was settled a day or two after its scheduled date shows as "(Authorized)" (grayed, not struck through, no calendar star) rather than "(Skipped)", since the payment did happen and just cleared later. Genuine skips and backward moves are unchanged.
 - Ending balances act as reconciliation anchors: an entered ending balance is shown as-is and is treated as authoritative cash on that day, reconciling unsettled expenses dated on or before it; only later unsettled items drag the running balance.
 - Unsettled expense tracking: mark one-time or recurring expenses as unsettled; they carry forward to today's view until resolved. Dual balance display (with/without unsettled) is shown when unsettled expenses exist. Older unsettled recurring expenses are auto-settled when a later occurrence clears.
-- Allocations (set-aside buckets): choose the "Allocation" transaction type to reserve money in a named bucket instead of spending it. Buckets roll forward to stay one day ahead of today while they hold a balance, regular one-time expenses can draw down from a bucket, and a bucket is cleared with "Close Out". The menu's "Allocated" view lists buckets soonest-first, and days holding an allocation get a light-purple highlight.
+- Allocations (set-aside buckets): choose the "Allocation" transaction type to reserve money in a named bucket instead of spending it. Buckets roll forward onto today while they hold a balance, regular one-time expenses can draw down from a bucket, and a bucket is cleared with "Close Out". The menu's "Allocated" view lists buckets soonest-first, and days holding an allocation get a light-purple highlight.
   - **Auto close-out**: tick "Auto close-out" on an allocation to pin it to its date (it no longer rolls forward) and have it removed automatically once that date passes — a use-it-or-lose-it bucket whose own date is the deadline.
-  - **Recurring buckets**: with auto close-out on, an allocation can be made recurring. Each period drops a fresh pinned bucket (e.g. a monthly grocery reserve) that you draw against; unspent amounts do not carry into the next period, and each period's bucket closes out after its date.
+  - **Recurring buckets**: any allocation can be made recurring, in two flavors. *With* auto close-out, each period drops a fresh pinned bucket (e.g. a monthly grocery reserve) that closes out after its own date. *Without* it, each period's bucket stays live across the whole period and is retired when the next one arrives. Either way unspent amounts do not carry into the next period. A period you skip sets nothing aside, so it holds no reserve and does not retire the previous bucket.
+  - **Free funds**: one recurring allocation series can be starred (⭐ in the "Allocated" view) as the household's free-funds bucket. While one is designated the calendar hides daily running balances and shows that bucket's remaining amount on the current day, so what is spendable is visible without exposing the whole budget.
 - Description autocomplete suggests previously used descriptions while typing (disabled for allocation buckets).
 - Hidden transactions (e.g. debt-snowball generated) are shown with a visual distinction.
 - Debt snowball planner (a full-page view): every debt pays only its minimum while you declare a **minimum daily cashflow floor**; whatever your projected daily checking balance carries above that floor — durably, so a payoff never drops a later day below it — is swept into a full debt payoff, smallest-balance first, on the exact day the cash is available (independent of the debt's due date). Freed-up minimums of paid-off debts raise that surplus naturally, so there is no separate set-aside fund. (This suits lenders that apply overpayments as pre-payments rather than to principal.) Includes a per-debt interest rate field, a configurable month to start applying the floor, one-time cash infusions, remaining-balance display on each day-view debt payment, and a "Convert to Debt" shortcut from any recurring expense.
+- Two calendar layouts: an agenda list (the default, one row per day with that day's line items) and the classic month grid. The choice persists.
+- What-if preview: try a hypothetical transaction without saving it. Drafts ride in the live balance walk — so every projected balance and the 30-day minimum reflect them — and a banner shows the swing with Apply / Discard. They are never written to storage, an export, or the cloud.
+- Savings goals: name, target amount, target date and amount saved so far, with a progress bar and a feasibility line computed from the same balance walk (the lowest projected balance through the target date, less the snowball's daily floor).
+- Bank statement reconciliation: upload a Suncoast transaction-history CSV and compare it against the calendar for the statement period, entirely on the device. The report offers to add a bank line that is missing from the app, settle an entry the bank has cleared (dating it to the day it posted), re-date a drifted entry or shift its whole series, fix an amount, and it suggests recurring series for payees that repeat on the statement.
 - Search with advanced filters, sort by date/amount/description, pagination (50 results per page), and CSV export. A search box is also available inline in the top toolbar.
 - Monthly summary shows the projected minimum balance for the next 30 days and a Notes link.
 - Full data import and export (JSON), via "Save to Device" / "Load from Device".
@@ -33,9 +38,13 @@ Updated for appVersion 2.0.0 on 2026-06-24 (source of truth: `js/transaction-sto
 
 A toolbar across the top of the calendar holds a hamburger menu and an inline search box. The menu contains:
 
+- **Switch to Calendar View** / **Switch to Agenda View** — toggles the two layouts.
 - **Recent Transactions** — quick list of recent entries; click one to open its day to edit or delete.
-- **Allocated** — list of allocation buckets, soonest to farthest.
+- **Allocated** — list of allocation buckets, soonest to farthest, with the free-funds star.
+- **What-If Preview** — add a hypothetical transaction and see the swing.
+- **Savings Goals** — add and track goals.
 - **Debt Snowball** — opens the full-page debt planner.
+- **Reconcile Bank Statement** — compare a bank CSV against the calendar.
 - **Save to Device** / **Load from Device** — JSON export/import.
 - **Save to Cloud** / **Load from Cloud** — GitHub Gist sync.
 - **Set/Change PIN** and, on supported devices, a biometrics toggle.

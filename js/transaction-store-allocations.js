@@ -303,7 +303,9 @@ Object.assign(TransactionStore.prototype, {
     const cutoff = livePeriodDate || todayStr;
     const complete = Array.from(demandByPeriod.entries())
       .filter(([p]) => p < cutoff)
-      .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+      // Period dates are Map keys, so no two can be equal — but the 0 case
+      // costs nothing and keeps every comparator in the app consistent.
+      .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
       .slice(-6);
     if (complete.length < 3) return null;
 
@@ -508,6 +510,18 @@ Object.assign(TransactionStore.prototype, {
           t.recurringId &&
           t.type === "expense"
         ) {
+          // A SKIPPED occurrence set no money aside, so it holds no reserve and
+          // cannot supersede anything — getAllocations and the reserve index
+          // already exclude it, and this rule has to agree with them or the two
+          // halves fight. They did: skipping this week's bucket made this sweep
+          // treat the skipped date as "live" and FORFEIT the previous bucket —
+          // the one getAllocations was still offering for draws, with money
+          // already drawn from it. It was deleted and tombstoned, its remaining
+          // reserve was released into every projected balance, and the expenses
+          // billed against it were left dangling. On every device.
+          if (this.isTransactionSkipped(date, t.recurringId)) {
+            return;
+          }
           const cur = liveRollingDate.get(t.recurringId);
           if (!cur || date > cur) {
             liveRollingDate.set(t.recurringId, date);

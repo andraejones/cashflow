@@ -382,7 +382,7 @@ Object.assign(TransactionStore.prototype, {
             JSON.parse(storedSnowballSettings), "debtSnowballSettings"
           ) || {};
         this.debtSnowballSettings = {
-          dailyFloor: this._finiteNumber(parsedSettings.dailyFloor),
+          dailyFloor: this._normalizeDailyFloor(parsedSettings.dailyFloor),
           extraPaymentStartMonth: this.normalizeExtraStartMonth(
             parsedSettings.extraPaymentStartMonth
           ),
@@ -801,7 +801,7 @@ Object.assign(TransactionStore.prototype, {
         data.savingsGoals, "imported savingsGoals"
       ).map((goal) => this._normalizeSavingsGoal(goal));
       this.debtSnowballSettings = {
-        dailyFloor: this._finiteNumber(data.debtSnowballSettings?.dailyFloor),
+        dailyFloor: this._normalizeDailyFloor(data.debtSnowballSettings?.dailyFloor),
         extraPaymentStartMonth: this.normalizeExtraStartMonth(
           data.debtSnowballSettings?.extraPaymentStartMonth
         ),
@@ -904,15 +904,29 @@ Object.assign(TransactionStore.prototype, {
         }
       });
       Object.keys(this.transactions).forEach((date) => {
+        // Pre-2.0 rows carried an `isRecurring` flag instead of a recurringId;
+        // bind each one to the series it belongs to.
+        const rowDate = Utils.parseDateString(date);
         this.transactions[date].forEach((t, index) => {
           if (t.isRecurring) {
-            const matchingRt = this.recurringTransactions.find(
-              (rt) =>
-                rt.amount === (t.originalAmount || t.amount) &&
-                rt.type === (t.originalType || t.type) &&
-                rt.description === (t.originalDescription || t.description) &&
-                Utils.parseDateString(rt.startDate) <= Utils.parseDateString(date)
-            );
+            const matchingRt = this.recurringTransactions.find((rt) => {
+              if (
+                rt.amount !== (t.originalAmount || t.amount) ||
+                rt.type !== (t.originalType || t.type) ||
+                rt.description !== (t.originalDescription || t.description)
+              ) {
+                return false;
+              }
+              // Both dates must be READABLE before comparing them. This was
+              // `parseDateString(rt.startDate) <= parseDateString(date)`, and
+              // `null <= aDate` coerces null to 0 and the date to its
+              // timestamp — so a series with an unparseable startDate matched
+              // every legacy row, binding it to the wrong series. The same
+              // coercion blanked the calendar once already (see the startDate
+              // gate in applyRecurringTransactions).
+              const seriesStart = Utils.parseDateString(rt.startDate);
+              return !!seriesStart && !!rowDate && seriesStart <= rowDate;
+            });
 
             if (matchingRt) {
               this.transactions[date][index] = {

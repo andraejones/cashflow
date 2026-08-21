@@ -88,9 +88,15 @@ class SavingsGoalsUI {
     const list = document.getElementById("savingsGoalsList");
     if (!list) return;
 
-    const goals = [...this.store.getSavingsGoals()].sort((a, b) =>
-      (a.targetDate || "") < (b.targetDate || "") ? -1 : 1
-    );
+    // Soonest target date first, and EQUAL dates keep the order they were added
+    // in. `a < b ? -1 : 1` never returns 0, which tells the engine that two
+    // equal dates are also greater than each other — an inconsistent comparator,
+    // so goals sharing a date could come back in either order.
+    const goals = [...this.store.getSavingsGoals()].sort((a, b) => {
+      const left = a.targetDate || "";
+      const right = b.targetDate || "";
+      return left < right ? -1 : left > right ? 1 : 0;
+    });
 
     list.innerHTML = "";
     if (goals.length === 0) {
