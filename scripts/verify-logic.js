@@ -11,7 +11,14 @@ global.localStorage = {
 };
 
 global.window = {
-  localStorage: global.localStorage
+  localStorage: global.localStorage,
+  // No-op listener stubs, mirroring the global.document stub below. The UI
+  // classes register window-level listeners in their constructors
+  // (DebtSnowballUI's popstate handler), so a test that instantiates one needs
+  // these to exist — without them the constructor throws before the test can
+  // reach the logic it is actually about.
+  addEventListener: () => {},
+  removeEventListener: () => {},
 };
 // Form fields the tests want a UI method to read. Empty by default, so
 // getElementById keeps returning null for every test that predates it; TEST 48
@@ -30,6 +37,20 @@ global.document = {
   // gives. TEST 49 drives saveDebt, which reads the end-condition radios.
   querySelectorAll: () => []
 };
+// Shared by the Utils stub below so parseDateString and
+// isLastCalendarDayOfMonth cannot drift apart from each other, or from
+// js/utils.js (TEST 81 compares them).
+function __parseDateStringStub(str) {
+  if (!str || typeof str !== 'string') return null;
+  const [y, m, d] = str.split('T')[0].split('-').map(Number);
+  // Number.isFinite, not !isNaN — isNaN(Infinity) === false let "1e999-01-01"
+  // through as an Invalid Date in js/utils.js.
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null;
+  const parsed = new Date(y, m - 1, d, 12, 0, 0);
+  if (isNaN(parsed.getTime())) return null;
+  return parsed;
+}
+
 global.Utils = {
   generateUniqueId: () => Math.random().toString(36).substr(2, 9),
   formatDateString: (date) => {
@@ -38,18 +59,15 @@ global.Utils = {
   // Mirrors js/utils.js exactly: null for empty/malformed input, and the date
   // part of an ISO date-time ("2026-06-28T00:00") is kept. A looser stub here
   // lets code that would throw or misparse in the browser pass the tests.
-  parseDateString: (str) => {
-    if (!str || typeof str !== 'string') return null;
-    const [y, m, d] = str.split('T')[0].split('-').map(Number);
-    if (isNaN(y) || isNaN(m) || isNaN(d)) return null;
-    return new Date(y, m - 1, d, 12, 0, 0);
-  },
+  parseDateString: (str) => __parseDateStringStub(str),
   isLastCalendarDayOfMonth: (str) => {
-    if (!str || typeof str !== 'string') return false;
-    const [y, m, d] = str.split('-').map(Number);
-    if (isNaN(y) || isNaN(m) || isNaN(d)) return false;
-    const lastDay = new Date(y, m, 0).getDate();
-    return d === lastDay;
+    // Same parse, same arithmetic as js/utils.js. Reimplementing it
+    // independently made the stub and the real helper disagree on malformed
+    // input — exactly where a harness silently stops testing the app.
+    const date = __parseDateStringStub(str);
+    if (!date) return false;
+    const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+    return date.getDate() === lastDay;
   },
   // No-op UI helpers so headless tests can drive UI-adjacent methods
   // (e.g. BankReconcileUI._shiftSeries) that fire notifications.
@@ -5707,6 +5725,1380 @@ console.log("TEST 70: Expansion Cost Doesn't Grow With A Series' Age");
   console.log(
     `✅ A 10-year-old series expands identically to a young one, in ${calls} interval computations`
   );
+}
+
+// TEST 71: an unrecognized custom-interval UNIT must not hang the expansion.
+//
+// applyCustomRecurrence guards the interval VALUE (a zero/negative step would
+// stall the catch-up loop) but not the unit. getCustomIntervalDate only knows
+// days/weeks/months and returns the START date unchanged for anything else, so
+// the month-stepped branch — `while (currentDate < startOfMonth)` — never
+// advances and the render never returns. The add form's <select> can only emit
+// the three known units, but recurring definitions are NOT normalized on the
+// way in (unlike debts, which _normalizeDebt coerces), so a hand-edited backup
+// or a merged gist carrying "years" is enough to freeze the app on load.
+console.log("TEST 71: An Unknown Custom-Interval Unit Skips Instead Of Hanging");
+{
+  const expandWithUnit = (unit) => {
+    const transactions = {};
+    const store = {
+      getTransactions: () => transactions,
+      getRecurringTransactions: () => [
+        {
+          id: "u",
+          amount: 10,
+          type: "expense",
+          description: "odd unit",
+          recurrence: "custom",
+          customInterval: { value: 1, unit },
+          startDate: "2020-01-01",
+        },
+      ],
+      getSkippedTransactions: () => ({}),
+      isTransactionSkipped: () => false,
+      trackDeletedTransaction: () => {},
+      saveData: () => {},
+      debouncedSave: () => {},
+    };
+    const manager = new RecurringTransactionManager(store);
+    // A real hang would never return, so bound the work instead of the wall
+    // clock: every step of the stalled loop calls getCustomIntervalDate.
+    const original = RecurringTransactionManager.prototype.getCustomIntervalDate;
+    let calls = 0;
+    RecurringTransactionManager.prototype.getCustomIntervalDate = function (...args) {
+      calls++;
+      if (calls > 5000) {
+        throw new Error(
+          `expansion is not advancing: ${calls} interval computations for unit "${unit}"`
+        );
+      }
+      return original.apply(this, args);
+    };
+    try {
+      manager.applyRecurringTransactions(2026, 6);
+    } finally {
+      RecurringTransactionManager.prototype.getCustomIntervalDate = original;
+    }
+    return Object.keys(transactions).sort();
+  };
+
+  // The known units still expand exactly as before.
+  const daily = expandWithUnit("days");
+  if (daily.length !== 31) {
+    throw new Error(`daily custom series produced ${daily.length} days in July, expected 31`);
+  }
+  const monthly = expandWithUnit("months");
+  if (monthly.length !== 1) {
+    throw new Error(`monthly custom series produced ${monthly.length} days in July, expected 1`);
+  }
+
+  // The unknown ones are skipped, not walked.
+  ["years", "fortnights", "", null, undefined].forEach((unit) => {
+    const dates = expandWithUnit(unit);
+    if (dates.length !== 0) {
+      throw new Error(
+        `custom series with unit "${unit}" materialized ${dates.length} occurrence(s); expected none`
+      );
+    }
+  });
+
+  console.log("✅ Unknown custom-interval units are skipped; known ones expand unchanged");
+}
+
+// TEST 72: a recurring instance whose series definition is gone must still be
+// editable.
+//
+// editTransaction's "all" scope guards `if (recurringTransaction)` and returns
+// false when the definition is missing; the "future" scope read
+// `recurringTransaction.recurrence` while assembling the split and threw
+// instead, so the whole edit died with a TypeError and the user's change was
+// lost. An instance CAN outlive its definition — a cloud merge that keeps a
+// modified instance while the other device's tombstone removes the series is
+// exactly that shape.
+console.log("TEST 72: Editing An Instance Whose Series Is Gone Doesn't Throw");
+{
+  const store = new TransactionStore();
+  store.transactions = {
+    "2026-08-10": [
+      {
+        id: "orphan-1",
+        amount: 50,
+        type: "expense",
+        description: "Ghost bill",
+        recurringId: "series-that-no-longer-exists",
+        modifiedInstance: true,
+        _lastModified: "2026-08-01T00:00:00.000Z",
+      },
+    ],
+  };
+  store.recurringTransactions = [];
+  const manager = new RecurringTransactionManager(store);
+
+  ["future", "all"].forEach((scope) => {
+    let result;
+    try {
+      result = manager.editTransaction(
+        "2026-08-10",
+        0,
+        { amount: 75, type: "expense", description: "Ghost bill (edited)" },
+        scope
+      );
+    } catch (error) {
+      throw new Error(`editTransaction threw for scope "${scope}": ${error.message}`);
+    }
+    if (result !== true) {
+      throw new Error(`editTransaction returned ${result} for scope "${scope}"; expected true`);
+    }
+  });
+
+  const edited = store.transactions["2026-08-10"][0];
+  if (edited.amount !== 75) {
+    throw new Error(`orphaned instance kept amount ${edited.amount}; expected the edited 75`);
+  }
+  if (edited.modifiedInstance !== true) {
+    throw new Error("the edited orphan lost its modifiedInstance flag, so it won't persist");
+  }
+  if (store.recurringTransactions.length !== 0) {
+    throw new Error(
+      `editing an orphan fabricated ${store.recurringTransactions.length} recurring definition(s)`
+    );
+  }
+
+  console.log("✅ An orphaned recurring instance edits cleanly under every scope");
+}
+
+// TEST 73: one unusable amount must cost only its own row.
+//
+// roundToCents maps NaN to 0 — a deliberate safety net — but the day's subtotal
+// was accumulated as `subtotal + t.amount`, so a row with no usable amount
+// turned the whole running sum into NaN and then into 0, discarding every
+// EARLIER row on that day. Three income rows of 1000 / (no amount key) / 250
+// reported 250. No error, no warning, just a wrong number on the calendar and
+// in every balance downstream of it. _repairWalkAmounts skipped the same rows
+// because `undefined` short-circuited its guard, so a reload never healed it.
+console.log("TEST 73: One Unusable Amount Costs Only Its Own Row");
+{
+  const badAmounts = [undefined, null, "abc", {}, [], NaN, Infinity, -Infinity];
+
+  // --- read side: the walk contains the damage to the offending row --------
+  badAmounts.forEach((bad) => {
+    const rows = [
+      { type: "income", amount: 1000, description: "good before" },
+      { type: "income", amount: bad, description: "bad" },
+      { type: "income", amount: 250, description: "good after" },
+      { type: "expense", amount: 100, description: "expense good" },
+      { type: "expense", amount: bad, description: "expense bad" },
+    ];
+    // `amount: undefined` still creates the key; delete it so the "missing
+    // key entirely" shape is genuinely exercised.
+    if (bad === undefined) {
+      delete rows[1].amount;
+      delete rows[4].amount;
+    }
+    const store = {
+      getTransactions: () => ({ "2026-08-20": rows }),
+      getMonthlyBalances: () => ({}),
+      getMoveForRecurring: () => null,
+    };
+    const service = new CalculationService(store, {
+      isTransactionSkipped: () => false,
+    });
+    const totals = service.calculateDailyTotals("2026-08-20");
+    if (totals.income !== 1250) {
+      throw new Error(
+        `amount ${String(bad)} in the middle of a day gave income ${totals.income}; expected 1250`
+      );
+    }
+    if (totals.expense !== 100) {
+      throw new Error(
+        `amount ${String(bad)} gave expense ${totals.expense}; expected 100`
+      );
+    }
+  });
+
+  // --- write side: the sweep repairs the stored value so it stops recurring -
+  {
+    const store = new TransactionStore();
+    store.transactions = {
+      "2026-08-20": [
+        { id: "a", type: "income", amount: 1000 },
+        { id: "b", type: "income", description: "no amount key" },
+        { id: "c", type: "income", amount: null },
+      ],
+    };
+    store.recurringTransactions = [{ id: "r", type: "expense", description: "no amount" }];
+    store.monthlyBalances = { "2026-08": { startingBalance: 10 } };
+    const repaired = store._repairWalkAmounts();
+    if (store.transactions["2026-08-20"][1].amount !== 0) {
+      throw new Error("a transaction with no amount key was left unrepaired");
+    }
+    if (store.recurringTransactions[0].amount !== 0) {
+      throw new Error("a recurring definition with no amount key was left unrepaired");
+    }
+    if (store.transactions["2026-08-20"][0].amount !== 1000) {
+      throw new Error("the sweep rewrote a perfectly good amount");
+    }
+    // monthlyBalances is derived and rebuilt every render; an absent field
+    // there is incompleteness, not corruption, and must stay absent.
+    if ("endingBalance" in store.monthlyBalances["2026-08"]) {
+      throw new Error("the sweep invented an endingBalance on a derived record");
+    }
+    if (repaired !== 3) {
+      throw new Error(`sweep reported ${repaired} repairs; expected 3`);
+    }
+  }
+
+  console.log("✅ An unusable amount zeroes only itself, and the sweep repairs it on disk");
+}
+
+// TEST 74: the reserved-total index must answer exactly what the scan did.
+//
+// getReservedTotalOnOrBefore is now a prefix-summed index with a binary-search
+// lookup instead of a full re-scan of the transactions map per call (the scan
+// cost anchors x dataset — quadratic in history length, and the largest single
+// cost of a render on a multi-year dataset). An index is only worth having if
+// it is exactly right, so pin it against a brute-force reference: same
+// skip-awareness, same allocated-expense filter, same per-step cent rounding.
+console.log("TEST 74: The Reserved-Total Index Matches A Brute-Force Scan");
+{
+  // Deterministic PRNG so a failure is reproducible.
+  const rng = (seed) => () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x7fffffff;
+  };
+
+  const reference = (transactions, skipped, dateString) => {
+    let total = 0;
+    Object.keys(transactions)
+      .sort()
+      .forEach((d) => {
+        if (d > dateString) return;
+        transactions[d].forEach((t) => {
+          if (t.type !== "expense" || t.allocated !== true) return;
+          if (t.recurringId && (skipped[d] || []).includes(t.recurringId)) return;
+          const n = Number(t.amount);
+          total = Math.round((total + (Number.isFinite(n) ? n : 0)) * 100) / 100;
+        });
+      });
+    return Math.round(total * 100) / 100;
+  };
+
+  let checked = 0;
+  for (let seed = 1; seed <= 60; seed++) {
+    const rnd = rng(seed);
+    const transactions = {};
+    const skipped = {};
+    const base = new Date(2024, 0, 1);
+    for (let i = 0; i < 220; i++) {
+      const d = new Date(base.getFullYear(), base.getMonth(), base.getDate() + i);
+      const key = Utils.formatDateString(d);
+      const rows = [];
+      const count = Math.floor(rnd() * 3);
+      for (let r = 0; r < count; r++) {
+        const allocated = rnd() < 0.5;
+        const row = {
+          // Cent-valued, which is all the app's own forms can produce.
+          amount: Math.round(rnd() * 40000) / 100,
+          type: rnd() < 0.15 ? "income" : "expense",
+          description: `r${i}-${r}`,
+        };
+        if (allocated && row.type === "expense") {
+          row.allocated = true;
+          if (rnd() < 0.4) row.recurringId = `series-${r % 3}`;
+        }
+        rows.push(row);
+      }
+      if (rows.length) transactions[key] = rows;
+      if (rnd() < 0.1) skipped[key] = [`series-${Math.floor(rnd() * 3)}`];
+    }
+
+    const service = new CalculationService(
+      { getTransactions: () => transactions, getMonthlyBalances: () => ({}) },
+      {
+        isTransactionSkipped: (date, id) => (skipped[date] || []).includes(id),
+      }
+    );
+
+    // Query every date in the span plus points outside it on both sides.
+    const probes = Object.keys(transactions).sort();
+    probes.push("2000-01-01", "2099-12-31");
+    probes.forEach((dateString) => {
+      const expected = reference(transactions, skipped, dateString);
+      const actual = service.getReservedTotalOnOrBefore(dateString);
+      if (actual !== expected) {
+        throw new Error(
+          `seed ${seed} @ ${dateString}: index says ${actual}, scan says ${expected}`
+        );
+      }
+      checked++;
+    });
+
+    // The index is cache-generation scoped: a mutation followed by
+    // invalidateCache must be visible, or a render would show a stale reserve.
+    const firstDate = Object.keys(transactions).sort()[0];
+    const lastDate = probes[probes.length - 3];
+    const before = service.getReservedTotalOnOrBefore(lastDate);
+    (transactions[firstDate] = transactions[firstDate] || []).push({
+      amount: 12.34,
+      type: "expense",
+      description: "late arrival",
+      allocated: true,
+    });
+    service.invalidateCache();
+    const after = service.getReservedTotalOnOrBefore(lastDate);
+    if (Math.round((after - before) * 100) / 100 !== 12.34) {
+      throw new Error(
+        `seed ${seed}: the index did not pick up a new reserve after invalidateCache ` +
+          `(${before} -> ${after})`
+      );
+    }
+  }
+
+  console.log(`✅ Index and scan agree on ${checked} lookups, and the index invalidates`);
+}
+
+// TEST 75: expanding a recurring series must not leave empty date entries.
+//
+// addRecurringTransactionToDate created transactions[date] = [] BEFORE the two
+// allocation guards that `return` — a past auto-close-out bucket, and a
+// superseded rolling one — so every skipped occurrence left an empty array
+// behind under its date. Those keys are not harmless: updateMonthlyBalances
+// derives the month range it walks from the map's KEYS, so an empty entry at an
+// old date widens every render's work. They were only ever cleared as a side
+// effect of an unrelated full-map loop in _collapseSupersededRollingAllocations,
+// which does not run for every dataset — so for anyone without a rolling
+// allocation series they simply accumulated.
+console.log("TEST 75: Expansion Leaves No Empty Date Entries Behind");
+{
+  const countEmpty = (transactions) =>
+    Object.keys(transactions).filter(
+      (d) => Array.isArray(transactions[d]) && transactions[d].length === 0
+    );
+
+  // A past-dated auto-close-out allocation series: every occurrence before
+  // today is refused, so every one of them used to leave an empty key.
+  const today = new Date();
+  const start = new Date(today.getFullYear(), today.getMonth() - 4, 5);
+  const transactions = {};
+  const store = {
+    getTransactions: () => transactions,
+    getRecurringTransactions: () => [
+      {
+        id: "closeout",
+        amount: 100,
+        type: "expense",
+        description: "Pinned bucket",
+        recurrence: "monthly",
+        startDate: Utils.formatDateString(start),
+        allocated: true,
+        autoCloseout: true,
+      },
+    ],
+    getSkippedTransactions: () => ({}),
+    isTransactionSkipped: () => false,
+    trackDeletedTransaction: () => {},
+    saveData: () => {},
+    debouncedSave: () => {},
+  };
+  const manager = new RecurringTransactionManager(store);
+  for (let back = 4; back >= 0; back--) {
+    const d = new Date(today.getFullYear(), today.getMonth() - back, 1);
+    manager.applyRecurringTransactions(d.getFullYear(), d.getMonth());
+  }
+
+  const empties = countEmpty(transactions);
+  if (empties.length > 0) {
+    throw new Error(
+      `expansion left ${empties.length} empty date entr${empties.length === 1 ? "y" : "ies"}: ${empties.join(", ")}`
+    );
+  }
+  // Guard against a vacuous pass: the guards under test must have actually
+  // fired, i.e. the past occurrences really were refused.
+  const materialized = Object.keys(transactions).length;
+  if (materialized > 1) {
+    throw new Error(
+      `expected at most the current period to materialize, got ${materialized} dates`
+    );
+  }
+
+  console.log("✅ Refused occurrences leave no empty date keys in the map");
+}
+
+// TEST 76: a recurring definition with no usable startDate must not brick the
+// calendar.
+//
+// applyRecurringTransactions gates each series on `startDate <= targetEndOfMonth`.
+// Utils.parseDateString returns NULL for a missing or malformed date, and
+// `null <= aDate` coerces null to 0 and the date to its timestamp — so the gate
+// is always true and every one of the ten apply*Recurrence branches then
+// dereferenced the null (getFullYear / getMonth / daysBetween) and threw. That
+// throw takes down applyRecurringTransactions, and with it updateMonthlyBalances
+// and the whole render: a blank calendar with no way back short of clearing
+// storage. Recurring definitions are NOT normalized on the way in from an import
+// or a cloud merge (debts are, via _normalizeDebt), so one bad value in a
+// restored backup was enough.
+console.log("TEST 76: A Recurring Series With No Usable Start Date Is Skipped");
+{
+  const RECURRENCES = [
+    "once", "daily", "weekly", "bi-weekly", "monthly", "semi-monthly",
+    "quarterly", "semi-annual", "yearly", "custom",
+  ];
+  const BAD_DATES = [undefined, null, "", "not-a-date", "2026-13", 20260101, {}, []];
+
+  RECURRENCES.forEach((recurrence) => {
+    BAD_DATES.forEach((startDate) => {
+      const transactions = {};
+      const definition = {
+        id: `bad-${recurrence}`,
+        amount: 25,
+        type: "expense",
+        description: "Broken series",
+        recurrence,
+        startDate,
+      };
+      if (recurrence === "custom") {
+        definition.customInterval = { value: 1, unit: "months" };
+      }
+      if (recurrence === "semi-monthly") {
+        definition.semiMonthlyDays = [1, 15];
+      }
+      // A good series alongside it: the bad one must not take the good one down.
+      const good = {
+        id: "good",
+        amount: 40,
+        type: "expense",
+        description: "Working series",
+        recurrence: "monthly",
+        startDate: "2026-08-03",
+      };
+      const store = {
+        getTransactions: () => transactions,
+        getRecurringTransactions: () => [definition, good],
+        getSkippedTransactions: () => ({}),
+        isTransactionSkipped: () => false,
+        trackDeletedTransaction: () => {},
+        saveData: () => {},
+        debouncedSave: () => {},
+      };
+      const manager = new RecurringTransactionManager(store);
+      try {
+        manager.applyRecurringTransactions(2026, 7); // August 2026
+      } catch (error) {
+        throw new Error(
+          `recurrence "${recurrence}" with startDate ${JSON.stringify(startDate)} threw: ${error.message}`
+        );
+      }
+      const rows = Object.values(transactions).flat();
+      if (rows.some((t) => t.recurringId === definition.id)) {
+        throw new Error(
+          `recurrence "${recurrence}" with startDate ${JSON.stringify(startDate)} materialized an occurrence`
+        );
+      }
+      if (!rows.some((t) => t.recurringId === "good")) {
+        throw new Error(
+          `the healthy series stopped expanding alongside a broken "${recurrence}" one`
+        );
+      }
+    });
+  });
+
+  // The sibling path: countOccurrencesBefore walks the same schedules.
+  const manager = new RecurringTransactionManager({
+    getTransactions: () => ({}),
+    getRecurringTransactions: () => [],
+    getSkippedTransactions: () => ({}),
+    isTransactionSkipped: () => false,
+  });
+  RECURRENCES.forEach((recurrence) => {
+    BAD_DATES.forEach((startDate) => {
+      const count = manager.countOccurrencesBefore(
+        { recurrence, startDate, customInterval: { value: 1, unit: "days" } },
+        Utils.parseDateString("2026-08-20")
+      );
+      if (count !== 0) {
+        throw new Error(
+          `countOccurrencesBefore returned ${count} for an unusable startDate (${recurrence})`
+        );
+      }
+    });
+  });
+
+  console.log(
+    `✅ ${RECURRENCES.length * BAD_DATES.length} broken series skipped cleanly; healthy ones unaffected`
+  );
+}
+
+// TEST 77: one malformed collection must not reject an entire import.
+//
+// importData read its collections with `x || []` / `x || {}`, which only
+// catches null and undefined. A truncated write or a hand edit that leaves
+// `"debts": 0` in an otherwise good backup threw inside .map, landed in
+// importData's catch, restored the pre-import backup and reported "Invalid file
+// format" — the user lost the WHOLE restore over one bad key. loadData's rule
+// for exactly the same data is the opposite: treat an unusable shape as missing,
+// keep the empty default, warn, and carry on. This pins the two to that rule.
+console.log("TEST 77: A Malformed Collection Doesn't Reject The Whole Import");
+{
+  const goodPayload = () => ({
+    transactions: {
+      "2026-08-10": [
+        { id: "keep-me", amount: 42.5, type: "expense", description: "Real row", _lastModified: "2026-08-01T00:00:00.000Z" },
+      ],
+    },
+    monthlyBalances: {},
+    recurringTransactions: [
+      { id: "rt-keep", amount: 10, type: "expense", description: "Series", recurrence: "monthly", startDate: "2026-08-01" },
+    ],
+    debts: [{ id: "d1", name: "Card", balance: 100, minPayment: 10 }],
+    cashInfusions: [{ id: "c1", name: "Refund", amount: 50, date: "2026-09-01" }],
+    savingsGoals: [{ id: "g1", name: "Fund", targetAmount: 500, targetDate: "2027-01-01", saved: 10 }],
+    skippedTransactions: {},
+    movedTransactions: {},
+    monthlyNotes: { "2026-08": { text: "note" } },
+    debtSnowballSettings: { dailyFloor: 5 },
+    lastUpdated: "2026-08-01T00:00:00.000Z",
+  });
+
+  const JUNK = [0, 1, "", "text", true, [], {}, null];
+  const COLLECTIONS = [
+    "debts", "cashInfusions", "savingsGoals",
+    "skippedTransactions", "movedTransactions", "monthlyNotes",
+  ];
+
+  COLLECTIONS.forEach((key) => {
+    JUNK.forEach((junk) => {
+      const store = new TransactionStore();
+      const payload = goodPayload();
+      payload[key] = junk;
+      const ok = store.importData(payload);
+      if (!ok) {
+        throw new Error(
+          `import rejected outright because "${key}" was ${JSON.stringify(junk)}`
+        );
+      }
+      // Everything else must have survived.
+      const rows = Object.values(store.transactions).flat();
+      if (!rows.some((t) => t.description === "Real row")) {
+        throw new Error(`transactions were lost when "${key}" was ${JSON.stringify(junk)}`);
+      }
+      if (!store.recurringTransactions.some((rt) => rt.id === "rt-keep")) {
+        throw new Error(`recurring definitions were lost when "${key}" was ${JSON.stringify(junk)}`);
+      }
+      // And the malformed one degraded to the empty default, not to junk.
+      const landed = store[key];
+      const expectArray = ["debts", "cashInfusions", "savingsGoals"].includes(key);
+      const usable = expectArray
+        ? Array.isArray(landed)
+        : landed && typeof landed === "object" && !Array.isArray(landed);
+      if (!usable) {
+        throw new Error(
+          `"${key}" landed as ${JSON.stringify(landed)} after importing ${JSON.stringify(junk)}`
+        );
+      }
+    });
+  });
+
+  // A per-day value that isn't a list is dropped, and its siblings survive.
+  {
+    const store = new TransactionStore();
+    const payload = goodPayload();
+    payload.transactions["2026-08-11"] = 7;
+    payload.transactions["2026-08-12"] = [null, 5, { id: "ok", amount: 1, type: "expense" }];
+    if (!store.importData(payload)) {
+      throw new Error("import rejected a payload with one unusable day");
+    }
+    if (store.transactions["2026-08-11"] !== undefined) {
+      throw new Error("a non-list day survived the import");
+    }
+    const day12 = store.transactions["2026-08-12"] || [];
+    if (day12.length !== 1 || day12[0].id !== "ok") {
+      throw new Error(`unusable rows were not pruned from a day: ${JSON.stringify(day12)}`);
+    }
+    if (!Object.values(store.transactions).flat().some((t) => t.description === "Real row")) {
+      throw new Error("a good day was lost alongside a bad one");
+    }
+  }
+
+  console.log(
+    `✅ ${COLLECTIONS.length * JUNK.length} malformed collections degraded instead of failing the restore`
+  );
+}
+
+// TEST 78: the reserve index must not survive a mid-walk expansion.
+//
+// walkDays({ ensureRecurringExpansion: true }) materializes each month as it
+// crosses it — and expanding a month can create recurring ALLOCATION instances,
+// which are exactly what the reserve index sums. An index built at the first
+// anchor and reused at a later one therefore reads a reserve total computed
+// before the later month existed. That is not an abstract staleness: the anchor
+// resets the running balance to `entered − reserved`, so a missing reserve puts
+// the balance permanently too HIGH from that day on, with nothing to show for
+// it. (Before the index existed, an unseen date was rescanned from scratch, so
+// this could not happen.) calculateMinimum's forward leg is exactly this walk.
+console.log("TEST 78: A Mid-Walk Expansion Drops The Stale Reserve Index");
+{
+  const today = new Date();
+  const y = today.getFullYear();
+  const m = today.getMonth();
+  const firstOf = (offset) => Utils.formatDateString(new Date(y, m + offset, 1));
+
+  const RESERVE = 300;
+  const store = new TransactionStore();
+  store.recurringTransactions = [
+    {
+      id: "alloc",
+      amount: RESERVE,
+      type: "expense",
+      description: "Monthly reserve",
+      recurrence: "monthly",
+      startDate: firstOf(-2),
+      allocated: true,
+      autoCloseout: true,
+      _lastModified: "2020-01-01T00:00:00.000Z",
+    },
+  ];
+  const earlyAnchor = Utils.formatDateString(new Date(y, m, 5));
+  const lateAnchor = Utils.formatDateString(new Date(y, m + 2, 20));
+  store.transactions = {
+    [earlyAnchor]: [
+      { id: "a1", amount: 5000, type: "balance", description: "EB", _lastModified: "2020-01-01T00:00:00.000Z" },
+    ],
+    [lateAnchor]: [
+      { id: "a2", amount: 7000, type: "balance", description: "EB", _lastModified: "2020-01-01T00:00:00.000Z" },
+    ],
+  };
+
+  const manager = new RecurringTransactionManager(store);
+  const service = new CalculationService(store, manager);
+
+  const anchors = [];
+  service.walkDays(
+    Utils.formatDateString(new Date(y, m, 1)),
+    Utils.formatDateString(new Date(y, m + 3, 0)),
+    {
+      seedBalance: 0,
+      ensureRecurringExpansion: true,
+      onDay: (r) => {
+        if (r.isAnchor) {
+          anchors.push({
+            date: r.dateString,
+            reserved: r.reservedOnOrBefore,
+            balance: r.balance,
+          });
+        }
+      },
+    }
+  );
+
+  if (anchors.length !== 2) {
+    throw new Error(`Setup: expected 2 anchors in the walk, saw ${anchors.length}`);
+  }
+  // The later anchor sits after at least two materialized reserve instances
+  // (this month's and next month's), so its reserve total must be non-zero and
+  // the balance must be the entered figure minus it.
+  const late = anchors[1];
+  if (!(late.reserved >= RESERVE)) {
+    throw new Error(
+      `the later anchor saw reserved=${late.reserved}; the index went stale across the ` +
+        `expansion that created those buckets (expected at least ${RESERVE})`
+    );
+  }
+  if (service.roundToCents(late.balance) !== service.roundToCents(7000 - late.reserved)) {
+    throw new Error(
+      `anchor balance ${late.balance} does not equal entered 7000 − reserved ${late.reserved}`
+    );
+  }
+  // And a fresh service walking the SAME (now fully expanded) data must agree —
+  // i.e. the incremental walk matched the all-at-once answer.
+  const fresh = new CalculationService(store, manager);
+  const freshReserved = fresh.getReservedTotalOnOrBefore(lateAnchor);
+  if (freshReserved !== late.reserved) {
+    throw new Error(
+      `incremental walk saw reserved=${late.reserved}, a fresh scan says ${freshReserved}`
+    );
+  }
+
+  // The snowball projection expands months lazily too (getDayFlow) and reads
+  // reserves at anchor days, so it owes the same contract. It reaches this
+  // state whenever store.monthlyBalances is already populated — which is the
+  // NORMAL case, because loadData restores that map from localStorage, so
+  // calculateMonthlySummary finds the month present and skips the
+  // updateMonthlyBalances call that would otherwise pre-expand everything.
+  {
+    const store2 = new TransactionStore();
+    store2.recurringTransactions = [
+      {
+        id: "alloc2", amount: 250, type: "expense", description: "Reserve",
+        recurrence: "monthly",
+        startDate: Utils.formatDateString(new Date(y, m - 1, 2)),
+        allocated: true, autoCloseout: true,
+        _lastModified: "2020-01-01T00:00:00.000Z",
+      },
+      {
+        id: "pay2", amount: 3000, type: "income", description: "Pay",
+        recurrence: "monthly",
+        startDate: Utils.formatDateString(new Date(y, m - 1, 1)),
+        _lastModified: "2020-01-01T00:00:00.000Z",
+      },
+    ];
+    // TWO anchors, and the near one matters: it forces the index to be built
+    // EARLY in the walk, before getDayFlow has expanded the far anchor's month.
+    // With only the far anchor the index happens to be built after its own
+    // month is expanded, and the check passes whether or not the fix is there.
+    const nearAnchor = Utils.formatDateString(
+      new Date(y, m, Math.min(today.getDate() + 2, 27))
+    );
+    const farAnchor = Utils.formatDateString(new Date(y, m + 2, 15));
+    store2.transactions = {
+      [nearAnchor]: [
+        { id: "na", amount: 9000, type: "balance", description: "EB", _lastModified: "2020-01-01T00:00:00.000Z" },
+      ],
+      [farAnchor]: [
+        { id: "fa", amount: 9000, type: "balance", description: "EB", _lastModified: "2020-01-01T00:00:00.000Z" },
+      ],
+    };
+    store2.debts = [
+      store2._normalizeDebt({
+        id: "pd", name: "Card", balance: 800, minPayment: 40, dueDay: 10,
+        recurrence: "monthly", interestRate: 10,
+        dueStartDate: Utils.formatDateString(new Date(y, m, 10)),
+      }),
+    ];
+    store2.debtSnowballSettings = { dailyFloor: 100, extraPaymentStartMonth: "", autoGenerate: true };
+    // Prime monthlyBalances exactly as a load would, so nothing pre-expands.
+    for (let k = -2; k <= 8; k++) {
+      const d = new Date(y, m + k, 1);
+      store2.monthlyBalances[`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`] =
+        { startingBalance: 0, endingBalance: 0 };
+    }
+
+    const manager2 = new RecurringTransactionManager(store2);
+    const service2 = new CalculationService(store2, manager2);
+    const seen = {};
+    const realLookup = service2.getReservedTotalOnOrBefore.bind(service2);
+    service2.getReservedTotalOnOrBefore = (d) => {
+      const v = realLookup(d);
+      if (!(d in seen)) seen[d] = v;
+      return v;
+    };
+    const snowball = new DebtSnowballUI(store2, manager2, () => {}, service2);
+    snowball.ensureMinimumPaymentRecurring(store2.debts[0]);
+    snowball.calculateSnowballProjection(y, m, true, {
+      captureThroughIndex: y * 12 + m + 6,
+    });
+
+    if (!(farAnchor in seen)) {
+      throw new Error("Setup: the projection never read a reserve at the far anchor");
+    }
+    // Two reserve buckets exist on/before that anchor (this month's and the
+    // next). A stale index reports 0.
+    const fresh2 = new CalculationService(store2, manager2);
+    const expected = fresh2.getReservedTotalOnOrBefore(farAnchor);
+    if (expected <= 0) {
+      throw new Error(`Setup: expected a non-zero reserve at ${farAnchor}, got ${expected}`);
+    }
+    if (seen[farAnchor] !== expected) {
+      throw new Error(
+        `the projection read reserved=${seen[farAnchor]} at ${farAnchor}; a fresh scan says ` +
+          `${expected} — getDayFlow's expansion left the index stale, so the projected ` +
+          `checking balance (and the floor check that decides payoffs) reads high`
+      );
+    }
+  }
+
+  console.log(
+    `✅ The later anchor reserved $${late.reserved} across a mid-walk expansion; the projection agrees too`
+  );
+}
+
+// TEST 79: parseDateString must never hand back an Invalid Date.
+//
+// Its guard was `isNaN(year) || isNaN(month) || isNaN(day)` — and
+// isNaN(Infinity) is FALSE. So "1e999-01-01" (or "Infinity-1-1", or a year past
+// the Date range like "1e309-01-01") produced `new Date(Infinity, ...)`: an
+// Invalid Date, which is TRUTHY. Every `if (!date) return` in the app therefore
+// waved it through, and Utils.formatDateString turned it into the literal
+// string "NaN-NaN-NaN" — which then became a KEY in the transactions map, where
+// it would sit forever. Dates arrive unvalidated from imports and cloud merges,
+// which is exactly why this function documents a null return.
+console.log("TEST 79: parseDateString Returns Null, Never An Invalid Date");
+{
+  const NON_FINITE = [
+    "1e999-01-01", "Infinity-01-01", "-Infinity-1-1",
+    "2026-1e999-01", "2026-01-1e999", "1e309-01-01",
+  ];
+  NON_FINITE.forEach((input) => {
+    const out = Utils.parseDateString(input);
+    if (out !== null) {
+      const kind = out instanceof Date && isNaN(out.getTime()) ? "an Invalid Date" : String(out);
+      throw new Error(`parseDateString(${JSON.stringify(input)}) returned ${kind}; expected null`);
+    }
+  });
+
+  // Nothing that already worked may change.
+  const UNCHANGED = {
+    "2026-08-20": "2026-08-20",
+    "2026-8-2": "2026-08-02",
+    "2026-08-20T00:00": "2026-08-20",   // ISO date-time tolerance
+    "2026-02-29": "2026-03-01",         // 2026 is not a leap year; JS rolls over
+    "2024-02-29": "2024-02-29",         // 2024 is
+    "2026-12-31": "2026-12-31",
+  };
+  Object.keys(UNCHANGED).forEach((input) => {
+    const out = Utils.parseDateString(input);
+    if (!out) {
+      throw new Error(`parseDateString(${JSON.stringify(input)}) regressed to null`);
+    }
+    const got = Utils.formatDateString(out);
+    if (got !== UNCHANGED[input]) {
+      throw new Error(
+        `parseDateString(${JSON.stringify(input)}) gave ${got}, expected ${UNCHANGED[input]}`
+      );
+    }
+  });
+
+  // The empty/garbage cases still return null.
+  [null, undefined, "", "abc", 42, {}].forEach((input) => {
+    if (Utils.parseDateString(input) !== null) {
+      throw new Error(`parseDateString(${JSON.stringify(input)}) should be null`);
+    }
+  });
+
+  // The consequence the fix exists to prevent: expansion must not key the
+  // transactions map on "NaN-NaN-NaN".
+  {
+    const transactions = {};
+    const store = {
+      getTransactions: () => transactions,
+      getRecurringTransactions: () => [
+        {
+          id: "inf",
+          amount: 10,
+          type: "expense",
+          description: "Infinite start",
+          recurrence: "monthly",
+          startDate: "1e999-01-01",
+        },
+      ],
+      getSkippedTransactions: () => ({}),
+      isTransactionSkipped: () => false,
+      trackDeletedTransaction: () => {},
+      saveData: () => {},
+      debouncedSave: () => {},
+    };
+    const manager = new RecurringTransactionManager(store);
+    manager.applyRecurringTransactions(2026, 7);
+    const keys = Object.keys(transactions);
+    if (keys.some((k) => k.includes("NaN"))) {
+      throw new Error(`expansion produced a NaN-keyed date: ${keys.join(", ")}`);
+    }
+    if (keys.length !== 0) {
+      throw new Error(`a series with a non-finite start date materialized ${keys.length} date(s)`);
+    }
+  }
+
+  console.log(
+    `✅ ${NON_FINITE.length} non-finite date strings return null; valid dates unchanged`
+  );
+}
+
+// TEST 80: every cross-file call must resolve, and every file must load in
+// index.html's order.
+//
+// This app has no build step and no type checker, so a method that is renamed
+// or moved between a class and one of its prototype companions still parses
+// fine — it fails only when a user happens to reach that call. The components
+// call each other constantly (app wires eleven of them together, the menu
+// markup calls into four by name, index.html has inline onclick handlers), and
+// none of those edges is checked by anything else.
+//
+// Loads every source into its OWN vm context in index.html's exact order, which
+// also proves the load order itself: a file referencing a class declared later
+// throws right here.
+console.log("TEST 80: Every Cross-File Call Resolves");
+{
+  const vmModule = require("vm");
+  const indexHtml = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
+  const order = [...indexHtml.matchAll(/<script src="(js\/[^"]+)"><\/script>/g)].map((m) => m[1]);
+  if (order.length < 20) {
+    throw new Error(`Setup: only found ${order.length} script tags in index.html`);
+  }
+
+  const stubEl = () => ({
+    style: {}, value: "", textContent: "", innerHTML: "", dataset: {}, options: { length: 0 },
+    checked: false, hidden: false, disabled: false,
+    setAttribute() {}, getAttribute: () => null, removeAttribute() {},
+    appendChild() {}, removeChild() {}, insertBefore() {}, remove() {},
+    addEventListener() {}, removeEventListener() {}, focus() {}, blur() {},
+    querySelector: () => null, querySelectorAll: () => [], closest: () => null, contains: () => false,
+    classList: { add() {}, remove() {}, contains: () => false, toggle() {} },
+    getBoundingClientRect: () => ({ width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0 }),
+    scrollIntoView() {}, parentElement: null, parentNode: { insertBefore() {} },
+    children: [], childNodes: [], cloneNode() { return stubEl(); },
+  });
+  const mem = {
+    _d: {}, getItem(k) { return k in this._d ? this._d[k] : null; },
+    setItem(k, v) { this._d[k] = String(v); }, removeItem(k) { delete this._d[k]; }, clear() { this._d = {}; },
+  };
+  const sandbox = {
+    console: { log() {}, warn() {}, error() {} },
+    Date, Math, Number, JSON, Set, Map, isNaN, parseInt, parseFloat,
+    Object, Array, String, Boolean, Infinity, RegExp, Promise,
+    setTimeout, clearTimeout, setInterval, clearInterval,
+    localStorage: mem, crypto: require("crypto").webcrypto,
+    TextEncoder, TextDecoder, Uint8Array, ArrayBuffer,
+    btoa: (x) => Buffer.from(x, "binary").toString("base64"),
+    atob: (x) => Buffer.from(x, "base64").toString("binary"),
+    fetch: async () => ({ ok: true, status: 200, headers: { get: () => null }, json: async () => ({}), text: async () => "" }),
+    navigator: { onLine: true },
+    history: { pushState() {}, back() {}, state: null },
+    IntersectionObserver: function () { return { observe() {}, disconnect() {} }; },
+    Node: { TEXT_NODE: 3 },
+    URL: { createObjectURL: () => "blob:x", revokeObjectURL() {} },
+    Blob: function () {}, FileReader: function () { this.readAsText = () => {}; },
+    PublicKeyCredential: undefined,
+    document: {
+      getElementById: () => stubEl(), querySelector: () => stubEl(), querySelectorAll: () => [],
+      createElement: () => stubEl(), createTextNode: () => stubEl(), body: stubEl(),
+      addEventListener() {}, removeEventListener() {}, activeElement: null, contains: () => false,
+    },
+  };
+  sandbox.globalThis = sandbox;
+  sandbox.window = sandbox;
+  sandbox.addEventListener = () => {};
+  sandbox.removeEventListener = () => {};
+  vmModule.createContext(sandbox);
+  order.forEach((rel) => {
+    try {
+      vmModule.runInContext(fs.readFileSync(path.join(__dirname, "..", rel), "utf8"), sandbox);
+    } catch (error) {
+      throw new Error(`${rel} failed to load in index.html order: ${error.message}`);
+    }
+  });
+
+  vmModule.runInContext(
+    `globalThis.__c = { TransactionStore, RecurringTransactionManager, CalculationService,
+       TransactionUI, CalendarUI, SearchUI, BankReconcileUI, DebtSnowballUI, WhatIfUI,
+       SavingsGoalsUI, CloudSync, PinProtection, CashflowApp };
+     globalThis.__u = Utils; globalThis.__m = ModalManager;`,
+    sandbox
+  );
+
+  // Which class each field name refers to, so `this.<field>.<method>()` resolves.
+  const FIELD = {
+    store: "TransactionStore", recurringManager: "RecurringTransactionManager",
+    calculationService: "CalculationService", transactionUI: "TransactionUI",
+    calendarUI: "CalendarUI", searchUI: "SearchUI", bankReconcile: "BankReconcileUI",
+    debtSnowball: "DebtSnowballUI", debtSnowballUI: "DebtSnowballUI",
+    whatIf: "WhatIfUI", savingsGoals: "SavingsGoalsUI", cloudSync: "CloudSync",
+    pinProtection: "PinProtection", app: "CashflowApp",
+  };
+  const membersOf = (ctor) => {
+    const out = new Set();
+    let proto = ctor.prototype;
+    while (proto && proto !== Object.prototype) {
+      Object.getOwnPropertyNames(proto).forEach((k) => out.add(k));
+      proto = Object.getPrototypeOf(proto);
+    }
+    return out;
+  };
+  const members = {};
+  Object.keys(sandbox.__c).forEach((k) => { members[k] = membersOf(sandbox.__c[k]); });
+  const utilsMembers = new Set(Object.keys(sandbox.__u));
+  const modalMembers = new Set(Object.keys(sandbox.__m));
+
+  const unresolved = [];
+  let resolved = 0;
+  order.forEach((rel) => {
+    // In the store companions `this.savingsGoals` / `.debts` / `.cashInfusions`
+    // are DATA arrays that happen to share a name with a UI component.
+    const isStore = /transaction-store/.test(rel);
+    const lines = fs.readFileSync(path.join(__dirname, "..", rel), "utf8").split("\n");
+    lines.forEach((line, i) => {
+      if (/^\s*(\/\/|\*)/.test(line)) return;
+      [/this\.(\w+)\.(\w+)\s*\(/g, /window\.app\.(\w+)\.(\w+)\s*\(/g].forEach((re) => {
+        let m;
+        while ((m = re.exec(line))) {
+          const field = m[1], method = m[2];
+          if (isStore && ["savingsGoals", "debts", "cashInfusions"].includes(field)) continue;
+          const cls = FIELD[field];
+          if (!cls) continue;
+          resolved++;
+          if (!members[cls].has(method)) {
+            unresolved.push(`${rel}:${i + 1} this.${field}.${method}() — ${cls} has no such method`);
+          }
+        }
+      });
+      let m;
+      const ure = /\bUtils\.(\w+)\s*\(/g;
+      while ((m = ure.exec(line))) {
+        resolved++;
+        if (!utilsMembers.has(m[1])) unresolved.push(`${rel}:${i + 1} Utils.${m[1]}() is not defined`);
+      }
+      const mre = /\bModalManager\.(\w+)\s*\(/g;
+      while ((m = mre.exec(line))) {
+        resolved++;
+        if (!modalMembers.has(m[1])) unresolved.push(`${rel}:${i + 1} ModalManager.${m[1]}() is not defined`);
+      }
+    });
+  });
+
+  // The inline handlers in index.html and in the menu markup CalendarUI builds
+  // are the easiest of all to break: they are strings, so nothing checks them.
+  const handlerSources = [
+    ["index.html", [...indexHtml.matchAll(/on\w+="([^"]+)"/g)].map((m) => m[1])],
+    ["calendar-ui menu markup",
+      [...fs.readFileSync(path.join(__dirname, "../js/calendar-ui.js"), "utf8")
+        .matchAll(/onclick="([^"]+)"/g)].map((m) => m[1])],
+  ];
+  handlerSources.forEach(([label, snippets]) => {
+    snippets.forEach((code) => {
+      let m;
+      const re = /\bapp\.(\w+)\.(\w+)\s*\(/g;
+      while ((m = re.exec(code))) {
+        const cls = FIELD[m[1]];
+        if (!cls) continue;
+        resolved++;
+        if (!members[cls].has(m[2])) unresolved.push(`${label}: app.${m[1]}.${m[2]}() — ${cls} has no such method`);
+      }
+      const re2 = /\bapp\.(\w+)\s*\(/g;
+      while ((m = re2.exec(code))) {
+        if (FIELD[m[1]]) continue;
+        resolved++;
+        if (!members.CashflowApp.has(m[1])) unresolved.push(`${label}: app.${m[1]}() — CashflowApp has no such method`);
+      }
+      const re3 = /\bpinProtection\.(\w+)\s*\(/g;
+      while ((m = re3.exec(code))) {
+        resolved++;
+        if (!members.PinProtection.has(m[1])) unresolved.push(`${label}: pinProtection.${m[1]}() — PinProtection has no such method`);
+      }
+    });
+  });
+
+  if (unresolved.length) {
+    throw new Error(
+      `${unresolved.length} cross-file call(s) do not resolve:\n  ` + unresolved.slice(0, 10).join("\n  ")
+    );
+  }
+  // Vacuity guard: if the regexes stop matching, this test proves nothing.
+  if (resolved < 400) {
+    throw new Error(`only ${resolved} cross-file calls were checked; the scan is not finding them`);
+  }
+
+  console.log(`✅ ${order.length} files load in order; ${resolved} cross-file calls all resolve`);
+}
+
+// TEST 81: the two harness Utils stubs must BEHAVE like the real Utils.
+//
+// Both vm harnesses hand-stub Utils (they load no DOM). TEST 69 already checks
+// that the stubs are not MISSING anything the loaded sources call — but a stub
+// that exists and quietly disagrees is worse than a missing one: every test
+// using it then proves something about the harness rather than about the app.
+// This had already happened twice. isLastCalendarDayOfMonth was reimplemented
+// independently in both stubs and disagreed with js/utils.js on malformed
+// input; and verify-walk-parity's escapeHtml was `String(str)` — an identity
+// function that did no escaping at all, so any future check on markup-building
+// code would have passed while the real code escaped nothing.
+console.log("TEST 81: The Harness Utils Stubs Match The Real Utils");
+{
+  const vmModule = require("vm");
+  const realCtx = {
+    console: { log() {}, warn() {}, error() {} },
+    Date, Math, Number, JSON, isNaN, parseInt, parseFloat, Object, Array, String, Infinity, RegExp,
+    setTimeout, Node: { TEXT_NODE: 3 },
+    document: {
+      getElementById: () => null, querySelectorAll: () => [],
+      createElement: () => ({ style: {}, setAttribute() {}, appendChild() {}, addEventListener() {} }),
+      body: { appendChild() {}, childNodes: [] },
+    },
+    window: {},
+  };
+  realCtx.globalThis = realCtx;
+  vmModule.createContext(realCtx);
+  vmModule.runInContext(
+    fs.readFileSync(path.join(__dirname, "../js/utils.js"), "utf8") + "\n;globalThis.__REAL = Utils;",
+    realCtx
+  );
+  const realUtils = realCtx.__REAL;
+
+  const loadStub = (harness) => {
+    const src = fs.readFileSync(path.join(__dirname, harness), "utf8");
+    const at = src.indexOf("global.Utils");
+    if (at === -1) throw new Error(`${harness} no longer defines a Utils stub`);
+    const open = src.indexOf("{", src.indexOf("=", at));
+    let depth = 0, end = -1;
+    for (let i = open; i < src.length; i++) {
+      if (src[i] === "{") depth++;
+      else if (src[i] === "}") { depth--; if (depth === 0) { end = i; break; } }
+    }
+    if (end === -1) throw new Error(`${harness}: could not delimit the Utils stub`);
+    const helper = (src.match(/function __parseDateStringStub[\s\S]*?\n\}/) || [""])[0];
+    const ctx = { console, Date, Math, Number, JSON, isNaN, parseInt, parseFloat, Object, Array, String, Infinity, RegExp, setTimeout };
+    ctx.globalThis = ctx;
+    vmModule.createContext(ctx);
+    vmModule.runInContext(`${helper}\nglobalThis.__STUB = ${src.slice(open, end + 1)};`, ctx);
+    return ctx.__STUB;
+  };
+
+  const DATE_STRINGS = [
+    "2026-08-20", "2026-8-2", "", null, undefined, "abc", "----", "2026-13-45",
+    "1e999-01-01", "Infinity-01-01", "2026-1e999-01", "1e309-01-01",
+    "2026-08-20T00:00", "2024-02-29", "2026-02-29", "0-0-0", "-1-1",
+    "2026-12-31", "2025-01-01", "2026-01-31", "2026-04-30", 42, {},
+  ];
+  const DATES = [
+    new Date(2026, 7, 20, 12, 0, 0), new Date(2024, 1, 29, 12, 0, 0),
+    new Date(2026, 0, 1, 12, 0, 0), new Date(2026, 11, 31, 12, 0, 0),
+  ];
+  const AMOUNTS = [0, 1, -1, 1234.5, 1234.567, -0.004, 1e6, NaN, Infinity, null, undefined, "12.3"];
+  const HTML = ["<b>", "a&b", '"q"', "'s'", "plain", "", "<script>alert(1)</script>", "café ☕"];
+
+  const shape = (v) =>
+    v instanceof Date ? (isNaN(v.getTime()) ? "InvalidDate" : v.toISOString()) : JSON.stringify(v);
+
+  const divergences = [];
+  let compared = 0;
+  ["verify-logic.js", "verify-walk-parity.js"].forEach((harness) => {
+    const stub = loadStub(harness);
+    const compare = (name, inputs) => {
+      if (typeof stub[name] !== "function") return;
+      inputs.forEach((input) => {
+        compared++;
+        const a = shape(realUtils[name](input));
+        const b = shape(stub[name](input));
+        if (a !== b) {
+          divergences.push(`${harness} ${name}(${JSON.stringify(input)}): real=${a} stub=${b}`);
+        }
+      });
+    };
+    compare("parseDateString", DATE_STRINGS);
+    compare("isLastCalendarDayOfMonth", DATE_STRINGS);
+    compare("formatDateString", DATES);
+    compare("formatAmount", AMOUNTS);
+    compare("escapeHtml", HTML);
+  });
+
+  if (divergences.length) {
+    throw new Error(
+      `${divergences.length} stub/real divergence(s):\n  ` + divergences.slice(0, 8).join("\n  ")
+    );
+  }
+  if (compared < 100) {
+    throw new Error(`only ${compared} stub comparisons ran; the stub extraction is not finding the methods`);
+  }
+
+  console.log(`✅ Both stubs agree with the real Utils across ${compared} comparisons`);
+}
+
+// TEST 82: editing a debt's due date must not leave phantom minimum payments.
+//
+// ensureSnowballPaymentsForHorizon ran cleanupOrphanedDebtMinimums FIRST, then
+// projected, then tightened each minimum series' endDate to its projected
+// payoff. The sweep therefore ran against the OLD window: every instance the
+// tightening put out of window survived, because nothing else removes them.
+// After a due-date edit the calendar showed six $60 minimums beyond the debt's
+// payoff — $360 of spending that does not exist, depressing every balance after
+// it — until the user happened to trigger a second render. Real money, wrong,
+// with no error.
+console.log("TEST 82: A Due-Date Edit Leaves No Minimums Past The Payoff");
+{
+  const today = new Date();
+  const dayOffset = (o) =>
+    Utils.formatDateString(new Date(today.getFullYear(), today.getMonth(), today.getDate() + o));
+
+  const store = new TransactionStore();
+  store.transactions = {
+    [dayOffset(-1)]: [
+      { id: "anchor", amount: 6000, type: "balance", description: "EB", _lastModified: "2026-01-01T00:00:00.000Z" },
+    ],
+  };
+  store.recurringTransactions = [
+    { id: "pay", amount: 3200, type: "income", description: "Pay", recurrence: "monthly", startDate: dayOffset(-40), _lastModified: "2026-01-01T00:00:00.000Z" },
+  ];
+  const manager = new RecurringTransactionManager(store);
+  const service = new CalculationService(store, manager);
+  const snowball = new DebtSnowballUI(store, manager, () => {}, service);
+
+  const debtId = store.addDebt({
+    name: "Card", balance: 1800, minPayment: 60, dueDay: 22,
+    recurrence: "monthly", interestRate: 18, dueStartDate: dayOffset(3),
+  });
+  snowball.ensureMinimumPaymentRecurring(store.getDebts().find((d) => d.id === debtId));
+  store.setDebtSnowballSettings({ dailyFloor: 100, extraPaymentStartMonth: "", autoGenerate: true });
+
+  const beyondPayoff = () => {
+    const debt = store.getDebts().find((d) => d.id === debtId);
+    const series = store.getRecurringTransactions().find((r) => r.id === (debt && debt.minRecurringId));
+    if (!series || !series.endDate) return [];
+    const out = [];
+    const transactions = store.getTransactions();
+    Object.keys(transactions).forEach((date) => {
+      transactions[date].forEach((t) => {
+        if (t.debtRole !== "minimum" || t.debtId !== debtId) return;
+        const occurrence = t.originalDate || date;
+        if (occurrence > series.endDate) out.push(`${occurrence} ($${t.amount})`);
+      });
+    });
+    return out;
+  };
+
+  const minimumCount = () =>
+    Object.values(store.getTransactions())
+      .flat()
+      .filter((t) => t.debtRole === "minimum" && t.debtId === debtId).length;
+
+  // Settle into a steady state across a few months, as navigating does.
+  for (let k = 0; k < 4; k++) {
+    const month = new Date(today.getFullYear(), today.getMonth() + k, 1);
+    snowball.ensureSnowballPaymentsForHorizon(month.getFullYear(), month.getMonth());
+  }
+  if (beyondPayoff().length) {
+    throw new Error(`Setup: already stale before the edit: ${beyondPayoff().join(", ")}`);
+  }
+  // Vacuity guard, taken BEFORE the edit: there must be materialized minimums
+  // for the edit to be able to strand. (Afterwards the correct count can
+  // legitimately be zero — the projection may clear the debt before the first
+  // minimum of the new schedule is even due.)
+  const beforeEdit = minimumCount();
+  if (beforeEdit === 0) {
+    throw new Error("Setup: no minimum payments were materialized before the edit");
+  }
+
+  // Edit the due date exactly as saveDebt does, then render ONCE.
+  store.updateDebt(debtId, { dueDay: 5, dueStartDate: dayOffset(35) });
+  snowball.ensureMinimumPaymentRecurring(store.getDebts().find((d) => d.id === debtId));
+  manager.invalidateCache();
+  snowball.ensureSnowballPaymentsForHorizon(today.getFullYear(), today.getMonth());
+
+  const stale = beyondPayoff();
+  if (stale.length) {
+    throw new Error(
+      `${stale.length} minimum payment(s) survive past the series' endDate after ONE render: ` +
+        stale.slice(0, 4).join(", ")
+    );
+  }
+
+  // The edit must actually have produced a bounded window, or the sweep had
+  // nothing to enforce and this proves nothing.
+  const debt = store.getDebts().find((d) => d.id === debtId);
+  const series = store.getRecurringTransactions().find((r) => r.id === debt.minRecurringId);
+  if (!series || !series.endDate) {
+    throw new Error("Setup: the minimum series has no endDate, so no window was tightened");
+  }
+
+  console.log(
+    `✅ ${beforeEdit} minimums before the edit, ${minimumCount()} after, none past the ${series.endDate} payoff`
+  );
+}
+
+// TEST 83: expansion and cleanup must agree on which date the endDate bounds.
+//
+// The recurrence expansion filters on the ADJUSTED LANDING date
+// (`targetDate <= endDate`), and computeMinimumPaymentEndDate writes a landing
+// date there on purpose ("anchored to its real, possibly adjusted, date") so
+// the payment that CLEARS a debt is retained. cleanupOrphanedDebtMinimums
+// filtered on the SCHEDULED occurrence instead. For a final payment scheduled
+// on a Sunday and adjusted back to the Friday that IS the endDate, the two
+// disagreed permanently: expansion re-created the row every render (landing
+// 27th <= end 27th), cleanup deleted it every render (scheduled 29th > end
+// 27th). The debt's last payment flickered in and out and the running balance
+// moved by its amount on every single render — the "figures change just by
+// navigating" failure this codebase has fixed before.
+console.log("TEST 83: Expansion And Cleanup Agree On The Recurrence Window");
+{
+  // A month whose 29th is a Sunday, so "previous business day" lands on the 27th.
+  const base = new Date();
+  let sunday = null;
+  for (let k = 0; k < 24 && !sunday; k++) {
+    const candidate = new Date(base.getFullYear(), base.getMonth() + k, 29);
+    if (candidate.getDay() === 0) sunday = candidate;
+  }
+  if (!sunday) throw new Error("Setup: found no upcoming month whose 29th is a Sunday");
+  const landing = Utils.formatDateString(new Date(sunday.getFullYear(), sunday.getMonth(), 27));
+
+  const transactions = {};
+  const store = new TransactionStore();
+  store.transactions = transactions;
+  store.recurringTransactions = [
+    {
+      id: "biz", amount: 60, type: "expense", description: "Debt Payment: Card",
+      recurrence: "monthly",
+      startDate: Utils.formatDateString(new Date(sunday.getFullYear(), sunday.getMonth() - 3, 29)),
+      businessDayAdjustment: "previous",
+      endDate: landing,        // exactly what computeMinimumPaymentEndDate produces
+      debtId: "card", debtRole: "minimum", debtName: "Card",
+    },
+  ];
+  store.debts = [
+    store._normalizeDebt({ id: "card", name: "Card", balance: 500, minPayment: 60, minRecurringId: "biz" }),
+  ];
+  const manager = new RecurringTransactionManager(store);
+  const snowball = new DebtSnowballUI(store, manager, () => {}, new CalculationService(store, manager));
+
+  const clearingRowPresent = () =>
+    Array.isArray(transactions[landing]) &&
+    transactions[landing].some((t) => t.recurringId === "biz");
+
+  manager.applyRecurringTransactions(sunday.getFullYear(), sunday.getMonth());
+  if (!clearingRowPresent()) {
+    throw new Error(`Setup: expansion did not place the adjusted payment on ${landing}`);
+  }
+
+  // The row expansion just created must survive the cleanup, and every render
+  // after it — otherwise the two are fighting.
+  for (let render = 1; render <= 5; render++) {
+    snowball.cleanupOrphanedDebtMinimums();
+    if (!clearingRowPresent()) {
+      throw new Error(
+        `render ${render}: cleanup deleted the payment expansion placed on ${landing} — ` +
+          `it filters on the scheduled date while expansion filters on the landing date`
+      );
+    }
+    manager.invalidateCache();
+    manager.applyRecurringTransactions(sunday.getFullYear(), sunday.getMonth());
+    if (!clearingRowPresent()) {
+      throw new Error(`render ${render}: expansion stopped producing the payment on ${landing}`);
+    }
+  }
+
+  // The other direction still works: a payment adjusted FORWARD past the
+  // endDate is not generated, and any stale copy is swept.
+  {
+    const forwardStore = new TransactionStore();
+    const fwd = {};
+    forwardStore.transactions = fwd;
+    const scheduled = Utils.formatDateString(new Date(sunday.getFullYear(), sunday.getMonth(), 28)); // Saturday
+    const forwardLanding = Utils.formatDateString(new Date(sunday.getFullYear(), sunday.getMonth(), 30));
+    forwardStore.recurringTransactions = [
+      {
+        id: "fwd", amount: 60, type: "expense", description: "Debt Payment: Card",
+        recurrence: "monthly",
+        startDate: Utils.formatDateString(new Date(sunday.getFullYear(), sunday.getMonth() - 3, 28)),
+        businessDayAdjustment: "next",
+        endDate: scheduled,   // the landing date (the 30th) is PAST this
+        debtId: "card2", debtRole: "minimum", debtName: "Card",
+      },
+    ];
+    forwardStore.debts = [
+      forwardStore._normalizeDebt({ id: "card2", name: "Card", balance: 500, minPayment: 60, minRecurringId: "fwd" }),
+    ];
+    // Plant a stale materialized copy at the forward landing date.
+    fwd[forwardLanding] = [
+      { id: "stale", amount: 60, type: "expense", description: "Debt Payment: Card",
+        recurringId: "fwd", originalDate: scheduled, debtId: "card2", debtRole: "minimum",
+        modifiedInstance: true, _lastModified: "2026-01-01T00:00:00.000Z" },
+    ];
+    const fwdManager = new RecurringTransactionManager(forwardStore);
+    const fwdSnowball = new DebtSnowballUI(forwardStore, fwdManager, () => {}, new CalculationService(forwardStore, fwdManager));
+    fwdSnowball.cleanupOrphanedDebtMinimums();
+    if ((fwd[forwardLanding] || []).some((t) => t.id === "stale")) {
+      throw new Error(
+        `a payment landing on ${forwardLanding}, past its series end ${scheduled}, was not swept`
+      );
+    }
+  }
+
+  console.log("✅ A business-day-adjusted final payment survives every render, and forward-adjusted strays are still swept");
 }
 
 // Run the async network tests sequentially (shared global.fetch mock): TEST 32

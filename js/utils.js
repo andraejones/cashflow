@@ -3,8 +3,29 @@
 // Modal Manager for tracking open modals and z-index management
 const ModalManager = {
   _baseZIndex: 1000,
+  // While the inactivity lock is up, dialogs stack from ABOVE the lock overlay
+  // instead. PinProtection.showLockOverlay pins that overlay at 9999 so nothing
+  // left over from the session can be reached behind it — but the lock flow
+  // itself talks to the user through Utils.showModalDialog ("Incorrect PIN",
+  // the "type DELETE" reset confirmation). Those went out at the ordinary
+  // 1010 and rendered UNDER the overlay: invisible, unclickable, with
+  // promptUnlock awaiting a dialog the user could not answer. One wrong PIN
+  // after an idle lock wedged the app until a reload. 10000 clears the overlay
+  // and the unlock dialog's own inline 10000, so the newest dialog is always
+  // the reachable one.
+  _lockedBaseZIndex: 10000,
   _openModals: [],
   _zIndexCounter: 0,
+
+  // The stacking floor for the CURRENT app state (locked or not).
+  _currentBaseZIndex: function () {
+    const locked =
+      typeof document !== "undefined" &&
+      document.body &&
+      document.body.classList &&
+      document.body.classList.contains("app-locked");
+    return locked ? this._lockedBaseZIndex : this._baseZIndex;
+  },
 
   // Register a modal as opened and assign z-index
   openModal: function (modalElement) {
@@ -18,7 +39,7 @@ const ModalManager = {
 
     // Increment counter and assign z-index
     this._zIndexCounter++;
-    const zIndex = this._baseZIndex + (this._zIndexCounter * 10);
+    const zIndex = this._currentBaseZIndex() + (this._zIndexCounter * 10);
     modalElement.style.zIndex = zIndex;
     return zIndex;
   },
@@ -120,10 +141,28 @@ const Utils = {
     // throwing in callers that deref it (e.g. CSV-derived dates).
     const datePart = dateString.split("T")[0];
     const [year, month, day] = datePart.split("-").map(Number);
-    if (isNaN(year) || isNaN(month) || isNaN(day)) {
+    // Number.isFinite, not !isNaN: isNaN(Infinity) is FALSE, so "1e999-01-01"
+    // (and "Infinity-1-1", and a huge year like "1e309-01-01") sailed past this
+    // guard and produced an *Invalid Date* — which is truthy, so every
+    // `if (!date) return` in the app waved it through, and
+    // formatDateString turned it into the literal string "NaN-NaN-NaN". That
+    // string then became a key in the transactions map. Dates arrive
+    // unvalidated from imports and cloud merges, which is the whole reason this
+    // function documents a null return.
+    if (
+      !Number.isFinite(year) ||
+      !Number.isFinite(month) ||
+      !Number.isFinite(day)
+    ) {
       return null;
     }
-    return new Date(year, month - 1, day, 12, 0, 0);
+    const parsed = new Date(year, month - 1, day, 12, 0, 0);
+    // Belt to the braces above: anything the Date constructor still could not
+    // represent is not a date this app can use.
+    if (isNaN(parsed.getTime())) {
+      return null;
+    }
+    return parsed;
   },
 
 

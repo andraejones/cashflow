@@ -38,8 +38,17 @@ Object.assign(TransactionStore.prototype, {
   // See [[finite-amount-guards]].
   _repairWalkAmounts() {
     let repaired = 0;
-    const fix = (obj, key) => {
-      if (!obj || obj[key] === undefined) return;
+    // `optional` keys are left alone when absent — a monthlyBalances entry that
+    // carries no endingBalance is just an incomplete derived record, and the
+    // next render rebuilds it. A row's `amount` is NOT optional: an absent one
+    // is corruption, and it used to slip through this sweep untouched because
+    // `undefined` short-circuited here. It then reached the walk as
+    // `subtotal + undefined` → NaN → 0, wiping every earlier row in that day's
+    // subtotal (see CalculationService._rowAmount, which contains the blast
+    // radius at read time; this repairs the stored value so it stops recurring).
+    const fix = (obj, key, { optional = false } = {}) => {
+      if (!obj) return;
+      if (optional && obj[key] === undefined) return;
       if (Number.isFinite(obj[key])) return;
       obj[key] = this._finiteNumber(obj[key]);
       repaired++;
@@ -52,8 +61,8 @@ Object.assign(TransactionStore.prototype, {
     (this.recurringTransactions || []).forEach((rt) => fix(rt, "amount"));
     Object.keys(this.monthlyBalances || {}).forEach((monthKey) => {
       const entry = this.monthlyBalances[monthKey];
-      fix(entry, "startingBalance");
-      fix(entry, "endingBalance");
+      fix(entry, "startingBalance", { optional: true });
+      fix(entry, "endingBalance", { optional: true });
     });
 
     if (repaired > 0) {

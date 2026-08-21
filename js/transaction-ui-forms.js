@@ -169,7 +169,12 @@ Object.assign(TransactionUI.prototype, {
         }
         break;
       case "Escape":
-        // Keep the modal open; just dismiss the suggestion list.
+        // Fallback only. The document-level capture handler in
+        // TransactionUI.initEventListeners runs before this one (this listener
+        // is on the input, a descendant of document) and already dismisses the
+        // list while keeping the modal open — stopPropagation here can never
+        // beat it. Kept so the list still closes if that guard is ever
+        // bypassed; by then the list is normally hidden and we return above.
         event.stopPropagation();
         this.closeDescriptionSuggestions();
         break;

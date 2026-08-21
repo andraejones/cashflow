@@ -11,7 +11,8 @@ CashFlow Calendar is an offline-first, single-page personal finance application 
 **No build process required.** Open `index.html` directly in a browser or serve via any static server.
 
 **Tests:** `npm test` (or run the two scripts directly with Node) — it must pass before every commit:
-- `node scripts/verify-logic.js` — 71 numbered integration tests over vm-loaded sources.
+- `node scripts/verify-logic.js` — 78 numbered integration tests over vm-loaded sources
+  (numbered up to TEST 83; the numbering has gaps where tests were merged).
 - `node scripts/verify-walk-parity.js` — randomized cross-path invariants for the balance walk (~140k assertions; reproduce failures with `node scripts/verify-walk-parity.js <seed>`). Includes a source guard: calendar-ui must consume `CalculationService.walkDays` and never re-implement anchor math.
 
 **Optional browser harnesses** (both puppeteer-gated, both exit 0 with a
@@ -118,13 +119,35 @@ data before committing a new hash.
 
 **CalculationService** (`calculation-service.js`) - Computes daily running balances and monthly summaries with caching. `walkDays(start, end, opts)` is THE single day-by-day balance walk (anchor resets to entered − reserves, unsettled/allocation accumulators); every balance path — monthly balances, running balance, day breakdown, 30-day minimum, and both calendar loops — steps through it. Companion helpers: `getMonthSeed`, `getCellExpense`, `getCarriedUnsettledList`. Never re-implement the walk; the parity harness fails if calendar-ui forks it.
 
+`getReservedTotalOnOrBefore` answers from a prefix-summed index built once per
+cache generation, not a scan (the scan was anchors × dataset — quadratic in
+history). **Any code that expands recurring months LAZILY while a cache
+generation is live must call `invalidateReservedIndex()` right after**, because
+expansion can materialize new allocation buckets and the index would otherwise
+be short — the anchor then resets the balance too HIGH, silently. Two sites do
+this today: `walkDays({ ensureRecurringExpansion: true })` and the snowball
+projection's `getDayFlow`. `updateMonthlyBalances` does not need it (it expands
+every month up front, before walking). TEST 78 pins both.
+
 **CalendarUI** (`calendar-ui.js`) - Renders monthly calendar grid with daily balances, month navigation, and highlighting (lowest balance, negative balance, minimum balance ranges). The per-day balance-variant figures ("Balance before holdbacks", "Balance excluding allocations") live in the day-detail modal via `CalculationService.getDayBalanceBreakdown`, not in the calendar cells.
 
 **TransactionUI** (`transaction-ui.js`) - Add/edit transaction modals and recurrence form UI. Supports settle/unsettle toggling for one-time expenses and displays carried-forward unsettled transactions on today's date.
 
 **DebtSnowballUI** (`debt-snowball.js`) - Debt entry management, snowball payment generation, and plan timeline.
 
-**WhatIfUI** (`what-if.js`) - What-if preview: draft transactions flagged `whatIf: true` ride in the in-memory transactions map so every balance walk sees them, but `_filterPersistedTransactions` keeps them out of localStorage/exports/sync. Banner above the calendar shows the 30-day-minimum swing with Apply/Discard. **Because drafts sit in the shared map, every new read surface must opt out or mark them** — search excludes them in `performSearch` (which also covers the CSV export, built from `searchResults`), bank reconciliation excludes them in `_buildAppItems` and `_appPayeeVocabulary` (a draft matched to a bank line hides a genuinely missing transaction, and Settle/Fix-date would persist the draft via `_relocateEntry`), the description autocomplete excludes them in `populateDescriptionSuggestions`, the agenda flags them 🔮, and the day-detail modal labels them. Surfaces that key off a field a draft never carries (`_lastModified` for Recent Transactions, `allocated`, `debtId`, `recurringId`, `type: "balance"`, `settled: false`) opt out structurally and need no extra check.
+Two ordering rules the shared transactions map depends on. (1)
+`ensureSnowballPaymentsForHorizon` sweeps orphaned minimums, THEN projects, THEN
+tightens each minimum series' `endDate` to its projected payoff — so it must
+sweep **again** after that tightening, or a due-date edit leaves phantom
+minimums past the payoff for a whole render (TEST 82). (2) The recurrence window
+is judged on two DIFFERENT dates, and `_outsideRecurrenceWindow` owns that
+asymmetry: `startDate` against the SCHEDULED occurrence (`originalDate`), and
+`endDate` against the LANDING date — because that is what the expansion compares
+and what `computeMinimumPaymentEndDate` writes. Using one date for both made
+expansion and cleanup fight forever over a business-day-adjusted final payment
+(TEST 83).
+
+**WhatIfUI** (`what-if.js`) - What-if preview: draft transactions flagged `whatIf: true` ride in the in-memory transactions map so every balance walk sees them, but `_filterPersistedTransactions` keeps them out of localStorage/exports/sync. Banner above the calendar shows the 30-day-minimum swing with Apply/Discard. **Because drafts sit in the shared map, every new read surface must opt out or mark them** — search excludes them in `performSearch` (which also covers the CSV export, built from `searchResults`), bank reconciliation excludes them in `_buildAppItems` and `_appPayeeVocabulary` (a draft matched to a bank line hides a genuinely missing transaction, and Settle/Fix-date would persist the draft via `_relocateEntry`), the description autocomplete excludes them in `populateDescriptionSuggestions`, the agenda flags them 🔮, and the day-detail modal labels them. Surfaces that key off a field a draft never carries (`_lastModified` for Recent Transactions, `debtId`, `recurringId`, `type: "balance"`) opt out structurally. `getUnsettledTransactions` and the reserve index check `whatIf` explicitly instead: their structural argument rested on `WhatIfUI.addDraft` forcing `settled: true` and never setting `allocated` — a guarantee living two files away from the code depending on it.
 
 **SavingsGoalsUI** (`savings-goals.js`) - Savings goals (`store.savingsGoals`, synced like cashInfusions). Feasibility line reuses the balance walk via `CalculationService.getMinimumBalanceThrough(targetDate)` minus the snowball daily floor.
 
@@ -166,7 +189,7 @@ local_last_sync, _backup_before_merge, calendar_view_mode
 
 - `styles.css` - CSS variables for theming (primary, accent, error colors)
 - `README.md` - Project documentation and feature overview
-- `scripts/verify-logic.js` - Standalone logic verification utility (71 tests)
+- `scripts/verify-logic.js` - Standalone logic verification utility (78 tests)
 - `scripts/verify-walk-parity.js` - Randomized balance-walk parity harness + source guard
 - `scripts/verify-ui.js` - Optional headless-Chromium UI harness (`npm run test:ui`)
 - `scripts/verify-sync.js` - Optional two-device cloud-sync harness (`npm run test:sync`)

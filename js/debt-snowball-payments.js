@@ -305,6 +305,34 @@ Object.assign(DebtSnowballUI.prototype, {
   // a payoff the user had already materialized further out survives deleting
   // its debt and keeps showing as a real expense on those far-future days until
   // they happen to navigate back to that month.
+  // Is this materialized instance outside the window its recurrence would
+  // actually generate? The two bounds are judged on DIFFERENT dates, and that
+  // asymmetry is the whole point:
+  //
+  //   startDate → the SCHEDULED occurrence (originalDate when a business-day
+  //     adjustment moved the landing date). The series' very first occurrence
+  //     IS startDate, and a backward adjustment legitimately lands it earlier;
+  //     judging that by its landing date would delete a payment the expansion
+  //     correctly created.
+  //
+  //   endDate → the LANDING date, because that is the date the expansion
+  //     itself compares (`targetDate <= endDate`, on the adjusted date) and the
+  //     date computeMinimumPaymentEndDate writes there (it anchors the payoff
+  //     to the payment's "real (possibly adjusted) date").
+  //
+  // Using the scheduled date for BOTH is what broke: a final payment scheduled
+  // on a Sunday and adjusted back to the Friday endDate was re-created by every
+  // expansion (landing 27th ≤ end 27th) and deleted again by every cleanup
+  // (scheduled 29th > end 27th). Two components disagreeing forever, once per
+  // render — the debt's last payment flickered in and out and the running
+  // balance moved by its amount each time.
+  _outsideRecurrenceWindow(rt, scheduledDate, landingDate) {
+    if (!rt) return false;
+    if (rt.startDate && scheduledDate < rt.startDate) return true;
+    if (rt.endDate && (landingDate || scheduledDate) > rt.endDate) return true;
+    return false;
+  },
+
   cleanupOrphanedDebtMinimums() {
     const transactions = this.store.getTransactions();
     const recurringById = new Map(
@@ -340,10 +368,7 @@ Object.assign(DebtSnowballUI.prototype, {
             return;
           }
           const occurrence = t.originalDate || dateKey;
-          if (
-            (rt.startDate && occurrence < rt.startDate) ||
-            (rt.endDate && occurrence > rt.endDate)
-          ) {
+          if (this._outsideRecurrenceWindow(rt, occurrence, dateKey)) {
             // Deleted by the sweep below — never a keeper candidate.
             return;
           }
@@ -385,14 +410,8 @@ Object.assign(DebtSnowballUI.prototype, {
           changed = true;
           return false;
         }
-        // Compare on the scheduled occurrence (originalDate when a business-day
-        // adjustment moved the placed date), so legitimately shifted payments
-        // are judged by their real due date, not their landing date.
         const occurrence = t.originalDate || dateKey;
-        if (
-          (rt.startDate && occurrence < rt.startDate) ||
-          (rt.endDate && occurrence > rt.endDate)
-        ) {
+        if (this._outsideRecurrenceWindow(rt, occurrence, dateKey)) {
           this.store.trackDeletedTransaction(t.id);
           changed = true;
           return false;

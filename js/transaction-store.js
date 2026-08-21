@@ -399,6 +399,12 @@ class TransactionStore {
     const results = [];
     Object.keys(this.transactions).forEach((date) => {
       this.transactions[date].forEach((t, index) => {
+        // What-if drafts ride in this same map. Today WhatIfUI.addDraft always
+        // stamps settled:true, so a draft cannot reach the carried-forward
+        // flow — but that makes this surface's correctness depend on a detail
+        // two files away. State the opt-out here, where the rule is
+        // ("every read surface must opt out or mark them").
+        if (t.whatIf === true) return;
         if (t.settled === false && t.type === "expense" && t.hidden !== true) {
           if (t.recurringId) {
             const skippedIds = this.skippedTransactions[date];

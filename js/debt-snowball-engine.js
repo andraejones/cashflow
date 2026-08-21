@@ -718,6 +718,22 @@ Object.assign(DebtSnowballUI.prototype, {
       if (!expandedMonths.has(monthKey)) {
         this.recurringManager.applyRecurringTransactions(year, month);
         expandedMonths.add(monthKey);
+        // This walk expands months lazily as it reaches them, and it reads
+        // getReservedTotalOnOrBefore on every anchor day — so the reserve index
+        // must not carry across an expansion that may have materialized new
+        // allocation buckets. Skipping this made the projected checking balance
+        // read HIGH at every anchor past the first (the reserve it should have
+        // subtracted was invisible), which is the exact input the floor check
+        // uses to decide a payoff is affordable. Same contract walkDays honors.
+        // typeof-guarded like the other cross-file calls in this app: sw.js
+        // caches each script separately and serves network-first, so a mixed
+        // version load is possible and must not throw here.
+        if (
+          this.calculationService &&
+          typeof this.calculationService.invalidateReservedIndex === "function"
+        ) {
+          this.calculationService.invalidateReservedIndex();
+        }
       }
       const transactions = this.store.getTransactions();
       const list = transactions[ds] || [];

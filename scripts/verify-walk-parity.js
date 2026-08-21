@@ -28,7 +28,13 @@ global.localStorage = {
   removeItem: (key) => { delete localStorageData[key]; },
   clear: () => { for (const k in localStorageData) delete localStorageData[k]; }
 };
-global.window = { localStorage: global.localStorage };
+global.window = {
+  localStorage: global.localStorage,
+  // Kept in step with verify-logic.js's stub: no-op listener hooks so a UI
+  // class constructed by a future check doesn't throw on registration.
+  addEventListener: () => {},
+  removeEventListener: () => {},
+};
 global.document = {
   addEventListener: () => {},
   // Kept in step with the other harness's stub (see the note below):
@@ -39,6 +45,20 @@ global.document = {
   // than the other lets code pass in one harness and throw in the other.
   querySelectorAll: () => []
 };
+// Shared by the Utils stub below so parseDateString and
+// isLastCalendarDayOfMonth cannot drift apart from each other, or from
+// js/utils.js (TEST 81 compares them).
+function __parseDateStringStub(str) {
+  if (!str || typeof str !== 'string') return null;
+  const [y, m, d] = str.split('T')[0].split('-').map(Number);
+  // Number.isFinite, not !isNaN — isNaN(Infinity) === false let "1e999-01-01"
+  // through as an Invalid Date in js/utils.js.
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null;
+  const parsed = new Date(y, m - 1, d, 12, 0, 0);
+  if (isNaN(parsed.getTime())) return null;
+  return parsed;
+}
+
 global.Utils = {
   generateUniqueId: () => Math.random().toString(36).substr(2, 9),
   formatDateString: (date) => {
@@ -47,18 +67,15 @@ global.Utils = {
   // Mirrors js/utils.js exactly: null for empty/malformed input, and the date
   // part of an ISO date-time ("2026-06-28T00:00") is kept. A looser stub here
   // lets code that would throw or misparse in the browser pass the tests.
-  parseDateString: (str) => {
-    if (!str || typeof str !== 'string') return null;
-    const [y, m, d] = str.split('T')[0].split('-').map(Number);
-    if (isNaN(y) || isNaN(m) || isNaN(d)) return null;
-    return new Date(y, m - 1, d, 12, 0, 0);
-  },
+  parseDateString: (str) => __parseDateStringStub(str),
   isLastCalendarDayOfMonth: (str) => {
-    if (!str || typeof str !== 'string') return false;
-    const [y, m, d] = str.split('-').map(Number);
-    if (isNaN(y) || isNaN(m) || isNaN(d)) return false;
-    const lastDay = new Date(y, m, 0).getDate();
-    return d === lastDay;
+    // Same parse, same arithmetic as js/utils.js. Reimplementing it
+    // independently made the stub and the real helper disagree on malformed
+    // input — exactly where a harness silently stops testing the app.
+    const date = __parseDateStringStub(str);
+    if (!date) return false;
+    const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+    return date.getDate() === lastDay;
   },
   showNotification: () => {},
   formatDisplayDate: (str) => str,
@@ -97,7 +114,11 @@ global.Utils = {
   ],
   WEEKDAY_LABELS: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
   DAY_SPECIFIC_OPTIONS: [],
+  // Must actually escape: an identity stub would let a harness check on any
+  // markup-building source pass while the real code did not escape at all.
   escapeHtml: (str) => String(str)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;"),
 };
 global.ModalManager = { openModal: () => {}, closeModal: () => {}, topModal: () => null };
 

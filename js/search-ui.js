@@ -187,8 +187,10 @@ class SearchUI {
         link.click();
         document.body.removeChild(link);
 
+        // Deferred, not inline — see CashflowApp.exportData: revoking in the
+        // same task can kill the blob before the browser has read it.
         if (typeof URL.revokeObjectURL === 'function') {
-          URL.revokeObjectURL(url);
+          setTimeout(() => URL.revokeObjectURL(url), 60000);
         }
       } else {
         console.error("URL.createObjectURL is not supported in this environment");

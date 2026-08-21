@@ -269,6 +269,157 @@ async function dismissAlert(page) {
       )
     );
 
+    // ---- Escape belongs to the autocomplete while its list is open -------
+    // The suggestion list is dismissed by the DOCUMENT-level capture handler in
+    // TransactionUI, not by the input's own keydown listener: the input is a
+    // descendant of document, so its stopPropagation() runs after the capture
+    // handler has already called closeModals(). Before the fix, one Escape
+    // aimed at the dropdown tore the whole day modal down and wiped the
+    // half-typed entry — invisible to both vm harnesses, which never dispatch
+    // a real event through a real tree.
+    await page.evaluate((d) => {
+      const cell = document.querySelector(`[data-date="${d}"]`);
+      if (cell) cell.click();
+    }, todayStr);
+    await sleep(300);
+    await page.click("#transactionDescription");
+    await page.type("#transactionDescription", "UI Harn");
+    await sleep(200);
+    const suggestionsOpen = await page.evaluate(() => {
+      const list = document.getElementById("descriptionSuggestions");
+      return { visible: !list.hidden, count: list.children.length };
+    });
+    // Guard against a vacuous pass: with no suggestions showing there is
+    // nothing for Escape to own and the check would prove nothing.
+    check("description suggestions open while typing", suggestionsOpen.visible && suggestionsOpen.count > 0,
+      `${suggestionsOpen.count} suggestions`);
+    await page.keyboard.press("Escape");
+    await sleep(250);
+    const afterEsc = await page.evaluate(() => ({
+      listOpen: !document.getElementById("descriptionSuggestions").hidden,
+      modalOpen: document.getElementById("transactionModal").style.display === "block",
+      typed: document.getElementById("transactionDescription").value,
+    }));
+    check("Escape dismisses the suggestion list", !afterEsc.listOpen);
+    check("Escape leaves the day modal (and the typed text) intact",
+      afterEsc.modalOpen && afterEsc.typed === "UI Harn", `typed="${afterEsc.typed}"`);
+    // A second Escape, with the list closed, must now close the modal.
+    await page.keyboard.press("Escape");
+    await sleep(250);
+    check("a second Escape then closes the day modal", !(await isOpen("#transactionModal")));
+
+    // ---- What is DISPLAYED must equal what the model computed ------------
+    // The vm harnesses verify CalculationService; the layout checks above
+    // verify geometry. Neither one reads the numbers actually printed in the
+    // cells, so a formatting or wiring slip between the walk and the DOM — a
+    // dropped sign, the wrong field, a stale render — is invisible to both.
+    // Re-derive the month with the same walk generateCalendar uses and compare
+    // it against the rendered text, in both views.
+    const renderTruth = await page.evaluate(() => {
+      const parseMoney = (txt) => {
+        if (!txt) return null;
+        const m = String(txt).replace(/[^0-9.\-]/g, "");
+        return m === "" || m === "-" ? null : Number(m);
+      };
+      const readMode = (mode) => {
+        if (window.app.calendarUI.viewMode !== mode) window.app.calendarUI.toggleViewMode();
+        const rows = [];
+        const sel = mode === "agenda" ? ".agenda-row[data-date]" : ".day[data-date]";
+        document.querySelectorAll(sel).forEach((el) => {
+          const bal = el.querySelector(".balance");
+          const inc = el.querySelector(".income");
+          const exp = el.querySelector(".expense");
+          rows.push({
+            date: el.getAttribute("data-date"),
+            balance: bal ? parseMoney(bal.textContent) : null,
+            income: inc ? parseMoney(inc.textContent) : null,
+            expense: exp ? parseMoney(exp.textContent) : null,
+          });
+        });
+        return rows;
+      };
+      const startMode = window.app.calendarUI.viewMode;
+      const agenda = readMode("agenda");
+      const grid = readMode("grid");
+      if (window.app.calendarUI.viewMode !== startMode) window.app.calendarUI.toggleViewMode();
+
+      const cs = window.app.calculationService;
+      const cur = window.app.calendarUI.currentDate;
+      const year = cur.getFullYear();
+      const month = cur.getMonth();
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+      const seed = cs.getMonthSeed(year, month, { trackUnsettled: true });
+      const todayStr = Utils.formatDateString(new Date());
+      const truth = {};
+      cs.walkDays(
+        Utils.formatDateString(new Date(year, month, 1)),
+        Utils.formatDateString(new Date(year, month, daysInMonth)),
+        {
+          seedBalance: seed.balance,
+          seedUnsettled: seed.unsettledCarry,
+          trackUnsettled: true,
+          onDay: (r) => {
+            const { cellExpense } = cs.getCellExpense(
+              r.dailyTotals, r.unsettledCarry, r.dateString === todayStr
+            );
+            truth[r.dateString] = {
+              balance: cs.roundToCents(r.balance),
+              income: cs.roundToCents(r.dailyTotals.income),
+              expense: cs.roundToCents(cellExpense),
+            };
+          },
+        }
+      );
+
+      const compare = (rows, mode) => {
+        const bad = [];
+        rows.forEach((row) => {
+          const t = truth[row.date];
+          if (!t) { bad.push(`${mode} ${row.date}: rendered a day the walk never produced`); return; }
+          if (row.balance !== null && Math.abs(row.balance - t.balance) > 0.005) {
+            bad.push(`${mode} ${row.date}: balance ${row.balance} vs walk ${t.balance}`);
+          }
+          // Amounts print with a +/- prefix, so compare magnitude and sign apart.
+          if (t.income > 0 && (row.income === null || Math.abs(Math.abs(row.income) - t.income) > 0.005)) {
+            bad.push(`${mode} ${row.date}: income ${row.income} vs walk ${t.income}`);
+          }
+          if (t.expense > 0 && (row.expense === null || Math.abs(Math.abs(row.expense) - t.expense) > 0.005)) {
+            bad.push(`${mode} ${row.date}: expense ${row.expense} vs walk ${t.expense}`);
+          }
+          if (t.expense > 0 && row.expense !== null && row.expense > 0) {
+            bad.push(`${mode} ${row.date}: expense lost its minus sign (${row.expense})`);
+          }
+          if (t.income > 0 && row.income !== null && row.income < 0) {
+            bad.push(`${mode} ${row.date}: income rendered negative (${row.income})`);
+          }
+        });
+        return bad;
+      };
+
+      const withFigures = agenda.filter((r) => r.balance !== null).length;
+      return {
+        agendaBad: compare(agenda, "agenda"),
+        gridBad: compare(grid, "grid"),
+        agendaCount: agenda.length,
+        gridCount: grid.length,
+        truthCount: Object.keys(truth).length,
+        withFigures,
+      };
+    });
+    // Vacuity guard: a month that rendered no balances would pass trivially.
+    check("the month rendered figures to compare", renderTruth.withFigures > 0,
+      `${renderTruth.withFigures} days carry a balance`);
+    check("agenda renders every day the walk produced",
+      renderTruth.agendaCount === renderTruth.truthCount,
+      `${renderTruth.agendaCount} rows / ${renderTruth.truthCount} days`);
+    check("grid renders every day the walk produced",
+      renderTruth.gridCount === renderTruth.truthCount,
+      `${renderTruth.gridCount} cells / ${renderTruth.truthCount} days`);
+    check("agenda figures equal the balance walk", renderTruth.agendaBad.length === 0,
+      renderTruth.agendaBad.slice(0, 2).join(" | "));
+    check("grid figures equal the balance walk", renderTruth.gridBad.length === 0,
+      renderTruth.gridBad.slice(0, 2).join(" | "));
+
     // ---- Toggle checkboxes must look like checkboxes ---------------------
     // `#transactionForm input` is an ID-specificity rule, so it outranks
     // `.settled-toggle-label input[type="checkbox"]` on every property they
@@ -356,6 +507,33 @@ async function dismissAlert(page) {
       "the dialog's X leaves the day modal open (.close scoping)",
       await isOpen("#transactionModal")
     );
+
+    // ---- The app menu must not compete for Escape -------------------------
+    // Its handler was the one document-level Escape listener left in the BUBBLE
+    // phase, with no ownership guard — so a dialog opened over the menu and the
+    // menu itself were both dismissed by a single Escape. Only a real dispatch
+    // through a real tree shows this.
+    await page.evaluate(() => {
+      window.app.calendarUI.openAppMenu();
+      Utils.showModalConfirm("Really?", "Confirm");
+    });
+    await sleep(300);
+    const menuBefore = await page.evaluate(() => ({
+      menu: document.getElementById("calendarOptions").classList.contains("is-open"),
+      dialog: document.getElementById("appModal").style.display === "block",
+    }));
+    check("menu and a dialog can be open together", menuBefore.menu && menuBefore.dialog);
+    await page.keyboard.press("Escape");
+    await sleep(300);
+    const menuAfter = await page.evaluate(() => ({
+      menu: document.getElementById("calendarOptions").classList.contains("is-open"),
+      dialog: document.getElementById("appModal").style.display === "block",
+    }));
+    check("Escape closes the dialog, not the menu underneath it",
+      !menuAfter.dialog && menuAfter.menu,
+      `menu=${menuAfter.menu} dialog=${menuAfter.dialog}`);
+    await page.evaluate(() => window.app.calendarUI.closeAppMenu());
+    await sleep(150);
 
     // ---- Day-modal figures refresh immediately after a mutation ----------
     // The modal re-renders BEFORE the calendar does, so it has to refresh the
@@ -521,6 +699,85 @@ async function dismissAlert(page) {
     check(
       "setting a PIN encrypts the stored data",
       await page.evaluate(() => String(localStorage.getItem("transactions")).startsWith("xor2:"))
+    );
+
+    // ---- A dialog raised BY the lock must sit ABOVE the lock overlay -----
+    // showLockOverlay pins the overlay at z-index 9999 so nothing left over
+    // from the session is reachable behind it. But the lock flow itself talks
+    // to the user through Utils.showModalDialog, which stacks from ModalManager's
+    // ordinary 1000 base — so "Incorrect PIN" landed at 1010, UNDER the overlay:
+    // invisible, unclickable, with promptUnlock awaiting an answer that could
+    // never come. One wrong PIN after an idle lock wedged the app until a
+    // reload. Hit-testing is the assertion that matters; comparing z-index
+    // numbers alone would not prove the dialog is actually reachable.
+    // The app menu is not a .modal, so closeAllModals' sweep never reached it:
+    // it stayed open behind the lock overlay and its Escape handler pulled
+    // focus off the PIN field onto the menu button underneath, sending the
+    // user's next keystrokes nowhere.
+    await page.evaluate(() => window.app.calendarUI.openAppMenu());
+    await sleep(150);
+    check("menu is open going into the lock",
+      await page.evaluate(() => document.getElementById("calendarOptions").classList.contains("is-open")));
+    await page.evaluate(() => window.pinProtection.lockApp());
+    await sleep(400);
+    check("the inactivity lock shows the unlock dialog", await isOpen("#appModal"));
+    check("locking closes the app menu",
+      await page.evaluate(() => !document.getElementById("calendarOptions").classList.contains("is-open")));
+    await page.evaluate(() => document.getElementById("appModalInput").focus());
+    await page.keyboard.press("Escape");
+    await sleep(250);
+    check("Escape at the lock screen leaves focus in the PIN field",
+      await page.evaluate(() => document.activeElement && document.activeElement.id === "appModalInput"),
+      await page.evaluate(() => (document.activeElement && document.activeElement.id) || "(none)"));
+    await page.evaluate(() => {
+      document.getElementById("appModalInput").value = "0000";
+      document.getElementById("appModalConfirm").click();
+    });
+    await sleep(500);
+    const buried = await page.evaluate(() => {
+      const modal = document.getElementById("appModal");
+      const overlay = document.getElementById("lockOverlay");
+      const content = modal.querySelector(".modal-content");
+      const box = content.getBoundingClientRect();
+      // Sample a few points across the dialog body rather than one, so a single
+      // unlucky coordinate can't decide the result.
+      const points = [0.25, 0.5, 0.75].map((f) => ({
+        x: Math.round(box.left + box.width * 0.5),
+        y: Math.round(box.top + box.height * f),
+      }));
+      const hits = points.map((p) => {
+        const el = document.elementFromPoint(p.x, p.y);
+        return el ? (modal.contains(el) ? "dialog" : el.id || el.className) : "none";
+      });
+      return {
+        title: document.getElementById("appModalTitle").textContent,
+        overlayShown: overlay && overlay.style.display === "block",
+        boxHeight: Math.round(box.height),
+        hits,
+        reachable: hits.every((h) => h === "dialog"),
+      };
+    });
+    check("a wrong PIN raises the 'Incorrect PIN' dialog", buried.title === "Unlock Failed",
+      buried.title);
+    check("the lock overlay is still up", buried.overlayShown);
+    // Vacuity guard: a zero-height dialog would hit-test to nothing meaningful.
+    check("the dialog was actually measured", buried.boxHeight > 0, `${buried.boxHeight}px tall`);
+    check("the dialog is reachable above the lock overlay", buried.reachable,
+      buried.hits.join(", "));
+    await dismissAlert(page);
+    await page.evaluate(() => {
+      document.getElementById("appModalInput").value = "4321";
+      document.getElementById("appModalConfirm").click();
+    });
+    await sleep(700);
+    check("the correct PIN then clears the lock",
+      await page.evaluate(() => {
+        const overlay = document.getElementById("lockOverlay");
+        return (
+          window.pinProtection.isLocked === false &&
+          (!overlay || overlay.style.display === "none")
+        );
+      })
     );
 
     await page.reload({ waitUntil: "networkidle0" });

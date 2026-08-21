@@ -84,6 +84,13 @@ class CashflowApp {
 
 
   async init() {
+    // Wired before the cloud round trip below, not after. index.html's Add
+    // Transaction button is an inline onclick="addTransaction()", so until this
+    // is assigned the button throws ReferenceError and does nothing visible.
+    // The startup sync can sit for a long time — a slow network, or a
+    // credentials dialog waiting on the user — and the calendar is interactive
+    // behind it the whole time.
+    window.addTransaction = () => this.transactionUI.addTransaction();
     try {
       Utils.cleanUpHtmlArtifacts();
       // On startup, push first if this device has local changes that never
@@ -96,7 +103,6 @@ class CashflowApp {
     }
     this._initialized = true;
     this.updateUI();
-    window.addTransaction = () => this.transactionUI.addTransaction();
 
     // Start heartbeat polling for remote changes (1 minute interval)
     this.cloudSync.startHeartbeat(60000);
@@ -638,7 +644,12 @@ class CashflowApp {
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      // Revoke on a later turn, not inline. The click only SCHEDULES the
+      // download; revoking in the same task can invalidate the blob before the
+      // browser has read it, and the user gets a silent no-op or a zero-byte
+      // file. This is the app's only local backup path, so it fails loudly
+      // (nothing saved) or not at all — never quietly.
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
 
       Utils.showNotification("Data exported successfully!");
     } catch (error) {

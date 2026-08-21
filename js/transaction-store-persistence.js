@@ -740,7 +740,9 @@ Object.assign(TransactionStore.prototype, {
     };
 
     try {
-      // Validate data structure before any assignment
+      // Validate the payload as a whole before any assignment. Individual
+      // collections are coerced (not rejected) below; this only refuses a file
+      // that could not be one of our exports at all.
       if (typeof data.transactions !== 'object') {
         throw new Error("Invalid transactions format");
       }
@@ -751,21 +753,53 @@ Object.assign(TransactionStore.prototype, {
         throw new Error("Invalid recurringTransactions format");
       }
 
-      this.transactions = data.transactions;
-      this.monthlyBalances = data.monthlyBalances;
-      this.recurringTransactions = data.recurringTransactions;
+      // Coerce shapes exactly as loadData does. `x || []` only catches
+      // null/undefined, so one malformed collection in an otherwise good
+      // backup — `"debts": 0` from a truncated write or a hand edit — threw
+      // inside .map, hit the catch below, restored the backup and reported
+      // "Invalid file format". The user lost the WHOLE restore over one bad
+      // key, when loadData's rule for the same data is "treat an unusable
+      // shape as missing, keep the empty default, and warn". Same rule here:
+      // salvage everything that is usable.
+      this.transactions = this._prunedEntries(
+        this._storedMap(data.transactions, "imported transactions") || {},
+        (day) => Array.isArray(day) && day.length > 0
+      );
+      Object.keys(this.transactions).forEach((date) => {
+        this.transactions[date] = this.transactions[date].filter(
+          (t) => t && typeof t === "object" && !Array.isArray(t)
+        );
+        if (this.transactions[date].length === 0) delete this.transactions[date];
+      });
+      // Derived data — an unusable copy is just rebuilt on the next render.
+      this.monthlyBalances =
+        this._storedMap(data.monthlyBalances, "imported monthlyBalances") || {};
+      this.recurringTransactions = (
+        this._storedArray(
+          data.recurringTransactions, "imported recurringTransactions"
+        ) || []
+      ).filter((rt) => rt && typeof rt === "object" && !Array.isArray(rt));
       // These three are assigned raw from the parsed file — the only inputs to
       // the balance walk that no form guard ever sees. Repair them before
       // anything walks them (see _repairWalkAmounts).
       this._repairWalkAmounts();
-      this.skippedTransactions = data.skippedTransactions || {};
-      this.debts = (data.debts || []).map((debt) => this._normalizeDebt(debt));
-      this.cashInfusions = (data.cashInfusions || []).map((infusion) =>
-        this._normalizeCashInfusion(infusion)
+      this.skippedTransactions = this._prunedEntries(
+        this._storedMap(data.skippedTransactions, "imported skippedTransactions") || {},
+        (list) => Array.isArray(list) && list.length > 0
       );
-      this.savingsGoals = (data.savingsGoals || []).map((goal) =>
-        this._normalizeSavingsGoal(goal)
+      const importedList = (value, label) =>
+        (this._storedArray(value, label) || []).filter(
+          (item) => item && typeof item === "object" && !Array.isArray(item)
+        );
+      this.debts = importedList(data.debts, "imported debts").map((debt) =>
+        this._normalizeDebt(debt)
       );
+      this.cashInfusions = importedList(
+        data.cashInfusions, "imported cashInfusions"
+      ).map((infusion) => this._normalizeCashInfusion(infusion));
+      this.savingsGoals = importedList(
+        data.savingsGoals, "imported savingsGoals"
+      ).map((goal) => this._normalizeSavingsGoal(goal));
       this.debtSnowballSettings = {
         dailyFloor: this._finiteNumber(data.debtSnowballSettings?.dailyFloor),
         extraPaymentStartMonth: this.normalizeExtraStartMonth(
@@ -773,8 +807,12 @@ Object.assign(TransactionStore.prototype, {
         ),
         autoGenerate: data.debtSnowballSettings?.autoGenerate === true,
       };
-      this.monthlyNotes = data.monthlyNotes || {};
-      this.movedTransactions = data.movedTransactions || {};
+      this.monthlyNotes =
+        this._storedMap(data.monthlyNotes, "imported monthlyNotes") || {};
+      this.movedTransactions = this._prunedEntries(
+        this._storedMap(data.movedTransactions, "imported movedTransactions") || {},
+        (move) => move && typeof move === "object" && !Array.isArray(move)
+      );
       this.lastUpdated =
         typeof data.lastUpdated === "string" ? data.lastUpdated : this.lastUpdated;
 

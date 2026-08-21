@@ -1074,6 +1074,18 @@ class DebtSnowballUI {
     // Sync minimum-payment end dates once for the whole window before
     // materializing individual months (each month then skips the redundant sync).
     if (this.syncMinimumPaymentEndDates(projection.payoffByDebtId)) {
+      // Sweep AGAIN, because that sync just moved the goalposts. The cleanup
+      // above ran against the PREVIOUS endDates; tightening a series to its
+      // projected payoff puts every already-materialized instance beyond the
+      // new payoff out of window, and nothing else removes them until the next
+      // render's cleanup. Editing a debt's due date therefore left phantom
+      // minimum payments on the calendar for one whole render — six rows of
+      // $60 in the case that surfaced this, i.e. $360 of spending that is not
+      // real, depressing every balance after them. One extra idempotent pass
+      // closes the window instead of waiting for the user to navigate.
+      if (this.cleanupOrphanedDebtMinimums()) {
+        this.recurringManager.invalidateCache();
+      }
       this.store.saveData(false);
     }
 

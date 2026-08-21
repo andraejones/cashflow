@@ -160,12 +160,27 @@ class CalendarUI {
       this.closeAppMenu();
     });
 
+    // CAPTURE phase with an ownership guard, like every other document-level
+    // Escape handler in the app. In the bubble phase, with no guard, this
+    // handler fired for Escapes that were not meant for the menu:
+    //   - a confirm dialog opened over the menu was dismissed AND the menu
+    //     closed on a single Escape, instead of the topmost layer owning it;
+    //   - worse, at the inactivity lock screen (which leaves the menu open —
+    //     it is not a .modal, so closeAllModals' sweep never reached it) this
+    //     ran button.focus() and pulled focus off the PIN field onto the menu
+    //     button sitting behind the lock overlay, so the next keystrokes went
+    //     nowhere.
     document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape" && menu.classList.contains("is-open")) {
-        this.closeAppMenu();
-        button.focus();
-      }
-    });
+      if (e.key !== "Escape") return;
+      if (!menu.classList.contains("is-open")) return;
+      // Anything stacked above owns Escape first.
+      if (typeof ModalManager !== "undefined" && ModalManager.topModal()) return;
+      // The lock screen's dialog is not tracked by ModalManager (PinProtection
+      // drives #appModal directly), so check the lock explicitly.
+      if (document.body.classList.contains("app-locked")) return;
+      this.closeAppMenu();
+      button.focus();
+    }, true);
   }
 
 

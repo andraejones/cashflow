@@ -74,6 +74,18 @@ class TransactionUI {
     this._boundEscapeHandler = (event) => {
       if (event.key !== "Escape") return;
       if (!this._ownsTopModal()) return;
+      // The description autocomplete owns the first Escape while its list is
+      // open: dismiss the suggestions, keep the half-filled form. That decision
+      // has to be made HERE. handleDescriptionKeydown is bound to the input,
+      // which is a descendant of document — so this capture-phase handler runs
+      // first, and its stopPropagation() came too late to stop closeModals()
+      // from tearing the modal down and wiping the entry the user was typing.
+      const suggestions = document.getElementById("descriptionSuggestions");
+      if (suggestions && !suggestions.hidden) {
+        event.preventDefault();
+        this.closeDescriptionSuggestions();
+        return;
+      }
       this.closeModals();
     };
     document.addEventListener("keydown", this._boundEscapeHandler, true);

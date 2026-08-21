@@ -861,6 +861,14 @@ class PinProtection {
       }
     }
 
+    // The app menu is not a .modal, so the sweep below never reached it — it
+    // stayed open (blurred) behind the lock overlay for the whole lock, and its
+    // Escape handler then competed with the unlock dialog for the key.
+    if (window.app && window.app.calendarUI &&
+        typeof window.app.calendarUI.closeAppMenu === "function") {
+      window.app.calendarUI.closeAppMenu();
+    }
+
     // Close appModal if it's open
     const appModal = document.getElementById("appModal");
     if (appModal && appModal.style.display === "block") {

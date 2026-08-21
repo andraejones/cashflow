@@ -8,6 +8,7 @@ class CalculationService {
     this._cachedSummaries = {};
     this._cachedDailyTotals = {};
     this._cachedReservedTotals = {};
+    this._reservedIndex = null;
   }
 
   // Round to cents to prevent floating-point drift in balance calculations
@@ -15,11 +16,105 @@ class CalculationService {
     return Math.round((Number(value) || 0) * 100) / 100;
   }
 
+  // A single row's money, as a finite number. Anything unusable (a missing
+  // `amount` key, null, a string, ±Infinity) contributes 0.
+  //
+  // This has to happen PER ROW, before the row joins a subtotal. roundToCents
+  // maps NaN to 0 — a deliberate safety net — but `subtotal + undefined` is
+  // NaN, so feeding an unusable row straight into the running sum discarded
+  // every earlier row on that day too: three income rows of 1000 / (none) / 250
+  // reported 250, not 1250. No error, no warning, just a wrong number on the
+  // calendar. TransactionStore._repairWalkAmounts normalizes stored data on
+  // load and import; this covers the same shape arriving any other way (a
+  // cloud merge, a row built at runtime) and keeps the damage to the one row.
+  _rowAmount(value) {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : 0;
+  }
+
 
   invalidateCache() {
     this._cachedSummaries = {};
     this._cachedDailyTotals = {};
     this._cachedReservedTotals = {};
+    this._reservedIndex = null;
+  }
+
+  // Drop the reserve index (only) because the transactions map just grew.
+  //
+  // Expanding a month materializes recurring instances, and recurring
+  // ALLOCATION instances are exactly what the index sums — so an index built
+  // before an expansion is short by whatever that month added. Every site that
+  // expands months LAZILY while a cache generation is live must call this:
+  // CalculationService.walkDays({ ensureRecurringExpansion: true }) and the
+  // snowball projection's getDayFlow. (updateMonthlyBalances does not need it:
+  // it expands every month up front, before it walks anything.)
+  //
+  // The per-date cache is deliberately NOT cleared. Leaving it is the
+  // pre-index behavior — an already-answered date kept its answer, an unseen
+  // one was rescanned — and matching that exactly is what keeps these walks'
+  // results unchanged. See TEST 78.
+  invalidateReservedIndex() {
+    this._reservedIndex = null;
+  }
+
+  // Prefix-summed reserve totals, built once per cache generation.
+  //
+  // getReservedTotalOnOrBefore used to re-scan the ENTIRE transactions map on
+  // every call. walkDays calls it once per Ending Balance anchor, and
+  // updateMonthlyBalances walks every month from the earliest transaction
+  // forward — so the cost was (number of anchors) x (size of the whole
+  // dataset), i.e. quadratic in history length for anyone who reconciles
+  // regularly. On a six-year dataset it was the single largest cost of a
+  // render, and it only ever gets worse, because the history only ever grows.
+  // Building the index is one pass; each lookup is then a binary search.
+  //
+  // The fold is in SORTED date order with a round after every transaction,
+  // matching the old per-transaction rounding. The old scan folded in the
+  // transactions map's own key-insertion order, which is not deterministic
+  // across a load/merge/runtime-add — for cent-valued money the two agree
+  // exactly, and where they could differ (sub-cent amounts) sorted order is
+  // the defensible one. TEST 74 pins the equivalence against a brute-force
+  // reference over randomized data, sub-cent amounts included.
+  _reservedTotalIndex() {
+    if (this._reservedIndex) {
+      return this._reservedIndex;
+    }
+    const transactions = this.store.getTransactions();
+    const perDate = new Map();
+    for (const d in transactions) {
+      const list = transactions[d];
+      if (!Array.isArray(list)) continue;
+      let rows = null;
+      list.forEach((t) => {
+        if (t.type !== "expense" || t.allocated !== true) return;
+        // A hypothetical must not reserve real money. Drafts never carry
+        // `allocated` today, which is why this needed no guard — but
+        // getAllocations already opts out here (it requires a stored id), and
+        // a reserve total that disagreed with the drawable buckets would move
+        // every anchor's balance with nothing on screen to explain it.
+        if (t.whatIf === true) return;
+        if (
+          t.recurringId &&
+          this.recurringManager.isTransactionSkipped(d, t.recurringId)
+        ) {
+          return;
+        }
+        (rows = rows || []).push(this._rowAmount(t.amount));
+      });
+      if (rows) perDate.set(d, rows);
+    }
+    const dates = Array.from(perDate.keys()).sort();
+    const prefix = new Array(dates.length);
+    let running = 0;
+    for (let i = 0; i < dates.length; i++) {
+      perDate.get(dates[i]).forEach((amount) => {
+        running = this.roundToCents(running + amount);
+      });
+      prefix[i] = running;
+    }
+    this._reservedIndex = { dates, prefix };
+    return this._reservedIndex;
   }
 
   // Sum of currently-live allocation reserves dated on/before `dateString`.
@@ -32,22 +127,23 @@ class CalculationService {
     if (this._cachedReservedTotals[dateString] !== undefined) {
       return this._cachedReservedTotals[dateString];
     }
-    const transactions = this.store.getTransactions();
-    let total = 0;
-    for (const d in transactions) {
-      if (d > dateString) continue;
-      transactions[d].forEach((t) => {
-        if (t.type !== "expense" || t.allocated !== true) return;
-        if (
-          t.recurringId &&
-          this.recurringManager.isTransactionSkipped(d, t.recurringId)
-        ) {
-          return;
-        }
-        total = this.roundToCents(total + t.amount);
-      });
+    // Binary search for the last indexed date on/before dateString; its prefix
+    // sum IS the answer. See _reservedTotalIndex for why this is an index
+    // rather than a scan.
+    const { dates, prefix } = this._reservedTotalIndex();
+    let lo = 0;
+    let hi = dates.length - 1;
+    let found = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (dates[mid] <= dateString) {
+        found = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
     }
-    total = this.roundToCents(total);
+    const total = this.roundToCents(found === -1 ? 0 : prefix[found]);
     this._cachedReservedTotals[dateString] = total;
     return total;
   }
@@ -259,20 +355,21 @@ class CalculationService {
           // and Monthly Summary can show the activity for the record. The day cell
           // showing +income/-expense while the balance equals the anchor is the
           // expected, by-design result — not a bug to reconcile.
+          const rowAmount = this._rowAmount(t.amount);
           if (t.type === "balance") {
-            balance = t.amount;
+            balance = rowAmount;
           } else if (t.type === "income") {
-            income = this.roundToCents(income + t.amount);
+            income = this.roundToCents(income + rowAmount);
           } else if (t.type === "expense") {
-            expense = this.roundToCents(expense + t.amount);
+            expense = this.roundToCents(expense + rowAmount);
             if (t.settled === false) {
-              unsettledExpense = this.roundToCents(unsettledExpense + t.amount);
+              unsettledExpense = this.roundToCents(unsettledExpense + rowAmount);
             }
             // Sum all allocated expenses (one-time + recurring) so the calendar
             // can show a "balance excluding allocations" figure that adds these
             // reserved buckets back to the running balance.
             if (t.allocated === true) {
-              allocatedExpense = this.roundToCents(allocatedExpense + t.amount);
+              allocatedExpense = this.roundToCents(allocatedExpense + rowAmount);
             }
             // Only one-time allocated expenses tint the day purple. Recurring
             // allocated instances (carry a recurringId) repeat often enough that
@@ -349,6 +446,12 @@ class CalculationService {
           if (!expandedMonths.has(monthKey)) {
             this.recurringManager.applyRecurringTransactions(year, month - 1);
             expandedMonths.add(monthKey);
+            // The map just grew; anything the index already summed is stale.
+            // Without this, an anchor in a later month read a reserve total
+            // computed before that month existed — a walk over three months
+            // with a monthly reserve reported the anchor's balance $600 too
+            // high, silently.
+            this.invalidateReservedIndex();
           }
         }
 
@@ -400,7 +503,9 @@ class CalculationService {
       const carryAnchor = this.getReconciliationAnchor(monthStartStr, { inclusive: false });
       for (const u of this.store.getUnsettledTransactions()) {
         if (u.date < monthStartStr && (carryAnchor === null || u.date > carryAnchor)) {
-          unsettledCarry = this.roundToCents(unsettledCarry + u.transaction.amount);
+          unsettledCarry = this.roundToCents(
+            unsettledCarry + this._rowAmount(u.transaction.amount)
+          );
         }
       }
     }
