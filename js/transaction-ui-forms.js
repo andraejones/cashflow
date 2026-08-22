@@ -245,72 +245,387 @@ Object.assign(TransactionUI.prototype, {
     field.style.display = "";
   },
 
-  // Shows the "Draw from allocation" dropdown for one-time expenses and
-  // (re)populates it with each allocation's remaining balance. Hidden when
-  // there are no allocations to draw from. Allocations themselves can't draw
-  // from another allocation, which the type select makes structural: the
-  // dropdown only appears for the plain "Expense" type.
-  updateDrawAllocationVisibility() {
-    const select = document.getElementById("transactionDrawAllocation");
-    if (!select) return;
-    const type = document.getElementById("transactionType").value;
-    const recurrence = document.getElementById("transactionRecurrence").value;
+  // ---------------------------------------------------------------------
+  // The allocation-draw editor
+  //
+  // One expense can be split across several buckets ("$130 of this $200 Costco
+  // run from Groceries, $70 from Household"), so the control is a LIST of rows
+  // — bucket + amount — not a single select. It is built once here and used by
+  // both entry points, the add modal and the day-detail inline edit form,
+  // because a split typed in one has to be editable in the other.
+  //
+  // Three rules are enforced here so the store never has to guess at intent:
+  //   - a bucket chosen on one row is not offered on any other, which makes a
+  //     duplicate row structurally impossible;
+  //   - a row can't exceed what its bucket has AVAILABLE to this expense — its
+  //     remaining plus whatever this same expense already draws from it, since
+  //     saving refunds the old draw before re-applying;
+  //   - the rows can't add up to more than the expense. Adding up to LESS is
+  //     fine: the remainder is ordinary spending, exactly how an over-large
+  //     single draw has always behaved.
+  // ---------------------------------------------------------------------
 
-    const applicable = type === "expense" && recurrence === "once";
-    if (!applicable) {
-      select.style.display = "none";
-      select.value = "";
-      return;
+  _drawCents(value) {
+    const num = Number(value);
+    return Math.round(((Number.isFinite(num) ? num : 0) + Number.EPSILON) * 100) / 100;
+  },
+
+  // Renders (or re-renders) a draw editor into `container`.
+  //   date            — the expense's own date; buckets are the ones live for
+  //                     that date, so an expense entered in a later period
+  //                     bills against that period's allocation.
+  //   amountElementId — the field holding the expense amount, read live so each
+  //                     new row can default to whatever is still uncovered.
+  //   existing        — the expense's current draw rows (edit only). Their
+  //                     `drawn` is added back to each bucket's availability.
+  //   rows            — rows to show; omit to keep whatever is on screen, which
+  //                     is what makes a re-render (type/date change) preserve a
+  //                     split the user is in the middle of typing.
+  // Returns the number of buckets on offer, so callers can decide whether the
+  // control is worth showing at all.
+  renderAllocationDrawEditor(container, options) {
+    if (!container) return 0;
+    const opts = options || {};
+    const prev = container._drawEditorConfig || {};
+    const date = opts.date !== undefined ? opts.date : prev.date;
+    const amountElementId =
+      opts.amountElementId !== undefined
+        ? opts.amountElementId
+        : prev.amountElementId;
+    const existing = opts.existing !== undefined ? opts.existing : prev.existing || [];
+    const rows = opts.rows !== undefined ? opts.rows : this.readAllocationDrawRows(container);
+
+    const buckets = this.store.getAllocations(date);
+    const available = new Map();
+    const labels = new Map();
+    buckets.forEach((b) => {
+      available.set(b.id, this._drawCents(b.remaining));
+      labels.set(b.id, b.description);
+    });
+    // This expense's own draws are refunded before the save re-applies them, so
+    // that money is available to it even though getAllocations counts it spent.
+    existing.forEach((r) => {
+      if (!r || !r.allocationId || !available.has(r.allocationId)) return;
+      available.set(
+        r.allocationId,
+        this._drawCents(available.get(r.allocationId) + (Number(r.drawn) || 0))
+      );
+    });
+    // A row pointing at a bucket that is no longer live (a superseded recurring
+    // period) keeps an option of its own, so saving can't silently drop a link
+    // the user never touched.
+    const offered = buckets.slice();
+    rows.forEach((r) => {
+      if (!r.allocationId || offered.some((b) => b.id === r.allocationId)) return;
+      const info = this.store.getAllocationInfoById(r.allocationId);
+      offered.push({
+        id: r.allocationId,
+        description: info ? info.description : "(current allocation)",
+        date: info ? info.date : "",
+        recurring: false,
+        remaining: null,
+      });
+      labels.set(r.allocationId, info ? info.description : "(current allocation)");
+    });
+
+    container._drawEditorConfig = {
+      date,
+      amountElementId,
+      existing,
+      available,
+      labels,
+    };
+    // The row defaults are a function of the expense amount, and the amount can
+    // be typed AFTER a bucket is chosen (or corrected later). Re-render on every
+    // change to it, which re-defaults the rows the user has not typed into and
+    // leaves the ones they have.
+    const amountEl = amountElementId
+      ? document.getElementById(amountElementId)
+      : null;
+    if (amountEl && !amountEl._drawEditorHooked && amountEl.addEventListener) {
+      amountEl._drawEditorHooked = true;
+      amountEl.addEventListener("input", () => {
+        // The editor may be gone (modal closed, edit form cancelled); its config
+        // is cleared when it is torn down, and that is the signal to stand down.
+        if (!container._drawEditorConfig) return;
+        this.renderAllocationDrawEditor(container, {});
+      });
     }
 
-    const previous = select.value;
-    // Offer the bucket active for the transaction's own date, not today's, so an
-    // expense entered in a later period bills against that period's allocation.
-    const dateField = document.getElementById("transactionDate");
-    const refDate = dateField && dateField.value ? dateField.value : undefined;
-    const allocations = this.store.getAllocations(refDate);
-    select.innerHTML = '<option value="">No allocation draw</option>';
-    allocations.forEach((a) => {
+    container.innerHTML = "";
+    if (offered.length === 0) {
+      container.style.display = "none";
+      return 0;
+    }
+    container.style.display = "";
+
+    // Row 0 always exists (its "No allocation draw" option is how a split is
+    // cleared); later rows come and go with the ✕ button.
+    const list = rows.length > 0 ? rows.slice() : [{ allocationId: "", amount: "" }];
+    const used = list.map((r) => r.allocationId).filter(Boolean);
+    list.forEach((row, index) => {
+      container.appendChild(
+        this._buildAllocationDrawRow(container, row, index, offered, available, used)
+      );
+    });
+
+    if (used.length > 0 && used.length < offered.length) {
+      const addBtn = document.createElement("button");
+      addBtn.type = "button";
+      addBtn.className = "draw-allocation-add";
+      addBtn.textContent = "+ Split across another allocation";
+      addBtn.addEventListener("click", () => {
+        const current = this.readAllocationDrawRows(container);
+        current.push({ allocationId: "", amount: "" });
+        this.renderAllocationDrawEditor(container, { rows: current });
+        const selects = container.querySelectorAll("[data-draw-bucket]");
+        const last = selects[selects.length - 1];
+        if (last && last.focus) last.focus();
+      });
+      container.appendChild(addBtn);
+    }
+    return offered.length;
+  },
+
+  _buildAllocationDrawRow(container, row, index, offered, available, used) {
+    const config = container._drawEditorConfig || {};
+    const wrapper = document.createElement("div");
+    wrapper.className = "draw-allocation-row";
+    wrapper.setAttribute("data-draw-row", String(index));
+
+    const select = document.createElement("select");
+    select.className = "draw-allocation-select";
+    select.setAttribute("data-draw-bucket", "");
+    select.setAttribute(
+      "aria-label",
+      index === 0 ? "Draw from allocation" : "Draw from another allocation"
+    );
+    const blank = document.createElement("option");
+    blank.value = "";
+    blank.textContent = index === 0 ? "No allocation draw" : "Choose an allocation";
+    select.appendChild(blank);
+    offered.forEach((a) => {
+      // Every bucket claimed by another row is off the menu, so two rows can
+      // never name the same bucket.
+      if (a.id !== row.allocationId && used.indexOf(a.id) !== -1) return;
       const option = document.createElement("option");
       option.value = a.id;
       // Recurring buckets repeat, so tag them with their period date to tell
       // one month's bucket from the next.
       const period = a.recurring ? ` (${this.formatShortDisplayDate(a.date)})` : "";
-      option.textContent = `${a.description} — $${Utils.formatAmount(a.remaining)} left${period}`;
+      const left =
+        a.remaining === null
+          ? ""
+          : ` — $${Utils.formatAmount(
+              available.has(a.id) ? available.get(a.id) : a.remaining
+            )} available`;
+      option.textContent = `${a.description}${left}${period}`;
       select.appendChild(option);
     });
-    select.value = previous && allocations.some((a) => a.id === previous) ? previous : "";
-    select.style.display = allocations.length > 0 ? "" : "none";
+    select.value = row.allocationId || "";
+    select.addEventListener("change", () => {
+      const current = this.readAllocationDrawRows(container);
+      if (current[index]) {
+        // A changed bucket re-defaults its amount rather than carrying the
+        // previous bucket's figure onto one that may not have that much.
+        current[index].amount = "";
+        current[index].touched = false;
+        if (!current[index].allocationId && index > 0) {
+          current.splice(index, 1);
+        }
+      }
+      this.renderAllocationDrawEditor(container, { rows: current });
+    });
+    wrapper.appendChild(select);
+
+    if (row.allocationId) {
+      const amountInput = document.createElement("input");
+      amountInput.type = "number";
+      amountInput.step = "0.01";
+      amountInput.min = "0";
+      amountInput.className = "draw-allocation-amount";
+      amountInput.setAttribute("data-draw-amount", "");
+      amountInput.setAttribute(
+        "aria-label",
+        `Amount drawn from ${config.labels && config.labels.get(row.allocationId)
+          ? config.labels.get(row.allocationId)
+          : "this allocation"}`
+      );
+      const cap = available.has(row.allocationId) ? available.get(row.allocationId) : null;
+      if (cap !== null) amountInput.max = String(cap);
+      const typed = row.amount === undefined || row.amount === null ? "" : String(row.amount);
+      // A figure the user typed is theirs to keep; anything else is a default
+      // that follows the expense amount.
+      if (row.touched && typed !== "") {
+        amountInput.value = typed;
+        amountInput.setAttribute("data-draw-touched", "1");
+      } else {
+        amountInput.value = String(
+          this._defaultDrawAmount(container, row.allocationId, index, cap)
+        );
+      }
+      amountInput.addEventListener("input", () => {
+        amountInput.setAttribute("data-draw-touched", "1");
+      });
+      wrapper.appendChild(amountInput);
+    }
+
+    if (index > 0) {
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.className = "draw-allocation-remove";
+      removeBtn.textContent = "✕";
+      removeBtn.setAttribute("aria-label", "Remove this allocation from the split");
+      removeBtn.addEventListener("click", () => {
+        const current = this.readAllocationDrawRows(container);
+        current.splice(index, 1);
+        this.renderAllocationDrawEditor(container, { rows: current });
+      });
+      wrapper.appendChild(removeBtn);
+    }
+    return wrapper;
   },
 
-  // Populates an inline edit form's "Draw from allocation" dropdown with the
-  // buckets active for the expense's own date, pre-selecting any current draw.
-  // Returns the number of live allocations offered. A current draw that's no
-  // longer in the active list (e.g. a superseded recurring period) is still
-  // added as an option so saving doesn't silently drop the existing link.
-  populateEditDrawAllocation(select, date, currentDrawId) {
-    const allocations = this.store.getAllocations(date);
-    select.innerHTML = '<option value="">No allocation draw</option>';
-    allocations.forEach((a) => {
-      const option = document.createElement("option");
-      option.value = a.id;
-      const period = a.recurring
-        ? ` (${this.formatShortDisplayDate(a.date)})`
-        : "";
-      option.textContent = `${a.description} — $${Utils.formatAmount(a.remaining)} left${period}`;
-      select.appendChild(option);
+  // What a freshly-chosen bucket should cover: whatever the expense still has
+  // uncovered, capped at what that bucket can actually pay. The cap is why a
+  // single row against a too-small bucket still behaves like it always did —
+  // it covers what it can and the rest is ordinary spending.
+  _defaultDrawAmount(container, allocationId, index, cap) {
+    const config = container._drawEditorConfig || {};
+    const amountEl = config.amountElementId
+      ? document.getElementById(config.amountElementId)
+      : null;
+    const expense = amountEl ? parseFloat(amountEl.value) : NaN;
+    const total = Number.isFinite(expense) && expense > 0 ? this._drawCents(expense) : 0;
+    let claimed = 0;
+    this.readAllocationDrawRows(container).forEach((r, i) => {
+      if (i === index || !r.allocationId) return;
+      const value = parseFloat(r.amount);
+      if (Number.isFinite(value) && value > 0) claimed = this._drawCents(claimed + value);
     });
-    if (currentDrawId && !allocations.some((a) => a.id === currentDrawId)) {
-      const info = this.store.getAllocationInfoById(currentDrawId);
-      const option = document.createElement("option");
-      option.value = currentDrawId;
-      option.textContent = info
-        ? `${info.description}, ${this.formatShortDisplayDate(info.date)}`
-        : "(current allocation)";
-      select.appendChild(option);
+    const uncovered = Math.max(0, this._drawCents(total - claimed));
+    const capped = cap === null ? uncovered : Math.min(uncovered, cap);
+    return this._drawCents(Math.max(0, capped));
+  },
+
+  // The editor's rows exactly as they sit on screen, empties included — this is
+  // what a re-render replays, so a half-typed split survives one.
+  readAllocationDrawRows(container) {
+    const out = [];
+    if (!container || !container.querySelectorAll) return out;
+    const rowEls = container.querySelectorAll("[data-draw-row]");
+    Array.prototype.forEach.call(rowEls, (el) => {
+      const select = el.querySelector("[data-draw-bucket]");
+      const amount = el.querySelector("[data-draw-amount]");
+      out.push({
+        allocationId: select ? select.value : "",
+        amount: amount ? amount.value : "",
+        touched: !!amount && amount.getAttribute("data-draw-touched") === "1",
+      });
+    });
+    return out;
+  },
+
+  // Validate the editor and convert it to the store's draw rows. Returns
+  // { rows, error }; a non-null error is a message to show the user, and
+  // nothing should be saved until it clears.
+  collectAllocationDraws(container, expenseAmount) {
+    if (!container || container.style.display === "none") {
+      return { rows: [], error: null };
     }
-    select.value = currentDrawId || "";
-    return allocations.length;
+    const config = container._drawEditorConfig || {};
+    const available = config.available || new Map();
+    const labels = config.labels || new Map();
+    const rows = [];
+    let error = null;
+    let total = 0;
+    this.readAllocationDrawRows(container).forEach((raw) => {
+      if (error || !raw.allocationId) return;
+      const name = labels.get(raw.allocationId) || "That allocation";
+      const value = parseFloat(raw.amount);
+      if (!Number.isFinite(value) || value <= 0) {
+        error = `Enter an amount greater than 0 to draw from ${name}.`;
+        return;
+      }
+      const amount = this._drawCents(value);
+      const cap = available.has(raw.allocationId) ? available.get(raw.allocationId) : null;
+      // Half a cent of slack: the inputs are decimal strings and the cap is a
+      // rounded figure, so an exact "spend the whole bucket" entry must not
+      // fail on a float hair.
+      if (cap !== null && amount > cap + 0.005) {
+        error = `${name} only has $${Utils.formatAmount(cap)} available.`;
+        return;
+      }
+      total = this._drawCents(total + amount);
+      rows.push({ allocationId: raw.allocationId, amount });
+    });
+    const expense = this._drawCents(expenseAmount);
+    if (!error && total > expense + 0.005) {
+      error = `Allocation draws add up to $${Utils.formatAmount(total)}, more than the $${Utils.formatAmount(expense)} expense.`;
+    }
+    // A lone bucket covering the whole expense is stored WITHOUT a figure of
+    // its own — the pre-split shape, where the draw simply is the expense. That
+    // is what keeps a later amount edit (here, in bank reconciliation's "fix
+    // amount", anywhere) flowing straight through to the bucket instead of
+    // freezing at the figure that happened to be in this box.
+    if (!error && rows.length === 1 && total >= expense - 0.005) {
+      rows[0].amount = null;
+    }
+    return { rows: error ? [] : rows, error };
+  },
+
+  // Shows the draw editor for one-time, non-allocated expenses in the add
+  // modal, rebuilt against the transaction's own date. Hidden when there are no
+  // buckets to draw from. An allocation can't draw from another allocation,
+  // which the type select makes structural: the editor only appears for the
+  // plain "Expense" type. Pass `reset` to start from an empty split (a fresh
+  // open of the modal) rather than keeping what is on screen.
+  updateDrawAllocationVisibility(reset) {
+    const container = document.getElementById("transactionDrawAllocations");
+    if (!container) return;
+    const type = document.getElementById("transactionType").value;
+    const recurrence = document.getElementById("transactionRecurrence").value;
+
+    const applicable = type === "expense" && recurrence === "once";
+    if (!applicable) {
+      container.innerHTML = "";
+      container.style.display = "none";
+      container._drawEditorConfig = null;
+      return;
+    }
+    // Offer the buckets active for the transaction's own date, not today's, so
+    // an expense entered in a later period bills against that period.
+    const dateField = document.getElementById("transactionDate");
+    const refDate = dateField && dateField.value ? dateField.value : undefined;
+    this.renderAllocationDrawEditor(container, {
+      date: refDate,
+      amountElementId: "transactionAmount",
+      existing: [],
+      rows: reset ? [] : undefined,
+    });
+  },
+
+  // Builds an inline edit form's draw editor for `date`, seeded with the
+  // expense's current split. Returns the number of buckets offered so the
+  // caller can skip the control when there is nothing to choose and nothing to
+  // preserve.
+  populateEditDrawAllocation(container, date, transaction, amountElementId) {
+    const existing = this.store.getAllocationDraws(transaction);
+    return this.renderAllocationDrawEditor(container, {
+      date,
+      amountElementId,
+      existing,
+      // Show each row's resolved share, so a full-cover row (no figure of its
+      // own) arrives in the box as the number it actually stands for.
+      rows: existing.map((r) => ({
+        allocationId: r.allocationId || "",
+        amount: r.share,
+        // A row with a figure of its own was set deliberately and must not be
+        // re-defaulted; a full-cover row has no figure to preserve and should
+        // keep following the amount.
+        touched: r.amount !== null,
+      })),
+    });
   },
 
   // When the "Allocation" type is selected, settlement no longer applies: the

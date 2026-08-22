@@ -1010,6 +1010,123 @@ async function dismissAlert(page) {
     check("a draw debits its bucket by exactly the spend",
       allocSetup.remaining === 140, `bucket at ${allocSetup.remaining}`);
 
+    // Splitting one expense across two buckets, driven through the real form.
+    // The vm harness can assert what the store does with a split but not what
+    // the editor does: the rows are built and rebuilt in the DOM, the second
+    // row's options are filtered against the first row's choice, and the
+    // defaults are read live off the amount field. All three are only true in a
+    // browser.
+    const split = await page.evaluate(async (groceryId) => {
+      const store = window.app.store;
+      const ui = window.app.transactionUI;
+      const today = Utils.formatDateString(new Date());
+      const householdId = store.addTransaction(today, {
+        amount: 100, type: "expense", description: "UI Household Bucket",
+        allocated: true, settled: true,
+      });
+      window.app.updateUI();
+      ui.showTransactionDetails(today);
+      await new Promise((r) => setTimeout(r, 300));
+
+      const editor = document.getElementById("transactionDrawAllocations");
+      const rows = () => [...editor.querySelectorAll("[data-draw-row]")];
+      const bucketSelect = (i) => rows()[i].querySelector("[data-draw-bucket]");
+      const amountInput = (i) => rows()[i].querySelector("[data-draw-amount]");
+      const pick = (select, label) => {
+        const option = [...select.options].find((o) => o.textContent.includes(label));
+        if (!option) return false;
+        select.value = option.value;
+        select.dispatchEvent(new Event("change"));
+        return true;
+      };
+
+      document.getElementById("transactionDate").value = today;
+      document.getElementById("transactionAmount").value = "90";
+      document.getElementById("transactionDescription").value = "UI Split Spend";
+      const typeEl = document.getElementById("transactionType");
+      typeEl.value = "expense";
+      typeEl.dispatchEvent(new Event("change"));
+      await new Promise((r) => setTimeout(r, 150));
+      const shown = editor.style.display !== "none" && rows().length === 1;
+
+      pick(bucketSelect(0), "UI Grocery Bucket");
+      await new Promise((r) => setTimeout(r, 100));
+      // A lone bucket defaults to the whole expense.
+      const firstDefault = amountInput(0).value;
+
+      const first = amountInput(0);
+      first.value = "50";
+      first.dispatchEvent(new Event("input"));
+      editor.querySelector(".draw-allocation-add").click();
+      await new Promise((r) => setTimeout(r, 100));
+      const secondRowAppeared = rows().length === 2;
+      const duplicateOffered = [...bucketSelect(1).options].some(
+        (o) => o.value && o.value === bucketSelect(0).value
+      );
+      pick(bucketSelect(1), "UI Household Bucket");
+      await new Promise((r) => setTimeout(r, 100));
+      // The second row defaults to what the first one left uncovered, and the
+      // first row's typed figure survives the re-render.
+      const secondDefault = amountInput(1).value;
+      const firstKept = amountInput(0).value;
+
+      // An over-committed split must be refused outright.
+      const over = amountInput(1);
+      over.value = "80";
+      over.dispatchEvent(new Event("input"));
+      const refused = ui.addTransaction() === false;
+      const savedAnyway = (store.getTransactions()[today] || []).some(
+        (t) => t.description === "UI Split Spend"
+      );
+
+      over.value = "40";
+      over.dispatchEvent(new Event("input"));
+      ui.addTransaction();
+      await new Promise((r) => setTimeout(r, 400));
+
+      const spend = (store.getTransactions()[today] || []).find(
+        (t) => t.description === "UI Split Spend"
+      );
+      const draws = spend ? store.getAllocationDraws(spend) : [];
+      const remainingOf = (id) => {
+        const found = store.findTransactionById(id);
+        return found ? found.transaction.amount : null;
+      };
+      ui.showTransactionDetails(today);
+      await new Promise((r) => setTimeout(r, 300));
+      const label = [...document.querySelectorAll(".draw-from-allocation")]
+        .map((el) => el.textContent)
+        .find((text) => text.includes("UI Household Bucket")) || "";
+      return {
+        householdId, shown, firstDefault, secondRowAppeared, duplicateOffered,
+        secondDefault, firstKept, refused, savedAnyway,
+        drawn: draws.map((d) => d.drawn),
+        grocery: remainingOf(groceryId),
+        household: remainingOf(householdId),
+        label,
+      };
+    }, allocSetup.id);
+    check("the draw editor renders one row for a one-time expense", split.shown);
+    check("a lone bucket defaults to the whole expense",
+      Number(split.firstDefault) === 90, `defaulted to ${split.firstDefault}`);
+    check("a second draw row can be added", split.secondRowAppeared);
+    check("a bucket already claimed is not offered on the next row",
+      !split.duplicateOffered);
+    check("the next row defaults to what is still uncovered",
+      Number(split.secondDefault) === 40, `defaulted to ${split.secondDefault}`);
+    check("a typed row survives the re-render",
+      Number(split.firstKept) === 50, `row 1 shows ${split.firstKept}`);
+    check("a split over the expense total is refused, and saves nothing",
+      split.refused && !split.savedAnyway);
+    check("the saved split debits each bucket by its own row",
+      split.drawn.join(",") === "50,40" && split.grocery === 90 && split.household === 60,
+      `drawn ${split.drawn.join("/")}, buckets ${split.grocery}/${split.household}`);
+    check("the day modal names every bucket the expense drew from",
+      split.label.includes("UI Grocery Bucket") && split.label.includes("UI Household Bucket"),
+      split.label);
+    await page.evaluate(() => window.app.transactionUI.closeModals());
+    await sleep(200);
+
     await page.evaluate(() => window.app.showAllocatedTransactions());
     await sleep(350);
     const allocModal = await page.evaluate(() => {

@@ -159,7 +159,6 @@ files.forEach(file => {
   vm.runInThisContext(content);
 });
 
-// TEST 1: Basic Transaction Logic
 console.log("TEST 1: Basic Transaction Logic");
 const store = new TransactionStore();
 store.resetData();
@@ -183,7 +182,6 @@ const txns = store.getTransactions()[dateStr];
 if (txns.length !== 2) throw new Error("Transactions not added");
 console.log("✅ Transactions added");
 
-// TEST 2: Calculation Service
 console.log("TEST 2: Calculation Service");
 const recurringManager = new RecurringTransactionManager(store);
 const calcService = new CalculationService(store, recurringManager);
@@ -8326,6 +8324,15 @@ console.log("TEST 93: Every Stored Field Survives Every Wrong Shape");
           { id: "t3", amount: 30, type: "expense", description: "Draw", settled: true,
             drawsFromAllocationId: "t2", drawsFromRecurringId: "r1",
             drawsFromPeriodDate: ds(Y, M, 5), _lastModified: stamp },
+          // A second bucket and an expense SPLIT across both, so the sweep
+          // walks the multi-row draw path too, not just the legacy single one.
+          { id: "t2b", amount: 50, type: "expense", description: "Bucket 2", allocated: true,
+            settled: true, _lastModified: stamp },
+          { id: "t3b", amount: 45, type: "expense", description: "Split draw", settled: true,
+            allocationDraws: [
+              { allocationId: "t2", amount: 20, drawn: 20, recurringId: "r1", periodDate: ds(Y, M, 5) },
+              { allocationId: "t2b", amount: 25, drawn: 25 },
+            ], _lastModified: stamp },
           { id: "t4", amount: 900, type: "income", description: "Pay", _lastModified: stamp },
         ],
         [ds(Y, M, 9)]: [
@@ -8420,7 +8427,8 @@ console.log("TEST 93: Every Stored Field Survives Every Wrong Shape");
   const SURFACES = [
     ["transaction", ["type", "description", "settled", "allocated", "hidden", "recurringId",
       "originalDate", "movedFrom", "originalRecurringId", "drawsFromAllocationId",
-      "drawsFromRecurringId", "drawsFromPeriodDate", "drawAmount", "debtId", "debtRole",
+      "allocationDraws", "drawsFromRecurringId", "drawsFromPeriodDate", "drawAmount",
+      "debtId", "debtRole",
       "debtName", "closeoutDate", "autoCloseout", "snowballMonth", "snowballGenerated",
       "modifiedInstance", "_lastModified", "id"],
       (p, f, v) => Object.values(p.transactions).forEach((list) => list.forEach((t) => { t[f] = v; }))],
@@ -9207,6 +9215,522 @@ console.log("TEST 98: No Null-Coerced Date Comparisons Or Two-Way Comparators");
   console.log(
     `✅ ${jsFiles.length} source files carry no null-coerced date comparison and no two-way comparator`
   );
+}
+
+// TEST 99: An expense can be SPLIT across several allocation buckets, so every
+// piece of the draw machinery that used to handle exactly one bucket now has to
+// handle a list: the debit, the refund, the clamp when the expense shrinks under
+// its own split, the re-point when a bucket is relocated, and the copy made
+// whenever a row is relocated by delete + re-add. The single-bucket shape has to
+// keep behaving EXACTLY as it did — a row with no figure of its own means "this
+// whole expense", which is why an amount edit still flows through to the bucket.
+console.log("TEST 99: One Expense Split Across Several Allocation Buckets");
+{
+  const T99_now = new Date();
+  const T99_day = (offset) =>
+    Utils.formatDateString(
+      new Date(T99_now.getFullYear(), T99_now.getMonth(), T99_now.getDate() + offset, 12, 0, 0)
+    );
+  const build = () => {
+    localStorage.clear();
+    const s = new TransactionStore();
+    s.resetData();
+    const a = s.addTransaction(T99_day(-5), {
+      amount: 150, type: "expense", description: "Groceries Bucket",
+      allocated: true, settled: true,
+    });
+    const b = s.addTransaction(T99_day(-5), {
+      amount: 100, type: "expense", description: "Household Bucket",
+      allocated: true, settled: true,
+    });
+    return { s, a, b };
+  };
+  const remainingOf = (s, id) => {
+    const found = s.findTransactionById(id);
+    return found ? s._roundCents(found.transaction.amount) : null;
+  };
+
+  // (a) Each row debits its OWN bucket by its own share.
+  {
+    const { s, a, b } = build();
+    s.addTransaction(T99_day(-1), {
+      amount: 200, type: "expense", description: "Costco", settled: true,
+      allocationDraws: [
+        { allocationId: a, amount: 130 },
+        { allocationId: b, amount: 70 },
+      ],
+    });
+    if (remainingOf(s, a) !== 20 || remainingOf(s, b) !== 30) {
+      throw new Error(
+        `Split debited wrong: A=${remainingOf(s, a)} (want 20), B=${remainingOf(s, b)} (want 30)`
+      );
+    }
+    const spend = s.getTransactions()[T99_day(-1)][0];
+    const rows = s.getAllocationDraws(spend);
+    if (rows.length !== 2 || rows[0].drawn !== 130 || rows[1].drawn !== 70) {
+      throw new Error(`Rows did not record what they drew: ${JSON.stringify(rows)}`);
+    }
+    // The legacy single-draw fields mirror the primary row, so an older build —
+    // and any reader that only asks "which bucket is this billed against?" —
+    // still sees the split's main bucket instead of nothing at all.
+    if (spend.drawsFromAllocationId !== a || spend.drawAmount !== 130) {
+      throw new Error("Legacy mirrors do not describe the primary row");
+    }
+    s.cancelPendingSave();
+  }
+
+  // (b) Under-coverage is ordinary spending — the same thing an over-large
+  //     single draw has always produced.
+  {
+    const { s, a, b } = build();
+    s.addTransaction(T99_day(-1), {
+      amount: 200, type: "expense", description: "Costco", settled: true,
+      allocationDraws: [{ allocationId: a, amount: 40 }, { allocationId: b, amount: 25 }],
+    });
+    if (remainingOf(s, a) !== 110 || remainingOf(s, b) !== 75) {
+      throw new Error("Partial split debited more than its rows asked for");
+    }
+    s.cancelPendingSave();
+  }
+
+  // (c) Shrinking the expense under its own split clamps the later rows rather
+  //     than drawing more than the expense is worth.
+  {
+    const { s, a, b } = build();
+    s.addTransaction(T99_day(-1), {
+      amount: 200, type: "expense", description: "Costco", settled: true,
+      allocationDraws: [{ allocationId: a, amount: 130 }, { allocationId: b, amount: 70 }],
+    });
+    s.updateTransaction(T99_day(-1), 0, { amount: 150 });
+    if (remainingOf(s, a) !== 20 || remainingOf(s, b) !== 80) {
+      throw new Error(
+        `Shrunk expense did not clamp its split: A=${remainingOf(s, a)} (want 20), B=${remainingOf(s, b)} (want 80)`
+      );
+    }
+    const drawnTotal = s.getAllocationDrawnTotal(s.getTransactions()[T99_day(-1)][0]);
+    if (drawnTotal !== 150) {
+      throw new Error(`Buckets cover ${drawnTotal} of a 150 expense`);
+    }
+    // And deleting it hands every cent back.
+    s.deleteTransaction(T99_day(-1), 0);
+    if (remainingOf(s, a) !== 150 || remainingOf(s, b) !== 100) {
+      throw new Error("Deleting a split expense did not refund every bucket");
+    }
+    s.cancelPendingSave();
+  }
+
+  // (d) Clearing the split (an empty list is authoritative) refunds everything
+  //     and leaves no mirror behind to resurrect the draw.
+  {
+    const { s, a, b } = build();
+    s.addTransaction(T99_day(-1), {
+      amount: 200, type: "expense", description: "Costco", settled: true,
+      allocationDraws: [{ allocationId: a, amount: 130 }, { allocationId: b, amount: 70 }],
+    });
+    s.updateTransaction(T99_day(-1), 0, { allocationDraws: [] });
+    if (remainingOf(s, a) !== 150 || remainingOf(s, b) !== 100) {
+      throw new Error("Clearing the split did not refund the buckets");
+    }
+    const cleared = s.getTransactions()[T99_day(-1)][0];
+    if (cleared.drawsFromAllocationId || cleared.allocationDraws || cleared.drawAmount) {
+      throw new Error(`Cleared split left draw fields behind: ${JSON.stringify(cleared)}`);
+    }
+    s.cancelPendingSave();
+  }
+
+  // (e) A row with NO figure of its own is the pre-split shape: it covers the
+  //     whole expense, so an amount edit still flows straight through to the
+  //     bucket. A row WITH a figure holds that figure.
+  {
+    const { s, a } = build();
+    s.addTransaction(T99_day(-1), {
+      amount: 40, type: "expense", description: "Full cover", settled: true,
+      allocationDraws: [{ allocationId: a, amount: null }],
+    });
+    if (remainingOf(s, a) !== 110) throw new Error("Full-cover row did not draw the expense");
+    s.updateTransaction(T99_day(-1), 0, { amount: 60 });
+    if (remainingOf(s, a) !== 90) {
+      throw new Error(`Full-cover row did not follow the amount edit: ${remainingOf(s, a)}`);
+    }
+    s.deleteTransaction(T99_day(-1), 0);
+
+    s.addTransaction(T99_day(-1), {
+      amount: 40, type: "expense", description: "Pinned", settled: true,
+      allocationDraws: [{ allocationId: a, amount: 40 }],
+    });
+    s.updateTransaction(T99_day(-1), 0, { amount: 60 });
+    if (remainingOf(s, a) !== 110) {
+      throw new Error(
+        `A pinned row must not grow with the expense: ${remainingOf(s, a)} (want 110)`
+      );
+    }
+    s.cancelPendingSave();
+  }
+
+  // (f) Two rows naming the same bucket are one row, not a double debit.
+  {
+    const { s, a } = build();
+    s.addTransaction(T99_day(-1), {
+      amount: 100, type: "expense", description: "Doubled", settled: true,
+      allocationDraws: [{ allocationId: a, amount: 50 }, { allocationId: a, amount: 50 }],
+    });
+    if (remainingOf(s, a) !== 100) {
+      throw new Error(`Duplicate rows double-debited the bucket: ${remainingOf(s, a)}`);
+    }
+    s.cancelPendingSave();
+  }
+
+  // (g) Junk rows — nothing coerces `allocationDraws` on the way in from an
+  //     import or a cloud merge, so every field is guarded by the reader.
+  {
+    const { s, a, b } = build();
+    const junk = [
+      42,
+      null,
+      {},
+      { allocationId: 42, amount: 10 },
+      { allocationId: a, amount: "abc" },
+      { allocationId: b, amount: -5 },
+      { allocationId: [b], amount: {} },
+    ];
+    s.addTransaction(T99_day(-1), {
+      amount: 90, type: "expense", description: "Junk", settled: true,
+      allocationDraws: junk,
+    });
+    // The one readable full-cover row (amount "abc" → no figure) takes the
+    // expense; the -5 row is not a usable figure either, so it takes what is
+    // left, which is nothing.
+    if (remainingOf(s, a) !== 60 || remainingOf(s, b) !== 100) {
+      throw new Error(
+        `Junk rows corrupted the buckets: A=${remainingOf(s, a)}, B=${remainingOf(s, b)}`
+      );
+    }
+    ["allocationDraws", 7, "x", {}].forEach((shape) => {
+      const probe = { amount: 10, type: "expense", allocationDraws: shape };
+      if (s.getAllocationDraws(probe).length !== 0) {
+        throw new Error(`A non-array allocationDraws (${JSON.stringify(shape)}) produced rows`);
+      }
+    });
+    s.cancelPendingSave();
+  }
+
+  // (h) Re-pointing a relocated bucket must move only ITS row and leave the
+  //     other bucket's row untouched.
+  {
+    const { s, a, b } = build();
+    s.addTransaction(T99_day(-1), {
+      amount: 200, type: "expense", description: "Costco", settled: true,
+      allocationDraws: [{ allocationId: a, amount: 130 }, { allocationId: b, amount: 70 }],
+    });
+    const loc = s.findTransactionById(a);
+    const movedAmount = s.getTransactions()[loc.date][loc.index].amount;
+    s.deleteTransaction(loc.date, loc.index);
+    const newA = s.addTransaction(T99_day(-4), {
+      amount: movedAmount, type: "expense", description: "Groceries Bucket",
+      allocated: true, settled: true,
+    });
+    if (s.repointAllocationDraws(a, newA) !== 1) {
+      throw new Error("Re-point did not find the split's row");
+    }
+    const rows = s.getAllocationDraws(s.getTransactions()[T99_day(-1)][0]);
+    if (rows.length !== 2 || rows[0].allocationId !== newA || rows[1].allocationId !== b) {
+      throw new Error(`Re-point mangled the split: ${JSON.stringify(rows)}`);
+    }
+    // The reserve still absorbs a later edit of the drawing expense.
+    s.updateTransaction(T99_day(-1), 0, { amount: 190 });
+    if (remainingOf(s, newA) !== 20 || remainingOf(s, b) !== 40) {
+      throw new Error(
+        `Re-pointed split stopped absorbing edits: A=${remainingOf(s, newA)}, B=${remainingOf(s, b)}`
+      );
+    }
+    s.cancelPendingSave();
+  }
+
+  // (i) Relocating the SPENDING row (settle, move, bank-reconcile "fix date")
+  //     goes through delete + re-add, and the copy has to carry the whole split
+  //     or the spend stands while every bucket is quietly credited back.
+  {
+    const { s, a, b } = build();
+    s.addTransaction(T99_day(-1), {
+      amount: 200, type: "expense", description: "Costco", settled: true,
+      allocationDraws: [{ allocationId: a, amount: 130 }, { allocationId: b, amount: 70 }],
+    });
+    const original = s.getTransactions()[T99_day(-1)][0];
+    const copy = { amount: original.amount, type: "expense", description: "Costco", settled: true };
+    s.carryAllocationDraws(original, copy);
+    if (copy.allocationDraws.some((r) => r.drawn !== undefined)) {
+      throw new Error("The carried rows must not bring the old draw with them");
+    }
+    s.deleteTransaction(T99_day(-1), 0);
+    s.addTransaction(T99_day(0), copy);
+    if (remainingOf(s, a) !== 20 || remainingOf(s, b) !== 30) {
+      throw new Error(
+        `Relocating a split expense lost its draws: A=${remainingOf(s, a)}, B=${remainingOf(s, b)}`
+      );
+    }
+    s.cancelPendingSave();
+  }
+
+  // (j) An allocation bucket can never draw from another bucket, whatever an
+  //     import hands us.
+  {
+    const { s, a, b } = build();
+    s.addTransaction(T99_day(-1), {
+      amount: 50, type: "expense", description: "Bucket that draws", allocated: true,
+      settled: true, allocationDraws: [{ allocationId: a, amount: 50 }],
+    });
+    if (remainingOf(s, a) !== 150 || remainingOf(s, b) !== 100) {
+      throw new Error("An allocation bucket drew from another bucket");
+    }
+    s.cancelPendingSave();
+  }
+
+  console.log("✅ Splits debit, clamp, refund, re-point and relocate per bucket");
+}
+
+// TEST 100: what a split records as DEMAND for each series' floor suggestions.
+// The rule has to hold at both ends: a single row still books the WHOLE expense
+// (that is the whole point of the suggester — a bucket too small to cover its
+// spending must still show the demand that would right-size it, which `drawn`
+// hides), while a real split books each bucket's own share. Whatever the split
+// leaves uncovered lands on the last row, so the expense is always attributed
+// exactly once.
+console.log("TEST 100: A Split Books Each Bucket's Own Share As Demand");
+{
+  const T100_now = new Date();
+  const Y = T100_now.getFullYear();
+  const M = T100_now.getMonth();
+  const ds = (y, m, d) => Utils.formatDateString(new Date(y, m, d, 12, 0, 0));
+  const stamp = new Date().toISOString();
+
+  // Two recurring allocation series, four periods each: three complete ones
+  // (the suggester needs three) plus the live one dated the 1st of this month.
+  const periods = [ds(Y, M - 3, 1), ds(Y, M - 2, 1), ds(Y, M - 1, 1), ds(Y, M, 1)];
+  const transactions = {};
+  const bucketId = (series, i) => `${series}-bucket-${i}`;
+  periods.forEach((date, i) => {
+    transactions[date] = [
+      { id: bucketId("r1", i), amount: 100, type: "expense", description: "Groceries",
+        allocated: true, settled: true, recurringId: "r1", modifiedInstance: true,
+        _lastModified: stamp },
+      { id: bucketId("r2", i), amount: 100, type: "expense", description: "Household",
+        allocated: true, settled: true, recurringId: "r2", modifiedInstance: true,
+        _lastModified: stamp },
+    ];
+  });
+  // One $200 spend per complete period, split 60 / 140 across the two series.
+  periods.slice(0, 3).forEach((date, i) => {
+    const spendDate = ds(Y, M - 3 + i, 10);
+    transactions[spendDate] = [
+      { id: `spend-${i}`, amount: 200, type: "expense", description: "Costco", settled: true,
+        allocationDraws: [
+          { allocationId: bucketId("r1", i), amount: 60, drawn: 60, recurringId: "r1", periodDate: date },
+          { allocationId: bucketId("r2", i), amount: 140, drawn: 100, recurringId: "r2", periodDate: date },
+        ],
+        _lastModified: stamp },
+    ];
+  });
+  const seriesDef = (id, description) => ({
+    id, amount: 100, type: "expense", description, recurrence: "monthly",
+    startDate: ds(Y, M - 3, 1), allocated: true, settled: true,
+    autoAdjustFloor: true, floorAmount: 20, _lastModified: stamp,
+  });
+
+  localStorage.clear();
+  const s = new TransactionStore();
+  s.resetData();
+  s.importData({
+    transactions,
+    monthlyBalances: {},
+    recurringTransactions: [seriesDef("r1", "Groceries"), seriesDef("r2", "Household")],
+    debts: [], cashInfusions: [], savingsGoals: [], skippedTransactions: {},
+    movedTransactions: {}, monthlyNotes: {},
+    debtSnowballSettings: { dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false },
+    lastUpdated: stamp,
+  });
+
+  // r1 sees 60/period: median 60 → 60 * 1.10 = 66 (under the 1.5x step cap of
+  // 150) → rounded to $5 = 65. Attributing the whole 200 to it would land on
+  // the step cap, 150; attributing what it actually DREW would be the same 60
+  // here, which is why r2 below is the row that separates those two.
+  const r1 = s.getAllocationFloorSuggestion("r1");
+  if (!r1 || r1.suggested !== 65) {
+    throw new Error(`r1 suggestion should be 65, got ${JSON.stringify(r1)}`);
+  }
+  // r2 asked for 140/period but its bucket could only pay 100. The suggestion
+  // has to be built on the 140 — the demand — not the 100 it managed to cover:
+  // median 140 → 154, capped by the 1.5x step to 150.
+  const r2 = s.getAllocationFloorSuggestion("r2");
+  if (!r2 || r2.suggested !== 150) {
+    throw new Error(`r2 suggestion should be 150, got ${JSON.stringify(r2)}`);
+  }
+  // Every period must be counted once, at its own share.
+  if (r1.periods.length !== 3 || r1.periods.some((p) => p.demand !== 60)) {
+    throw new Error(`r1 demand history is wrong: ${JSON.stringify(r1.periods)}`);
+  }
+
+  // The single-row case is the legacy rule, unchanged: one bucket, no figure of
+  // its own, books the whole expense even though it could only cover part.
+  const legacy = {};
+  periods.forEach((date, i) => {
+    legacy[date] = [
+      { id: bucketId("r1", i), amount: 100, type: "expense", description: "Groceries",
+        allocated: true, settled: true, recurringId: "r1", modifiedInstance: true,
+        _lastModified: stamp },
+    ];
+  });
+  periods.slice(0, 3).forEach((date, i) => {
+    legacy[ds(Y, M - 3 + i, 10)] = [
+      { id: `legacy-${i}`, amount: 200, type: "expense", description: "Costco", settled: true,
+        drawsFromAllocationId: bucketId("r1", i), drawAmount: 100,
+        drawsFromRecurringId: "r1", drawsFromPeriodDate: date, _lastModified: stamp },
+    ];
+  });
+  localStorage.clear();
+  const s2 = new TransactionStore();
+  s2.resetData();
+  s2.importData({
+    transactions: legacy,
+    monthlyBalances: {},
+    recurringTransactions: [seriesDef("r1", "Groceries")],
+    debts: [], cashInfusions: [], savingsGoals: [], skippedTransactions: {},
+    movedTransactions: {}, monthlyNotes: {},
+    debtSnowballSettings: { dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false },
+    lastUpdated: stamp,
+  });
+  const legacySuggestion = s2.getAllocationFloorSuggestion("r1");
+  if (!legacySuggestion || legacySuggestion.suggested !== 150) {
+    throw new Error(
+      `A legacy single draw must still book the whole expense: ${JSON.stringify(legacySuggestion)}`
+    );
+  }
+
+  // And the same expense entered TODAY: the form caps a row at what its bucket
+  // can pay, so a $200 spend against a $100 bucket is stored as an explicit $60
+  // row (whatever the box allowed) with the rest uncovered. That uncovered rest
+  // is still demand on this series — it is the whole signal that the bucket is
+  // too small — so it lands on the last row rather than evaporating.
+  const capped = {};
+  periods.forEach((date, i) => {
+    capped[date] = [
+      { id: bucketId("r1", i), amount: 100, type: "expense", description: "Groceries",
+        allocated: true, settled: true, recurringId: "r1", modifiedInstance: true,
+        _lastModified: stamp },
+    ];
+  });
+  periods.slice(0, 3).forEach((date, i) => {
+    capped[ds(Y, M - 3 + i, 10)] = [
+      { id: `capped-${i}`, amount: 200, type: "expense", description: "Costco", settled: true,
+        allocationDraws: [
+          { allocationId: bucketId("r1", i), amount: 60, drawn: 60, recurringId: "r1", periodDate: date },
+        ],
+        _lastModified: stamp },
+    ];
+  });
+  localStorage.clear();
+  const s3 = new TransactionStore();
+  s3.resetData();
+  s3.importData({
+    transactions: capped,
+    monthlyBalances: {},
+    recurringTransactions: [seriesDef("r1", "Groceries")],
+    debts: [], cashInfusions: [], savingsGoals: [], skippedTransactions: {},
+    movedTransactions: {}, monthlyNotes: {},
+    debtSnowballSettings: { dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false },
+    lastUpdated: stamp,
+  });
+  const cappedSuggestion = s3.getAllocationFloorSuggestion("r1");
+  if (!cappedSuggestion || cappedSuggestion.suggested !== 150) {
+    throw new Error(
+      `The uncovered rest of a capped row is still demand: ${JSON.stringify(cappedSuggestion)}`
+    );
+  }
+  if (cappedSuggestion.periods.some((p) => p.demand !== 200)) {
+    throw new Error(
+      `Each period should book the whole 200: ${JSON.stringify(cappedSuggestion.periods)}`
+    );
+  }
+  s.cancelPendingSave();
+  s2.cancelPendingSave();
+  s3.cancelPendingSave();
+  console.log("✅ Demand follows each row's share; the whole expense is booked once");
+}
+
+// TEST 101: the editor's own contract. The store clamps defensively, but it is
+// the form that has to REFUSE a split the user did not mean — an amount larger
+// than the bucket can pay, or rows adding up to more than the expense — because
+// silently clamping either one would hand back a different split than the one
+// on screen, with no way to tell.
+console.log("TEST 101: The Draw Editor Refuses A Split It Cannot Honor");
+{
+  const ui = {
+    _drawCents: TransactionUI.prototype._drawCents,
+    readAllocationDrawRows: TransactionUI.prototype.readAllocationDrawRows,
+    collectAllocationDraws: TransactionUI.prototype.collectAllocationDraws,
+  };
+  const editor = (rows, available, display) => ({
+    style: { display: display === undefined ? "" : display },
+    _drawEditorConfig: {
+      available: new Map(Object.entries(available || { A: 150, B: 100 })),
+      labels: new Map([["A", "Groceries"], ["B", "Household"]]),
+    },
+    querySelectorAll: () =>
+      rows.map((r) => ({
+        querySelector: (sel) =>
+          sel === "[data-draw-bucket]"
+            ? { value: r[0] }
+            : { value: r[1], getAttribute: () => (r[2] ? "1" : null) },
+      })),
+  });
+
+  const ok = ui.collectAllocationDraws(editor([["A", "130"], ["B", "70"]]), 200);
+  if (ok.error || ok.rows.length !== 2 || ok.rows[0].amount !== 130 || ok.rows[1].amount !== 70) {
+    throw new Error(`A valid split was rejected: ${JSON.stringify(ok)}`);
+  }
+
+  const overBucket = ui.collectAllocationDraws(editor([["A", "160"]]), 200);
+  if (!overBucket.error || !/Groceries only has/.test(overBucket.error)) {
+    throw new Error(`Drawing more than a bucket holds must be refused: ${JSON.stringify(overBucket)}`);
+  }
+
+  const overExpense = ui.collectAllocationDraws(editor([["A", "130"], ["B", "90"]]), 200);
+  if (!overExpense.error || !/more than the/.test(overExpense.error)) {
+    throw new Error(`Rows over the expense total must be refused: ${JSON.stringify(overExpense)}`);
+  }
+  if (overExpense.rows.length !== 0) {
+    throw new Error("A rejected split must not hand back rows to save");
+  }
+
+  [["A", ""], ["A", "0"], ["A", "-10"], ["A", "abc"]].forEach((row) => {
+    const bad = ui.collectAllocationDraws(editor([row]), 200);
+    if (!bad.error) {
+      throw new Error(`A bucket with amount "${row[1]}" should be refused`);
+    }
+  });
+
+  // A row with no bucket chosen is simply not part of the split.
+  const partial = ui.collectAllocationDraws(editor([["A", "50"], ["", ""]]), 200);
+  if (partial.error || partial.rows.length !== 1) {
+    throw new Error(`An unfilled row must be ignored, not rejected: ${JSON.stringify(partial)}`);
+  }
+
+  // A lone bucket covering the whole expense is stored WITHOUT a figure, so
+  // later amount edits keep flowing through to it (TEST 99e).
+  const whole = ui.collectAllocationDraws(editor([["A", "150"]]), 150);
+  if (whole.error || whole.rows.length !== 1 || whole.rows[0].amount !== null) {
+    throw new Error(`A full-cover row must be stored as "the whole expense": ${JSON.stringify(whole)}`);
+  }
+  // Spending a bucket to the last cent must not fail on a float hair.
+  const exact = ui.collectAllocationDraws(editor([["A", "0.3"]], { A: 0.1 + 0.2 }), 10);
+  if (exact.error) {
+    throw new Error(`Draining a bucket exactly was refused: ${exact.error}`);
+  }
+  // Hidden editor (the type is not a plain one-time expense): nothing to save.
+  const hidden = ui.collectAllocationDraws(editor([["A", "50"]], null, "none"), 200);
+  if (hidden.error || hidden.rows.length !== 0) {
+    throw new Error("A hidden editor must contribute no draws");
+  }
+  console.log("✅ The editor refuses over-drawn buckets and over-committed splits");
 }
 
 // Run the async network tests sequentially (shared global.fetch mock): TEST 32

@@ -1756,15 +1756,10 @@ class BankReconcileUI {
         moved.closeoutDate = carried < targetDate ? targetDate : carried;
       }
     }
-    if (tx.drawsFromAllocationId) {
-      moved.drawsFromAllocationId = tx.drawsFromAllocationId;
-    }
-    // Carry the series/period provenance so a relocated draw keeps feeding the
-    // allocation's demand history even after its bucket is forfeited.
-    if (tx.drawsFromRecurringId) {
-      moved.drawsFromRecurringId = tx.drawsFromRecurringId;
-      moved.drawsFromPeriodDate = tx.drawsFromPeriodDate;
-    }
+    // Carry the whole allocation split, including each row's series/period
+    // provenance, so a relocated draw keeps feeding the allocation's demand
+    // history even after its bucket is forfeited.
+    this.store.carryAllocationDraws(tx, moved);
 
     if (appItem.recurringId) {
       const recId = appItem.recurringId;

@@ -1,5 +1,3 @@
-// Cloud sync
-
 class CloudSync {
 
   constructor(store, onUpdate) {
@@ -51,7 +49,6 @@ class CloudSync {
       if (savedSetting !== null) {
         this.autoSyncEnabled = savedSetting === 'true';
       }
-      // Load stored ETag and sync time
       this._lastKnownETag = localStorage.getItem('gist_etag');
       const syncTime = localStorage.getItem('local_last_sync');
       this._lastSyncTime = syncTime ? new Date(syncTime) : null;
@@ -60,7 +57,6 @@ class CloudSync {
     }
   }
 
-  // Store ETag after successful fetch/save
   _storeETag(etag) {
     this._lastKnownETag = etag;
     if (etag) {
@@ -72,7 +68,6 @@ class CloudSync {
     }
   }
 
-  // Store last sync time
   _storeSyncTime() {
     this._lastSyncTime = new Date();
     try {
@@ -114,14 +109,12 @@ class CloudSync {
   }
 
 
-  // Encryption constants
   _SALT_LENGTH = 16;
   _IV_LENGTH = 12;
   _PBKDF2_ITERATIONS = 100000;
 
   // Generate a device-specific key for token encryption
   async _getDeviceKey() {
-    // Use a stable device identifier from localStorage, or create one
     let deviceId = localStorage.getItem('_device_id');
     if (!deviceId) {
       deviceId = crypto.randomUUID ? crypto.randomUUID() :
@@ -655,7 +648,6 @@ class CloudSync {
       if (!existing) {
         merged.set(item.id, item);
       } else {
-        // Compare timestamps - keep newer
         const localTime = new Date(item._lastModified || 0).getTime();
         const remoteTime = new Date(existing._lastModified || 0).getTime();
         if (localTime >= remoteTime) {
@@ -736,7 +728,6 @@ class CloudSync {
     allDates.forEach(date => {
       const localSkips = Array.isArray(local[date]) ? local[date] : [];
       const remoteSkips = Array.isArray(remote[date]) ? remote[date] : [];
-      // Union of skipped IDs
       const mergedSkips = [...new Set([...localSkips, ...remoteSkips])];
       if (mergedSkips.length > 0) {
         merged[date] = mergedSkips;
@@ -883,7 +874,6 @@ class CloudSync {
     const asMap = (value) =>
       value && typeof value === "object" && !Array.isArray(value) ? value : {};
 
-    // Get deleted items lists
     const localDeleted = asMap(localData._deletedItems);
     const remoteDeleted = asMap(remoteData._deletedItems);
 
@@ -989,7 +979,6 @@ class CloudSync {
     return merged;
   }
 
-  // Fetch remote Gist with optional ETag check
   async _fetchGist(token, gistId, etag = null) {
     const headers = {
       Authorization: `Bearer ${token}`,
@@ -1016,7 +1005,6 @@ class CloudSync {
     if (!gistFile.truncated) {
       return gistFile.content;
     }
-    // File was truncated by GitHub API - fetch full content via raw_url
     const rawResponse = await fetch(gistFile.raw_url, {
       headers: { Authorization: `Bearer ${token}` }
     });
@@ -1062,7 +1050,6 @@ class CloudSync {
         return true;
       }
       if (response.status === 404) {
-        // Gist was deleted
         console.warn('Gist not found during heartbeat check');
         return null;
       }
@@ -1073,7 +1060,6 @@ class CloudSync {
     }
   }
 
-  // Start periodic heartbeat to check for remote changes
   async startHeartbeat(intervalMs = 60000) {
     this.stopHeartbeat();
     // Snapshot the generation after stopHeartbeat bumped it. If another
@@ -1107,7 +1093,6 @@ class CloudSync {
     }, intervalMs);
   }
 
-  // Stop the heartbeat polling
   stopHeartbeat() {
     // Invalidate any startHeartbeat() that is mid-await so it won't install an
     // interval after we've stopped.
@@ -1118,7 +1103,6 @@ class CloudSync {
     }
   }
 
-  // Show visual indicator that remote updates are available
   _showUpdateAvailable() {
     if (this._updateAvailable) return; // Already showing
     this._updateAvailable = true;
@@ -1132,7 +1116,6 @@ class CloudSync {
     Utils.showNotification('Remote changes detected. Use Cloud Sync to update.', 'info');
   }
 
-  // Clear the update available indicator
   _clearUpdateAvailable() {
     this._updateAvailable = false;
     const syncIndicator = document.querySelector('.cloud-sync-indicator');
@@ -1272,7 +1255,6 @@ class CloudSync {
           await this._fetchGist(token, gistId, this._lastKnownETag);
 
         if (!notModified && checkResponse.ok) {
-          // Remote has changed - need to merge
           showLoading("Merging changes...");
           const gist = await checkResponse.json();
 
@@ -1318,7 +1300,6 @@ class CloudSync {
                 throw new Error("Cannot create backup before merge. Aborting to prevent data loss.");
               }
 
-              // Merge local and remote data
               const mergedData = this._mergeData(localData, remoteData, localLastUpdated);
               mergedData.autoSyncEnabled = this.autoSyncEnabled;
 
@@ -1328,7 +1309,6 @@ class CloudSync {
               // Import merged data into local store (silently, without triggering another save)
               this._importWithoutSchedulingCloudSave(mergedData);
 
-              // Update dataToSave with merged result
               dataToSave = {
                 ...mergedData,
                 lastUpdated: new Date().toISOString(),
@@ -1337,7 +1317,6 @@ class CloudSync {
 
               console.log("Merged local and remote data due to conflict");
 
-              // Refresh UI with merged data
               if (this.onUpdate) {
                 this.onUpdate();
               }
@@ -1511,7 +1490,6 @@ class CloudSync {
         }
       }
 
-      // Fetch the Gist
       const { response, etag } = await this._fetchGist(token, gistId);
 
       if (!response.ok) {
@@ -1552,7 +1530,6 @@ class CloudSync {
         // Flush any pending debounced saves to ensure we have the latest local data
         this.store.flushPendingSave();
 
-        // Check if local has changes since last sync
         const localData = this.store.exportData();
         const hasLocalChanges = this._hasLocalChangesSinceSync(localData);
 
@@ -1569,7 +1546,6 @@ class CloudSync {
             throw new Error("Cannot create backup before merge. Aborting to prevent data loss.");
           }
 
-          // Merge local and remote data
           showLoading("Merging changes...");
           const mergedData = this._mergeData(localData, remoteData);
 
@@ -1602,13 +1578,11 @@ class CloudSync {
           localStorage.setItem('auto_sync_enabled', this.autoSyncEnabled.toString());
         }
 
-        // Store the ETag for future conflict detection
         this._storeETag(etag);
         this._storeSyncTime();
         // Record sync time for grace period (avoids false "remote changes" detection)
         this._lastSaveTime = Date.now();
 
-        // If we merged local changes, save back to cloud
         if (needsResync && this.autoSyncEnabled) {
           // Schedule a save to push merged data back (preserve quiet mode)
           setTimeout(() => {
@@ -1657,7 +1631,6 @@ class CloudSync {
     }
   }
 
-  // Check if local data has changes since last sync
   _hasLocalChangesSinceSync(localData) {
     if (!this._lastSyncTime) {
       // Never synced before → no merge: returning false makes loadFromCloud do a
@@ -1678,7 +1651,6 @@ class CloudSync {
       }
     }
 
-    // Check transactions for modifications after last sync
     const checkTimestamp = (item) => {
       if (item._lastModified) {
         return new Date(item._lastModified).getTime() > lastSyncTime;
@@ -1686,34 +1658,28 @@ class CloudSync {
       return false;
     };
 
-    // Check regular transactions
     for (const date of Object.keys(localData.transactions || {})) {
       for (const txn of localData.transactions[date]) {
         if (checkTimestamp(txn)) return true;
       }
     }
 
-    // Check recurring transactions
     for (const rt of localData.recurringTransactions || []) {
       if (checkTimestamp(rt)) return true;
     }
 
-    // Check debts
     for (const debt of localData.debts || []) {
       if (checkTimestamp(debt)) return true;
     }
 
-    // Check cash infusions
     for (const infusion of localData.cashInfusions || []) {
       if (checkTimestamp(infusion)) return true;
     }
 
-    // Check savings goals
     for (const goal of localData.savingsGoals || []) {
       if (checkTimestamp(goal)) return true;
     }
 
-    // Check monthly notes
     for (const monthKey of Object.keys(localData.monthlyNotes || {})) {
       const note = localData.monthlyNotes[monthKey];
       if (note && typeof note === 'object' && note._lastModified) {

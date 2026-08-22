@@ -1,5 +1,3 @@
-// Calendar UI logic
-
 class CalendarUI {
 
   constructor(
@@ -67,7 +65,6 @@ class CalendarUI {
       this.changeMonth(1);
     });
 
-    // Notes modal close button
     const notesModal = document.getElementById("notesModal");
     const notesCloseBtn = notesModal?.querySelector(".close");
     if (notesCloseBtn) {
@@ -254,7 +251,6 @@ class CalendarUI {
       currentMonthElement.style.cursor = "pointer";
     }
 
-    // Announce month change to screen readers
     Utils.announceToScreenReader(`Viewing ${Utils.MONTH_LABELS[month]} ${year}`);
     if (pendingMessage) {
       currentMonthElement.appendChild(pendingMessage);
@@ -394,11 +390,9 @@ class CalendarUI {
       {
         seedBalance: balanceToday,
         onDay: (r) => {
-          // Track first crisis date (first day with balance ≤0)
           if (firstCrisisDate === null && r.balance <= 0) {
             firstCrisisDate = r.dateString;
           }
-          // Track all negative/zero balance dates
           if (r.balance <= 0) {
             negativeBalanceDates.push(r.dateString);
           }
@@ -448,19 +442,14 @@ class CalendarUI {
       onDay: (r) => {
       const i = r.day;
       const isCurrentDay = year === today.getFullYear() && month === today.getMonth() && i === today.getDate();
-      // Highlight the last day of the 30-day minimum range
       const isMinimumEnd =
         year === minimumEndYear &&
         month === minimumEndMonth &&
         i === minimumEndDay;
-      // Highlight the day(s) with the lowest balance in the 30-day range
       const currentDateString = r.dateString;
       const isLowestBalance = lowestBalanceDates.includes(currentDateString);
-      // Highlight first crisis day (first day with balance ≤0)
       const isFirstCrisis = currentDateString === firstCrisisDate;
-      // Highlight all negative/zero balance days
       const isNegativeBalance = negativeBalanceDates.includes(currentDateString);
-      // Flag days where a debt gets fully paid off by the snowball plan.
       const isPayoffDay = payoffDates ? payoffDates.has(currentDateString) : false;
       const dateString = currentDateString;
       const dailyTotals = r.dailyTotals;
@@ -472,7 +461,6 @@ class CalendarUI {
         ? transactions[dateString].filter((t) => t.hidden !== true).length
         : 0;
 
-      // Check if this date has any moved transactions (from or to)
       const hasMoveAnomaly = this.store.hasMoveAnomaly(dateString);
 
       // The cell's expense figure. The current day is "live": it shows its own
@@ -572,7 +560,6 @@ class CalendarUI {
     const todayMonth = today.getMonth();
     const thirtyDaysFromNow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 30);
 
-    // Check if viewed month is in the past (before current month)
     const viewedMonthStart = new Date(year, month, 1);
     const currentMonthStart = new Date(todayYear, todayMonth, 1);
     const viewedMonthEnd = new Date(year, month + 1, 0); // Last day of viewed month
@@ -1038,14 +1025,11 @@ class CalendarUI {
     if (!window.pinProtection) return;
 
     try {
-      // Ensure WebAuthn initialization is complete
       await pinProtection.ensureWebAuthnInit();
 
       if (pinProtection.isWebAuthnEnabled()) {
-        // Disable biometrics
         await pinProtection.disableBiometrics();
       } else {
-        // Enable biometrics
         await pinProtection.enableBiometrics();
       }
 

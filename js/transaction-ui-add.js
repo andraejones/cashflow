@@ -131,11 +131,22 @@ Object.assign(TransactionUI.prototype, {
               newTransaction.closeoutDate = closeoutValue || date;
             }
           } else {
-            // A non-allocated one-time expense may draw from an allocation; the
-            // store debits the bucket and records drawAmount.
-            const drawId = document.getElementById("transactionDrawAllocation").value;
-            if (drawId) {
-              newTransaction.drawsFromAllocationId = drawId;
+            // A non-allocated one-time expense may be split across one or more
+            // allocation buckets; the store debits each and records what it
+            // drew from each. The editor validates the split (no duplicate
+            // bucket, no row over its bucket's available balance, no total over
+            // the expense) — a bad split stops the add rather than silently
+            // saving a draw the user did not describe.
+            const drawResult = this.collectAllocationDraws(
+              document.getElementById("transactionDrawAllocations"),
+              amount
+            );
+            if (drawResult.error) {
+              Utils.showNotification(drawResult.error, "error");
+              return false;
+            }
+            if (drawResult.rows.length > 0) {
+              newTransaction.allocationDraws = drawResult.rows;
             }
           }
         }
@@ -223,9 +234,12 @@ Object.assign(TransactionUI.prototype, {
       document.getElementById("transactionCloseoutDate").value = "";
       document.getElementById("closeoutDateField").style.display = "none";
       document.getElementById("settledToggleLabel").style.display = "";
-      const drawSelect = document.getElementById("transactionDrawAllocation");
-      drawSelect.value = "";
-      drawSelect.style.display = "none";
+      const drawEditor = document.getElementById("transactionDrawAllocations");
+      if (drawEditor) {
+        drawEditor.innerHTML = "";
+        drawEditor.style.display = "none";
+        drawEditor._drawEditorConfig = null;
+      }
       document.getElementById("toggleGroup").style.display = "none";
       const advancedOptions = document.getElementById("advancedRecurrenceOptions");
       if (advancedOptions) {

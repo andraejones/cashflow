@@ -1,6 +1,3 @@
-// Utility helpers
-
-// Modal Manager for tracking open modals and z-index management
 const ModalManager = {
   _baseZIndex: 1000,
   // While the inactivity lock is up, dialogs stack from ABOVE the lock overlay
@@ -27,30 +24,25 @@ const ModalManager = {
     return locked ? this._lockedBaseZIndex : this._baseZIndex;
   },
 
-  // Register a modal as opened and assign z-index
   openModal: function (modalElement) {
     if (!modalElement) return undefined;
 
     // Remove if already in stack (re-opening)
     this._openModals = this._openModals.filter(m => m !== modalElement);
 
-    // Add to stack
     this._openModals.push(modalElement);
 
-    // Increment counter and assign z-index
     this._zIndexCounter++;
     const zIndex = this._currentBaseZIndex() + (this._zIndexCounter * 10);
     modalElement.style.zIndex = zIndex;
     return zIndex;
   },
 
-  // Unregister a modal when closed
   closeModal: function (modalElement) {
     if (!modalElement) return;
 
     this._openModals = this._openModals.filter(m => m !== modalElement);
 
-    // Reset z-index to default
     modalElement.style.zIndex = '';
 
     // Nothing is stacked any more, so the next modal can start from the base
@@ -80,7 +72,6 @@ const Utils = {
   generateUniqueId: function () {
     const now = Date.now();
 
-    // Reset counter if timestamp changed, otherwise increment
     if (now !== this._lastIdTimestamp) {
       this._lastIdTimestamp = now;
       this._idCounter = 0;
@@ -210,14 +201,12 @@ const Utils = {
     const toast = document.createElement("div");
     toast.className = type === "error" ? "error-toast" : "success-toast";
     toast.textContent = message;
-    // Add ARIA attributes for accessibility
     toast.setAttribute("role", "status");
     toast.setAttribute("aria-live", "polite");
 
     document.body.appendChild(toast);
     toast.style.display = "block";
 
-    // Also announce to the dedicated ARIA live region for broader screen reader support
     this.announceToScreenReader(message);
 
     setTimeout(() => {
@@ -495,7 +484,6 @@ const Utils = {
     });
   },
 
-  // Show loading overlay with optional custom message
   showLoading: function (message = "Loading...") {
     const overlay = document.getElementById("loadingOverlay");
     const textEl = document.getElementById("loadingText");
@@ -508,7 +496,6 @@ const Utils = {
     }
   },
 
-  // Hide loading overlay
   hideLoading: function () {
     const overlay = document.getElementById("loadingOverlay");
     if (overlay) {
@@ -517,7 +504,6 @@ const Utils = {
     }
   },
 
-  // Announce message to screen readers via ARIA live region
   announceToScreenReader: function (message) {
     const liveRegion = document.getElementById("ariaLiveRegion");
     if (liveRegion) {

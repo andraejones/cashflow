@@ -1,5 +1,3 @@
-// Transaction UI
-
 class TransactionUI {
 
   constructor(store, recurringManager, onUpdate, cloudSync = null, calculationService = null) {
@@ -342,12 +340,13 @@ class TransactionUI {
       }
       // Snapshot for undo: restored under a fresh id (the deleted id is
       // tombstoned for sync — reusing it would let the next cloud merge
-      // delete the restored copy again). Dropping drawAmount lets
-      // addTransaction re-apply the allocation draw cleanly.
+      // delete the restored copy again). Dropping what was already drawn lets
+      // addTransaction re-apply the allocation split cleanly.
       const restoreClone = { ...this.store.getTransactions()[date][liveIndex] };
       delete restoreClone.id;
       delete restoreClone._lastModified;
       delete restoreClone.drawAmount;
+      this.store.carryAllocationDraws(restoreClone, restoreClone);
       this.store.deleteTransaction(date, liveIndex);
       this.showTransactionDetails(date);
       this._notifyChange();

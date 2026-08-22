@@ -120,9 +120,7 @@
           Close out on
           <input type="date" id="transactionCloseoutDate" aria-label="Close-out date" />
         </label>
-        <select id="transactionDrawAllocation" class="draw-allocation-select" aria-label="Draw from allocation" style="display:none">
-          <option value="">No allocation draw</option>
-        </select>
+        <div id="transactionDrawAllocations" class="draw-allocation-list" style="display:none" role="group" aria-label="Draw from allocations"></div>
         <select id="transactionRecurrence" aria-label="Transaction recurrence">
           <option value="once">One-time</option>
           <option value="daily">Daily</option>

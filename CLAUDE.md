@@ -11,8 +11,8 @@ CashFlow Calendar is an offline-first, single-page personal finance application 
 **No build process required.** Open `index.html` directly in a browser or serve via any static server.
 
 **Tests:** `npm test` (or run the two scripts directly with Node) — it must pass before every commit:
-- `node scripts/verify-logic.js` — 97 numbered integration tests over vm-loaded sources
-  (numbered up to TEST 98; the numbering has gaps where tests were merged).
+- `node scripts/verify-logic.js` — 100 numbered integration tests over vm-loaded sources
+  (numbered up to TEST 101; the numbering has gaps where tests were merged).
   Four of them are SWEEPS rather than scenarios, and they are the ones worth
   extending when something new is added:
     - TEST 93 puts a wrong-typed value in every field the app reads, one field
@@ -195,6 +195,37 @@ one `getAllocations` was still offering, with money already drawn from it. It
 was deleted and tombstoned (so every device followed), its reserve was released
 into every projected balance, and its drawers were left dangling. TEST 96.
 
+An expense's draw is a LIST, not a link. `allocationDraws` holds one row per
+bucket — `{ allocationId, amount, drawn, recurringId?, periodDate? }` — so one
+$200 run can take $130 from Groceries and $70 from Household. Three things about
+that shape are load-bearing:
+
+- **`amount: null` means "the whole rest of the expense."** That is the
+  pre-split shape, and it is why editing an expense's amount still flows
+  straight through to its bucket (bank reconciliation's "fix amount" depends on
+  it). The editor writes null when ONE row covers the whole expense and an
+  explicit figure for every row of a real split.
+  `_resolveAllocationDrawShares` is the single resolver — the debit, the demand
+  history and the UI all read shares from it, so they cannot disagree.
+- **The legacy fields are mirrors of the primary row, not a second source of
+  truth.** `drawsFromAllocationId` / `drawAmount` / `drawsFromRecurringId` /
+  `drawsFromPeriodDate` are still written so an older build (and any reader
+  that just asks "which bucket is this billed against?") degrades to the main
+  bucket rather than seeing no draw. `allocationDraws` wins whenever it is an
+  array — **including an empty one**, which is how an explicit unlink is
+  expressed; only a MISSING array falls back to the mirrors.
+- **Demand for the floor suggester is each row's share, plus whatever the split
+  left uncovered, booked on the LAST row.** With one row that is exactly the old
+  rule (the whole expense counts, not the capped `drawn`) — the signal that a
+  bucket is too small to cover its own spending. TESTs 99–101 cover the split
+  end to end, including the editor's refusals in a real browser (`test:ui`).
+
+Anything that copies a transaction to re-add it elsewhere (settle, move,
+relocate on a bank-statement date fix, undo-delete) must call
+`store.carryAllocationDraws(source, target)`. Deleting the original refunds
+every bucket, so a copy that carries only the first row leaves the spend
+standing while the other buckets are quietly credited back.
+
 The expansion cache and the rolling-allocation collapse are coupled, in both
 directions. A superseded bucket can only be collapsed once its SUPERSEDOR has
 been materialized — which happens when a LATER month is expanded, after the
@@ -211,7 +242,7 @@ with nothing on screen to explain it. TEST 87 pins both halves.
 
 **CalendarUI** (`calendar-ui.js`) - Renders monthly calendar grid with daily balances, month navigation, and highlighting (lowest balance, negative balance, minimum balance ranges). The per-day balance-variant figures ("Balance before holdbacks", "Balance excluding allocations") live in the day-detail modal via `CalculationService.getDayBalanceBreakdown`, not in the calendar cells.
 
-**TransactionUI** (`transaction-ui.js`) - Add/edit transaction modals and recurrence form UI. Supports settle/unsettle toggling for one-time expenses and displays carried-forward unsettled transactions on today's date.
+**TransactionUI** (`transaction-ui.js`) - Add/edit transaction modals and recurrence form UI. Supports settle/unsettle toggling for one-time expenses and displays carried-forward unsettled transactions on today's date. The allocation-draw editor (`renderAllocationDrawEditor` / `collectAllocationDraws` in `transaction-ui-forms.js`) is shared by the add modal and the day-detail inline edit form; it enforces what the store can only clamp — one row per bucket, no row over what its bucket has available to this expense, no split totalling more than the expense.
 
 **DebtSnowballUI** (`debt-snowball.js`) - Debt entry management, snowball payment generation, and plan timeline.
 
@@ -280,7 +311,7 @@ local_last_sync, _backup_before_merge, calendar_view_mode
 
 - `styles.css` - CSS variables for theming (primary, accent, error colors)
 - `README.md` - Project documentation and feature overview
-- `scripts/verify-logic.js` - Standalone logic verification utility (97 tests)
+- `scripts/verify-logic.js` - Standalone logic verification utility (100 tests)
 - `scripts/verify-walk-parity.js` - Randomized balance-walk parity harness + source guard
 - `scripts/verify-ui.js` - Optional headless-Chromium UI harness (`npm run test:ui`)
 - `scripts/verify-sync.js` - Optional two-device cloud-sync harness (`npm run test:sync`)

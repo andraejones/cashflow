@@ -1,5 +1,3 @@
-// Search UI
-
 class SearchUI {
 
   constructor(store, recurringManager, transactionUI) {
@@ -252,7 +250,6 @@ class SearchUI {
         hasMaxAmount = !isNaN(maxAmount);
       }
     }
-    // Validate amount range - min should not exceed max
     if (hasMinAmount && hasMaxAmount && minAmount > maxAmount) {
       searchResults.innerHTML = "Invalid amount range: minimum amount cannot exceed maximum amount.";
       clearButton.disabled = false;
@@ -278,9 +275,7 @@ class SearchUI {
     let foundTransactions = [];
     const transactions = this.store.getTransactions();
 
-    // Normalize search term for amount matching
     const normalizeAmount = (term) => {
-      // Strip currency symbols and whitespace
       const cleaned = term.replace(/[$,\s]/g, '').replace(/^[+-]/, '');
       const num = parseFloat(cleaned);
       return isNaN(num) ? null : num;

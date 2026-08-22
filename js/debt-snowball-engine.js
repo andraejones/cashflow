@@ -346,7 +346,7 @@ Object.assign(DebtSnowballUI.prototype, {
     });
 
     // Forward interest accrual — keeps this snapshot consistent with the
-    // daily-floor projection (calculateProjection), which accrues each debt's
+    // daily-floor projection (calculateSnowballProjection), which accrues each debt's
     // monthly interest from the projection start. Interest is never materialized
     // as a transaction, so without this the inline "Remaining" (principal only)
     // would understate the balance and never reconcile with the
@@ -1066,7 +1066,6 @@ Object.assign(DebtSnowballUI.prototype, {
     flushMonthInfo();
 
     if (viewBalances === null) {
-      // For past months, use historical balances; otherwise use projected balances
       viewBalances = historicalViewBalances || { ...balances };
     }
 
@@ -1102,7 +1101,6 @@ Object.assign(DebtSnowballUI.prototype, {
       return {};
     }
 
-    // Group infusions by month
     const infusionsByMonthKey = {};
     infusions.forEach((infusion) => {
       if (!infusion.date) return;
@@ -1149,7 +1147,6 @@ Object.assign(DebtSnowballUI.prototype, {
     const endYear = latestDate ? latestDate.getFullYear() : today.getFullYear();
     const endMonth = latestDate ? latestDate.getMonth() : today.getMonth();
 
-    // Build initial balances
     const baseDate = new Date(startYear, startMonth, 1);
     const baseSummaries = this.getDebtSummaries(baseDate);
     let balances = {};
@@ -1178,7 +1175,6 @@ Object.assign(DebtSnowballUI.prototype, {
       }
     });
 
-    // Track allocations per infusion
     const infusionAllocations = {};
     infusions.forEach((inf) => {
       infusionAllocations[inf.id] = {};
@@ -1206,7 +1202,6 @@ Object.assign(DebtSnowballUI.prototype, {
       const monthKey = `${year}-${String(month + 1).padStart(2, "0")}`;
       const monthIndex = this.getMonthIndex(year, month);
 
-      // Calculate monthly minimums
       const monthlyTotalsByDebtId = {};
       Object.keys(recurringTemplates).forEach((debtId) => {
         const template = recurringTemplates[debtId];
@@ -1256,7 +1251,6 @@ Object.assign(DebtSnowballUI.prototype, {
         }
       });
 
-      // Get infusions for this month
       const monthInfusions = infusionsByMonthKey[monthKey] || [];
 
       // Process each infusion individually to track allocation
@@ -1298,7 +1292,6 @@ Object.assign(DebtSnowballUI.prototype, {
         }
       });
 
-      // Check if all debts are paid
       const activeDebtIds = Object.keys(balances).filter((id) => balances[id] > 0);
       if (activeDebtIds.length === 0) break;
 

@@ -15,7 +15,6 @@ class PinProtection {
     this.onUnlockCallback = null;
     this.onLockCallback = null;
 
-    // WebAuthn state
     this.webAuthnAvailable = false;
     this.webAuthnEnabled = false;
     this.credentialId = null;
@@ -25,12 +24,10 @@ class PinProtection {
     // After an inactivity lock, re-unlock must use the same method.
     this.lastUnlockMethod = null;
 
-    // Encryption constants
     this.SALT_LENGTH = 16;
     this.IV_LENGTH = 12;
     this.PBKDF2_ITERATIONS = 100000;
 
-    // Initialize WebAuthn support check
     this.webAuthnInitPromise = this.initWebAuthn();
   }
 
@@ -55,7 +52,6 @@ class PinProtection {
     this.webAuthnEnabled = this.webAuthnAvailable && this.credentialId !== null;
   }
 
-  // Wait for WebAuthn initialization to complete
   async ensureWebAuthnInit() {
     if (this.webAuthnInitPromise) {
       // Belt to initWebAuthn's braces: an unlock must never be blocked by a
@@ -89,7 +85,6 @@ class PinProtection {
   // Secure PIN hashing using SHA-256 with salt
   async hashPinSecure(pin, salt = null) {
     const encoder = new TextEncoder();
-    // Generate or use provided salt
     if (!salt) {
       salt = crypto.getRandomValues(new Uint8Array(this.SALT_LENGTH));
     } else if (typeof salt === 'string') {
@@ -102,7 +97,6 @@ class PinProtection {
     saltedPin.set(salt);
     saltedPin.set(encoder.encode(pin), salt.length);
 
-    // Hash with SHA-256
     const hashBuffer = await crypto.subtle.digest('SHA-256', saltedPin);
     const hashArray = new Uint8Array(hashBuffer);
 
@@ -131,7 +125,6 @@ class PinProtection {
     const secureHash = await this.hashPinSecure(pin);
     localStorage.setItem("pin_hash", secureHash);
     this.currentPin = pin;
-    // Start inactivity monitoring when PIN is set
     this.startInactivityMonitoring();
   }
 
@@ -184,7 +177,6 @@ class PinProtection {
     }
   }
 
-  // WebAuthn helper: convert ArrayBuffer to base64 string
   arrayBufferToBase64(buffer) {
     const bytes = new Uint8Array(buffer);
     let binary = '';
@@ -194,7 +186,6 @@ class PinProtection {
     return btoa(binary);
   }
 
-  // WebAuthn helper: convert base64 string to ArrayBuffer
   base64ToArrayBuffer(base64) {
     const binary = atob(base64);
     const bytes = new Uint8Array(binary.length);
@@ -267,7 +258,6 @@ class PinProtection {
         }
       });
 
-      // Store credential ID for future authentication
       const credentialId = this.arrayBufferToBase64(credential.rawId);
       localStorage.setItem("webauthn_credential_id", credentialId);
       this.credentialId = credentialId;
@@ -321,7 +311,6 @@ class PinProtection {
   // structural shape as cloud-sync's token "encryption" keyed off the plaintext
   // _device_id.)
   async storePinForBiometrics(pin) {
-    // Use a device-specific key derived from credential ID for encryption
     const credentialId = this.credentialId || localStorage.getItem("webauthn_credential_id");
     if (!credentialId) {
       console.error("No credential ID available for biometric PIN storage");
@@ -369,7 +358,6 @@ class PinProtection {
     localStorage.setItem("biometric_pin", this.arrayBufferToBase64(combined.buffer));
   }
 
-  // Retrieve PIN after biometric authentication
   async retrievePinForBiometrics() {
     const stored = localStorage.getItem("biometric_pin");
     if (!stored) return null;
@@ -419,12 +407,10 @@ class PinProtection {
     }
   }
 
-  // Clear stored biometric PIN
   clearBiometricPin() {
     localStorage.removeItem("biometric_pin");
   }
 
-  // Enable biometric authentication
   async enableBiometrics() {
     if (!this.isPinSet()) {
       await Utils.showModalAlert("Please set a PIN first before enabling biometrics.", "PIN Required");
@@ -463,7 +449,6 @@ class PinProtection {
       } else {
         await this.registerWebAuthn();
       }
-      // Store PIN for future biometric unlocks
       await this.storePinForBiometrics(this.currentPin);
       await Utils.showModalAlert("FaceID/TouchID enabled successfully!", "Success");
       return true;
@@ -480,7 +465,6 @@ class PinProtection {
     }
   }
 
-  // Disable biometric authentication
   async disableBiometrics() {
     localStorage.removeItem("webauthn_credential_id");
     this.clearBiometricPin();
@@ -494,7 +478,6 @@ class PinProtection {
       return true;
     }
 
-    // Ensure WebAuthn initialization is complete before checking
     await this.ensureWebAuthnInit();
 
     // After an inactivity lock, require the same method used at the original sign-in.
@@ -574,7 +557,6 @@ class PinProtection {
       } else if (confirmation !== null) {
         await Utils.showModalAlert("Reset cancelled. You must type DELETE exactly.", "Reset Cancelled");
       }
-      // Return to unlock prompt
       return this.promptUnlock();
     }
 
@@ -637,7 +619,6 @@ class PinProtection {
       const cancelButton = document.getElementById("appModalCancel");
       const closeButton = document.getElementById("appModalClose");
 
-      // Set up the dialog
       titleEl.textContent = "Unlock";
       messageEl.textContent = "Enter PIN to unlock:";
       inputWrapper.classList.add("is-visible");
@@ -648,7 +629,6 @@ class PinProtection {
       cancelButton.style.display = "none";
       closeButton.style.display = "none";
 
-      // Create reset button if it doesn't exist
       let resetButton = modal.querySelector("#appModalReset");
       if (!resetButton) {
         resetButton = document.createElement("button");
@@ -832,7 +812,6 @@ class PinProtection {
       );
       return;
     }
-    // Update stored biometric PIN if biometrics is enabled
     if (this.isWebAuthnEnabled()) {
       await this.storePinForBiometrics(newPin);
     }
@@ -843,22 +822,18 @@ class PinProtection {
   startInactivityMonitoring() {
     if (!this.isPinSet()) return;
 
-    // Add event listeners for user activity
     this.activityEvents.forEach(event => {
       document.addEventListener(event, this.boundResetTimer, { passive: true });
     });
 
-    // Start the timer
     this.resetInactivityTimer();
   }
 
   stopInactivityMonitoring() {
-    // Remove all event listeners
     this.activityEvents.forEach(event => {
       document.removeEventListener(event, this.boundResetTimer);
     });
 
-    // Clear the timeout
     if (this.inactivityTimeout) {
       clearTimeout(this.inactivityTimeout);
       this.inactivityTimeout = null;
@@ -866,15 +841,12 @@ class PinProtection {
   }
 
   resetInactivityTimer() {
-    // Don't reset if already locked or no PIN set
     if (this.isLocked || !this.isPinSet()) return;
 
-    // Clear existing timeout
     if (this.inactivityTimeout) {
       clearTimeout(this.inactivityTimeout);
     }
 
-    // Set new timeout
     this.inactivityTimeout = setTimeout(() => {
       this.lockApp();
     }, this.INACTIVITY_DELAY);
@@ -891,7 +863,6 @@ class PinProtection {
       this.onLockCallback();
     }
 
-    // Close any existing open modals before showing lock screen
     this.closeAllModals();
 
     this.showLockOverlay();
@@ -937,7 +908,6 @@ class PinProtection {
       window.app.calendarUI.closeAppMenu();
     }
 
-    // Close appModal if it's open
     const appModal = document.getElementById("appModal");
     if (appModal && appModal.style.display === "block") {
       appModal.style.display = "none";
@@ -964,7 +934,6 @@ class PinProtection {
       }
     }
 
-    // Close any other common modals
     const otherModals = document.querySelectorAll('.modal[style*="display: block"], .modal[style*="display:block"]');
     otherModals.forEach(modal => {
       modal.style.display = "none";
@@ -976,7 +945,6 @@ class PinProtection {
   }
 
   showLockOverlay() {
-    // Create overlay if it doesn't exist
     let overlay = document.getElementById('lockOverlay');
     if (!overlay) {
       overlay = document.createElement('div');

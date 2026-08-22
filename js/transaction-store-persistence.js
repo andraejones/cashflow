@@ -116,25 +116,20 @@ Object.assign(TransactionStore.prototype, {
     return map;
   },
 
-  // Debounced save method - batches multiple rapid changes into a single save
   debouncedSave(isDataModified = true) {
-    // Track if any pending save has data modification
     if (isDataModified) {
       this._pendingIsDataModified = true;
     }
 
-    // Clear existing timer
     if (this._saveDebounceTimer) {
       clearTimeout(this._saveDebounceTimer);
     }
 
-    // Set new timer
     this._saveDebounceTimer = setTimeout(() => {
       this._saveDebounceTimer = null;
       const wasModified = this._pendingIsDataModified;
       this._pendingIsDataModified = false;
 
-      // If a save is in progress, queue this one
       if (this._saveInProgress) {
         this._queuedSave = this._queuedSave || wasModified;
         return;
@@ -155,7 +150,6 @@ Object.assign(TransactionStore.prototype, {
     }
   },
 
-  // Cancel pending save without saving
   cancelPendingSave() {
     if (this._saveDebounceTimer) {
       clearTimeout(this._saveDebounceTimer);
@@ -556,7 +550,6 @@ Object.assign(TransactionStore.prototype, {
       this._pendingIsDataModified = false;
     }
 
-    // Mark save as in progress
     this._saveInProgress = true;
     // Reported to callers so a step that depends on the write landing (the PIN
     // change flow re-keying every value) can back out instead of committing.
@@ -618,7 +611,6 @@ Object.assign(TransactionStore.prototype, {
         "lastUpdated",
         encrypt(this.lastUpdated || "")
       );
-      // Prune old deleted items before saving
       this._pruneDeletedItems();
       this.storage.setItem(
         "deletedItems",
@@ -652,7 +644,6 @@ Object.assign(TransactionStore.prototype, {
       this.triggerSaveCallbacks(isDataModified);
       this._saveInProgress = false;
 
-      // Process queued save if any
       if (this._queuedSave !== null) {
         const queuedModified = this._queuedSave;
         this._queuedSave = null;
@@ -836,18 +827,15 @@ Object.assign(TransactionStore.prototype, {
           if (!t.recurringId) {
             return true;
           }
-          // Keep if it's a modified instance
           if (t.modifiedInstance) {
             return true;
           }
-          // Keep if it was moved (has movedFrom property)
           if (t.movedFrom !== undefined) {
             return true;
           }
           // Otherwise, it's an expanded recurring transaction - remove it
           return false;
         });
-        // Remove empty date entries
         if (this.transactions[date].length === 0) {
           delete this.transactions[date];
         }
@@ -881,14 +869,12 @@ Object.assign(TransactionStore.prototype, {
         }
       });
 
-      // Ensure debts have _lastModified
       this.debts.forEach((debt) => {
         if (!debt._lastModified) {
           debt._lastModified = new Date().toISOString();
         }
       });
 
-      // Ensure cashInfusions have _lastModified
       this.cashInfusions.forEach((infusion) => {
         if (!infusion._lastModified) {
           infusion._lastModified = new Date().toISOString();
@@ -953,7 +939,6 @@ Object.assign(TransactionStore.prototype, {
       return true;
     } catch (error) {
       console.error("Error during import:", error);
-      // Restore from backup on failure
       this.transactions = backup.transactions;
       this.monthlyBalances = backup.monthlyBalances;
       this.recurringTransactions = backup.recurringTransactions;

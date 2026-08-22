@@ -268,6 +268,13 @@ Object.assign(TransactionStore.prototype, {
     return true;
   },
 
+  // ---- What-if preview drafts --------------------------------------------
+  // Draft transactions flagged `whatIf: true` ride in the in-memory
+  // transactions map so every balance walk (calendar, minimum, snowball
+  // projection) sees them, but _filterPersistedTransactions keeps them out of
+  // localStorage, exports, and cloud sync. No save is triggered here — nothing
+  // persisted changes until the drafts are applied.
+
   addWhatIfTransaction(date, transaction) {
     if (!date || !transaction) return false;
     if (!this.transactions[date]) {
@@ -383,7 +390,6 @@ Object.assign(TransactionStore.prototype, {
     return this._monthlyNoteText(monthKey).trim() !== "";
   },
 
-  // Move a transaction from one date to another
   // For recurring transactions, this creates an exception for that specific occurrence
   moveTransaction(recurringId, fromDate, toDate) {
     if (!recurringId || !fromDate || !toDate) {

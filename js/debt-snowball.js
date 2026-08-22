@@ -1,5 +1,3 @@
-// Debt snowball UI
-
 const WEEKDAY_LABELS = [
   "Sunday",
   "Monday",
@@ -58,7 +56,6 @@ class DebtSnowballUI {
     this.editingCashInfusionId = null;
     this.convertingFromRecurringId = null; // Track recurring transaction being converted to debt
 
-    // Cash infusion DOM references
     this.cashInfusionList = document.getElementById("cashInfusionList");
     this.cashInfusionForm = document.getElementById("cashInfusionForm");
     this.cashInfusionFormTitle = document.getElementById("cashInfusionFormTitle");
@@ -151,7 +148,6 @@ class DebtSnowballUI {
       }
     });
 
-    // Cash infusion event listeners
     const addCashInfusionButton = document.getElementById("addCashInfusionButton");
     if (addCashInfusionButton) {
       addCashInfusionButton.addEventListener("click", () => this.showCashInfusionForm());
@@ -260,13 +256,10 @@ class DebtSnowballUI {
   showDebtFormFromRecurring(recurringTransaction) {
     if (!recurringTransaction) return;
 
-    // Track which recurring transaction we're converting
     this.convertingFromRecurringId = recurringTransaction.id;
 
-    // Open the snowball view
     this.showView();
 
-    // Build a debt-like object from the recurring transaction
     const debtFromRecurring = {
       name: recurringTransaction.description || "",
       balance: "", // User must fill this in
@@ -284,10 +277,8 @@ class DebtSnowballUI {
       maxOccurrences: recurringTransaction.maxOccurrences || null,
     };
 
-    // Show the form with pre-populated data
     this.showDebtForm(debtFromRecurring);
 
-    // Update form title to indicate conversion
     if (this.debtFormTitle) {
       this.debtFormTitle.textContent = "Convert to Debt";
     }
@@ -816,7 +807,6 @@ class DebtSnowballUI {
         this.ensureMinimumPaymentRecurring(createdDebt);
       }
 
-      // If converting from a recurring transaction, delete it
       if (this.convertingFromRecurringId) {
         this.store.deleteRecurringTransaction(this.convertingFromRecurringId);
         this.recurringManager.invalidateCache();
@@ -869,7 +859,6 @@ class DebtSnowballUI {
     this.currentViewMonth = month;
   }
 
-  // Cash Infusion Methods
 
   saveSnowballSettings() {
     const dailyFloor = parseFloat(this.snowballFloorInput?.value || "0");

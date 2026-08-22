@@ -283,17 +283,34 @@ Object.assign(TransactionStore.prototype, {
         ) {
           livePeriodDate = date;
         }
-        if (
-          t.type === "expense" &&
-          t.allocated !== true &&
-          t.drawsFromRecurringId === recurringId &&
-          t.drawsFromPeriodDate
-        ) {
-          const p = t.drawsFromPeriodDate;
-          demandByPeriod.set(
-            p,
-            this._roundCents((demandByPeriod.get(p) || 0) + (Number(t.amount) || 0))
-          );
+        if (t.type === "expense" && t.allocated !== true) {
+          // Attribute the WHOLE expense across its split: each row contributes
+          // what it was assigned, and whatever the split left uncovered lands
+          // on the LAST row — the bucket the user was still filling when the
+          // money ran out. With a single row (every expense predating splits)
+          // that is exactly the old rule, the full amount as demand, which is
+          // the point: a bucket too small to cover its own spending has to
+          // still record the demand that would right-size it. `drawn` is capped
+          // at the bucket and would hide it.
+          const rows = this._normalizeAllocationDraws(t);
+          if (rows.length > 0) {
+            const shares = this._resolveAllocationDrawShares(t, rows);
+            const total = Math.max(0, this._roundCents(Number(t.amount) || 0));
+            let assigned = 0;
+            shares.forEach((share) => {
+              assigned = this._roundCents(assigned + share);
+            });
+            const uncovered = Math.max(0, this._roundCents(total - assigned));
+            rows.forEach((r, i) => {
+              if (r.recurringId !== recurringId || !r.periodDate) return;
+              const extra = i === rows.length - 1 ? uncovered : 0;
+              const p = r.periodDate;
+              demandByPeriod.set(
+                p,
+                this._roundCents((demandByPeriod.get(p) || 0) + shares[i] + extra)
+              );
+            });
+          }
         }
       });
     });
@@ -328,56 +345,288 @@ Object.assign(TransactionStore.prototype, {
     };
   },
 
-  // Debit the linked allocation by as much of the expense as it can cover.
-  // Overflow (spend > remaining) drains the allocation to 0 and leaves the
-  // excess as normal spending. Stores drawAmount for exact reversal later.
-  _applyAllocationDraw(transaction) {
-    if (
-      !transaction ||
-      transaction.type !== "expense" ||
-      !transaction.drawsFromAllocationId
-    ) {
-      return;
-    }
-    const entry = this._findAllocationEntryById(
-      transaction.drawsFromAllocationId
-    );
-    if (!entry) {
-      // Allocation no longer exists — drop the dangling link. Keep any
-      // drawsFromRecurringId/drawsFromPeriodDate provenance: the bucket is
-      // gone (forfeited periods are deleted), but the spend still belongs to
-      // that series' history for floor suggestions.
-      delete transaction.drawsFromAllocationId;
-      delete transaction.drawAmount;
-      return;
-    }
-    const allocation = entry.transaction;
-    // Drawing from a recurring allocation instance: freeze that one instance as
-    // a persisted modified instance (with a stable id) so the debit survives
-    // re-expansion, and rewrite the link from the synthetic key to the real id.
-    // Stamp the series id + period date on the expense: forfeited bucket
-    // instances are deleted outright (see closeOutExpiredAllocations), so this
-    // provenance is the only durable record tying the spend to its period —
-    // getAllocationFloorSuggestion's demand history is built from it.
-    if (allocation.recurringId) {
-      if (!allocation.id) {
-        allocation.id = Utils.generateUniqueId();
+  // ---------------------------------------------------------------------
+  // Multi-bucket draws
+  //
+  // An expense can be split across SEVERAL allocation buckets — "$130 of this
+  // $200 Costco run comes out of Groceries, $70 out of Household". The split
+  // lives on the expense as `allocationDraws`, one row per bucket:
+  //
+  //   { allocationId, amount, drawn, recurringId?, periodDate? }
+  //
+  //   amount — what the user assigned to that bucket, or NULL for "whatever of
+  //            the expense is still uncovered". A null row is the pre-split
+  //            shape — one bucket covering the whole expense — and it is why
+  //            editing the expense's amount still flows straight through to
+  //            its bucket, the way it always has. The editor writes null when
+  //            a single row covers the entire expense and an explicit figure
+  //            for every row of a real split, where the shares are the point.
+  //   drawn  — what was actually debited, kept for exact reversal. The editor
+  //            caps a row at its bucket's remaining, so a row's share and its
+  //            `drawn` normally match; they diverge only when the bucket shrank
+  //            underneath a saved expense (a lowered series amount, a cloud
+  //            merge), and keeping both is what lets the draw come back in full
+  //            when the money does.
+  //
+  // A row whose bucket has since been forfeited keeps its `recurringId` /
+  // `periodDate` and loses its `allocationId`: the spend still belongs to that
+  // period's demand history even though there is nothing left to debit.
+  //
+  // The legacy single-draw fields (`drawsFromAllocationId`, `drawAmount`,
+  // `drawsFromRecurringId`, `drawsFromPeriodDate`) are still written, mirroring
+  // the primary row, so a device on an older build — or any reader that only
+  // cares which bucket an expense is mainly billed against — degrades to the
+  // primary bucket instead of seeing no draw at all. `allocationDraws` is the
+  // source of truth whenever it is an ARRAY, including an empty one: an edit
+  // that clears every row writes `[]`, and the mirrors are then ignored rather
+  // than resurrecting the draw the user just removed.
+  // ---------------------------------------------------------------------
+
+  // Every draw row of an expense, in a shape readers can trust: usable ids,
+  // cent-rounded finite amounts, one row per bucket. Returns fresh objects, so
+  // callers can rewrite them without touching the transaction. Nothing coerces
+  // `allocationDraws` on the way in from an import or a cloud merge, so this is
+  // where the shape is guarded — every field is typeof-checked.
+  _normalizeAllocationDraws(transaction) {
+    if (!transaction || typeof transaction !== "object") return [];
+    const rows = [];
+    const seen = new Set();
+    const push = (allocationId, amount, drawn, recurringId, periodDate) => {
+      const id =
+        typeof allocationId === "string" && allocationId ? allocationId : null;
+      const rid =
+        typeof recurringId === "string" && recurringId ? recurringId : null;
+      // A row with neither a bucket to debit nor a series to remember says
+      // nothing at all.
+      if (!id && !rid) return;
+      const key = id || `series:${rid}:${periodDate || ""}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      // null, not 0: "no figure of its own" and "zero" are different rows, and
+      // Number(null) is 0 — so the empty cases are checked before coercion.
+      const fixed =
+        amount === null || amount === undefined || amount === ""
+          ? NaN
+          : Number(amount);
+      const row = {
+        amount:
+          Number.isFinite(fixed) && fixed >= 0 ? this._roundCents(fixed) : null,
+        // Nothing is held by a bucket that no longer exists, so a history-only
+        // row can never refund anything.
+        drawn: id ? Math.max(0, this._roundCents(drawn)) : 0,
+      };
+      if (id) row.allocationId = id;
+      if (rid) {
+        row.recurringId = rid;
+        if (typeof periodDate === "string" && periodDate) {
+          row.periodDate = periodDate;
+        }
       }
-      allocation.modifiedInstance = true;
-      transaction.drawsFromAllocationId = allocation.id;
-      transaction.drawsFromRecurringId = allocation.recurringId;
-      transaction.drawsFromPeriodDate = entry.date;
-    } else {
-      delete transaction.drawsFromRecurringId;
-      delete transaction.drawsFromPeriodDate;
+      rows.push(row);
+    };
+    if (Array.isArray(transaction.allocationDraws)) {
+      transaction.allocationDraws.forEach((r) => {
+        if (!r || typeof r !== "object") return;
+        push(r.allocationId, r.amount, r.drawn, r.recurringId, r.periodDate);
+      });
+      return rows;
     }
-    const remaining = Math.max(0, this._roundCents(allocation.amount));
-    const draw = this._roundCents(
-      Math.min(remaining, Math.max(0, Number(transaction.amount) || 0))
+    // Legacy single-draw shape — also what an older build, an older export and
+    // the cloud merge hand us. It never carried a figure of its own: the draw
+    // was always "this whole expense, capped at the bucket", which is exactly
+    // what a null amount means here.
+    push(
+      transaction.drawsFromAllocationId,
+      null,
+      transaction.drawAmount,
+      transaction.drawsFromRecurringId,
+      transaction.drawsFromPeriodDate
     );
-    transaction.drawAmount = draw;
-    allocation.amount = this._roundCents(allocation.amount - draw);
-    allocation._lastModified = new Date().toISOString();
+    return rows;
+  },
+
+  // Public read of the split for UI and reporting. Each row also carries the
+  // `share` it resolves to against this expense's amount, so no caller has to
+  // re-derive what a null amount means.
+  getAllocationDraws(transaction) {
+    const rows = this._normalizeAllocationDraws(transaction);
+    const shares = this._resolveAllocationDrawShares(transaction, rows);
+    rows.forEach((row, i) => {
+      row.share = shares[i];
+    });
+    return rows;
+  },
+
+  // Each row's assigned share of the expense, in row order: an explicit amount
+  // capped by what the expense has left to give, or — for a null row — whatever
+  // is still uncovered at that point. Sharing one resolver is what keeps the
+  // debit, the demand history and the UI from disagreeing about a split.
+  _resolveAllocationDrawShares(transaction, rows) {
+    const total = Math.max(
+      0,
+      this._roundCents(transaction ? transaction.amount : 0)
+    );
+    let assigned = 0;
+    return rows.map((row) => {
+      const room = Math.max(0, this._roundCents(total - assigned));
+      const share =
+        row.amount === null || row.amount === undefined
+          ? room
+          : this._roundCents(Math.min(row.amount, room));
+      assigned = this._roundCents(assigned + share);
+      return share;
+    });
+  },
+
+  // What buckets are actually covering of this expense (sum of `drawn`).
+  getAllocationDrawnTotal(transaction) {
+    return this._roundCents(
+      this._normalizeAllocationDraws(transaction).reduce(
+        (sum, row) => sum + row.drawn,
+        0
+      )
+    );
+  },
+
+  // Write normalized rows back onto the transaction, keeping the legacy
+  // row mirrors in step. An empty list clears every draw field — that is how an
+  // explicit unlink (or a type change off expense) erases the link.
+  _writeAllocationDraws(transaction, rows) {
+    delete transaction.drawsFromAllocationId;
+    delete transaction.drawAmount;
+    delete transaction.drawsFromRecurringId;
+    delete transaction.drawsFromPeriodDate;
+    if (!rows || rows.length === 0) {
+      delete transaction.allocationDraws;
+      return;
+    }
+    transaction.allocationDraws = rows;
+    // Mirror the first row that still has a live bucket; a split whose only
+    // rows are history-only mirrors just the provenance, like the legacy
+    // dangling-link case did.
+    const primary = rows.find((r) => r.allocationId);
+    if (primary) {
+      transaction.drawsFromAllocationId = primary.allocationId;
+      transaction.drawAmount = primary.drawn;
+    }
+    const prov =
+      primary && primary.recurringId
+        ? primary
+        : rows.find((r) => r.recurringId);
+    if (prov) {
+      transaction.drawsFromRecurringId = prov.recurringId;
+      if (prov.periodDate) {
+        transaction.drawsFromPeriodDate = prov.periodDate;
+      }
+    }
+  },
+
+  // Debit every bucket this expense draws from, as much as each can cover, and
+  // record what was drawn for exact reversal later. Overflow (a row larger than
+  // its bucket's remaining, which the form rejects but a shrinking bucket can
+  // still produce) drains that bucket to 0 and leaves the excess as normal
+  // spending, same as the single-draw model always did.
+  _applyAllocationDraws(transaction) {
+    if (!transaction || transaction.type !== "expense") return;
+    // An allocation bucket cannot draw from another allocation; the type select
+    // makes that structural in the form, and this keeps an imported or merged
+    // row from doing it behind the form's back.
+    if (transaction.allocated === true) {
+      this._writeAllocationDraws(transaction, null);
+      return;
+    }
+    const rows = this._normalizeAllocationDraws(transaction);
+    const shares = this._resolveAllocationDrawShares(transaction, rows);
+    const applied = [];
+    rows.forEach((row, index) => {
+      const entry = row.allocationId
+        ? this._findAllocationEntryById(row.allocationId)
+        : null;
+      if (!entry) {
+        // Bucket is gone (forfeited periods are deleted outright). Drop the
+        // dangling link but keep the series/period provenance: the spend still
+        // belongs to that period's history for floor suggestions.
+        if (row.recurringId) {
+          applied.push({
+            amount: row.amount,
+            drawn: 0,
+            recurringId: row.recurringId,
+            periodDate: row.periodDate,
+          });
+        }
+        return;
+
+      }
+      const allocation = entry.transaction;
+      // Drawing from a recurring allocation instance: freeze that one instance
+      // as a persisted modified instance (with a stable id) so the debit
+      // survives re-expansion, and rewrite the link from the synthetic key to
+      // the real id. Stamp the series id + period date on the row: forfeited
+      // bucket instances are deleted outright (see closeOutExpiredAllocations),
+      // so this provenance is the only durable record tying the spend to its
+      // period — getAllocationFloorSuggestion's demand history is built from it.
+      let allocationId = row.allocationId;
+      let recurringId;
+      let periodDate;
+      if (allocation.recurringId) {
+        if (!allocation.id) {
+          allocation.id = Utils.generateUniqueId();
+        }
+        allocation.modifiedInstance = true;
+        allocationId = allocation.id;
+        recurringId = allocation.recurringId;
+        periodDate = entry.date;
+      }
+      // The resolver already capped every share at what the expense has left to
+      // give, so a later amount edit can shrink the expense under a split that
+      // was valid when it was saved without ever over-drawing.
+      const want = shares[index];
+      if (want <= 0) return;
+      const remaining = Math.max(0, this._roundCents(allocation.amount));
+      const draw = this._roundCents(Math.min(remaining, want));
+      allocation.amount = this._roundCents(allocation.amount - draw);
+      allocation._lastModified = new Date().toISOString();
+      applied.push({
+        allocationId,
+        // The row keeps its OWN figure, not the resolved share: a null row has
+        // to stay null or it would freeze at today's amount and stop following
+        // the expense.
+        amount: row.amount,
+        drawn: draw,
+        recurringId,
+        periodDate,
+      });
+    });
+    // Re-normalize so what lands on the transaction is canonical, whatever the
+    // rows looked like coming in.
+    this._writeAllocationDraws(
+      transaction,
+      this._normalizeAllocationDraws({ allocationDraws: applied })
+    );
+  },
+
+  // Copy an expense's draw rows onto a fresh copy that is about to be re-added
+  // elsewhere (a move, a settle, a bank-reconcile relocation). Deleting the
+  // original refunds its buckets, so the copy has to carry the split or the
+  // spend stands while the buckets are silently credited back. `drawn` is
+  // deliberately left off — addTransaction re-debits and recomputes it.
+  carryAllocationDraws(source, target) {
+    if (!source || !target) return target;
+    const rows = this._normalizeAllocationDraws(source).map((r) => {
+      // `amount` is copied as-is, null included: a full-cover row must land on
+      // the copy as a full-cover row.
+      const copy = { amount: r.amount };
+      if (r.allocationId) copy.allocationId = r.allocationId;
+      if (r.recurringId) {
+        copy.recurringId = r.recurringId;
+        if (r.periodDate) copy.periodDate = r.periodDate;
+      }
+      return copy;
+    });
+    if (rows.length > 0) {
+      target.allocationDraws = rows;
+    }
+    return target;
   },
 
   // Re-point every expense drawing from `oldId` at `newId`.
@@ -386,7 +635,7 @@ Object.assign(TransactionStore.prototype, {
   // tombstone on the old id rules out reusing it), so the bucket comes back
   // under a fresh id while its drawers still name the old one. The links then
   // dangle: the "Drawn from" label disappears, and the next edit of a drawing
-  // expense finds no bucket to refund — _applyAllocationDraw drops the link
+  // expense finds no bucket to refund — _applyAllocationDraws drops the row
   // instead, so the reserve stops absorbing the change and the projected
   // balance drifts by the difference. rollForwardAllocations avoids all this by
   // keeping the id when it moves a bucket; a user-initiated move can't, so it
@@ -396,8 +645,30 @@ Object.assign(TransactionStore.prototype, {
     let updated = 0;
     Object.keys(this.transactions).forEach((date) => {
       this.transactions[date].forEach((t) => {
-        if (t.drawsFromAllocationId !== oldId) return;
-        t.drawsFromAllocationId = newId;
+        const rows = this._normalizeAllocationDraws(t);
+        if (!rows.some((r) => r.allocationId === oldId)) return;
+        // The drawer may already have a row on the target bucket (the two ids
+        // now name the same bucket) — fold the two together rather than leaving
+        // a duplicate that the normalizer would drop, money and all.
+        const merged = [];
+        rows.forEach((r) => {
+          if (r.allocationId === oldId) r.allocationId = newId;
+          const dup = r.allocationId
+            ? merged.find((m) => m.allocationId === r.allocationId)
+            : null;
+          if (dup) {
+            // Two rows on one bucket: a null (full-cover) row swallows the
+            // other's figure, since it already claims everything left.
+            dup.amount =
+              dup.amount === null || r.amount === null
+                ? null
+                : this._roundCents(dup.amount + r.amount);
+            dup.drawn = this._roundCents(dup.drawn + r.drawn);
+            return;
+          }
+          merged.push(r);
+        });
+        this._writeAllocationDraws(t, merged);
         t._lastModified = new Date().toISOString();
         updated++;
       });
@@ -408,24 +679,16 @@ Object.assign(TransactionStore.prototype, {
     return updated;
   },
 
-  // Refund a previously-applied draw back to its allocation.
-  _reverseAllocationDraw(transaction) {
-    if (
-      !transaction ||
-      !transaction.drawsFromAllocationId ||
-      !transaction.drawAmount
-    ) {
-      return;
-    }
-    const allocation = this._findAllocationById(
-      transaction.drawsFromAllocationId
-    );
-    if (allocation) {
-      allocation.amount = this._roundCents(
-        allocation.amount + transaction.drawAmount
-      );
+  // Refund every previously-applied draw back to its bucket.
+  _reverseAllocationDraws(transaction) {
+    if (!transaction) return;
+    this._normalizeAllocationDraws(transaction).forEach((row) => {
+      if (!row.allocationId || !row.drawn) return;
+      const allocation = this._findAllocationById(row.allocationId);
+      if (!allocation) return;
+      allocation.amount = this._roundCents(allocation.amount + row.drawn);
       allocation._lastModified = new Date().toISOString();
-    }
+    });
   },
 
   // Allocations are rolling reserved cushions: once an allocation's date falls

@@ -1,5 +1,3 @@
-// Transaction storage
-
 class TransactionStore {
 
   constructor(storage = localStorage, pinProtection = null) {
@@ -29,7 +27,6 @@ class TransactionStore {
     this._deletedItems = this._emptyDeletedItems();
     this.onSaveCallbacks = [];
 
-    // Debounce settings for batching rapid saves
     this._saveDebounceTimer = null;
     this._saveDebounceDelay = 500; // 500ms debounce delay
     this._pendingIsDataModified = false;
@@ -39,10 +36,6 @@ class TransactionStore {
     this.loadData();
   }
 
-  /**
-   * Prune deleted items older than 30 days to prevent unbounded growth.
-   * Supports both old format (just ID string) and new format (object with deletedAt).
-   */
   getTransactions() {
     return this.transactions;
   }
@@ -73,19 +66,12 @@ class TransactionStore {
   }
 
 
-  // ---- What-if preview drafts --------------------------------------------
-  // Draft transactions flagged `whatIf: true` ride in the in-memory
-  // transactions map so every balance walk (calendar, minimum, snowball
-  // projection) sees them, but _filterPersistedTransactions keeps them out of
-  // localStorage, exports, and cloud sync. No save is triggered here — nothing
-  // persisted changes until the drafts are applied.
-
   // Cent rounding for the allocation engine. Non-finite input collapses to 0
   // rather than propagating: every value this touches (a bucket's remaining, a
   // draw amount) is persisted, and the house rule for persisted money is
   // Number.isFinite (see _finiteNumber / _repairWalkAmounts). Before this,
   // Number(undefined) + EPSILON produced NaN, and one NaN reaching
-  // _applyAllocationDraw turned the bucket's amount into NaN for good.
+  // _applyAllocationDraws turned the bucket's amount into NaN for good.
   _roundCents(value) {
     const num = Number(value);
     return Math.round(((Number.isFinite(num) ? num : 0) + Number.EPSILON) * 100) / 100;
@@ -106,18 +92,15 @@ class TransactionStore {
       this.transactions[date] = [];
     }
 
-    // Assign ID and timestamp if not present
     if (!transaction.id) {
       transaction.id = Utils.generateUniqueId();
     }
     transaction._lastModified = new Date().toISOString();
 
-    // If this expense draws from an allocation, debit that allocation now and
-    // record how much was actually drawn (so the draw can be reversed exactly
-    // when the expense is later edited, moved, or deleted).
-    if (transaction.drawsFromAllocationId) {
-      this._applyAllocationDraw(transaction);
-    }
+    // If this expense draws from allocations, debit each bucket now and record
+    // how much was actually drawn from each (so the draws can be reversed
+    // exactly when the expense is later edited, moved, or deleted).
+    this._applyAllocationDraws(transaction);
 
     this.transactions[date].push(transaction);
     this.debouncedSave();
@@ -132,7 +115,6 @@ class TransactionStore {
     }
 
     if (this.transactions[date] && this.transactions[date][index]) {
-      // Preserve existing ID, update timestamp
       const existing = this.transactions[date][index];
       const existingId = existing.id;
       const merged = {
@@ -142,21 +124,21 @@ class TransactionStore {
         _lastModified: new Date().toISOString(),
       };
 
-      // Reconcile any allocation draw: refund the old draw, then re-debit based
-      // on the merged amount/target. Covers amount edits (re-draws the new
-      // amount) and type changes away from expense (drops the link entirely).
-      this._reverseAllocationDraw(existing);
-      if (merged.type === "expense" && merged.drawsFromAllocationId) {
-        delete merged.drawAmount;
-        this._applyAllocationDraw(merged);
+      // Reconcile the allocation split: refund every old draw, then re-debit
+      // from the merged amount/rows. Covers amount edits (re-draws against the
+      // new amount), split edits, and type changes away from expense.
+      //
+      // An edit that clears the split hands us `allocationDraws: []`, which is
+      // authoritative: _applyAllocationDraws writes no rows and clears the
+      // legacy mirrors with them, so an explicit unlink drops the period
+      // provenance too (unlike the dangling-bucket case, where the row keeps it
+      // as history). A caller that passes no draw fields at all inherits the
+      // existing split from the spread above, as it always has.
+      this._reverseAllocationDraws(existing);
+      if (merged.type === "expense") {
+        this._applyAllocationDraws(merged);
       } else {
-        // Explicit unlink (or type change off expense): the user is saying
-        // this spend isn't bucket spending, so drop the period provenance too
-        // (unlike the dangling-bucket case, which keeps it as history).
-        delete merged.drawsFromAllocationId;
-        delete merged.drawAmount;
-        delete merged.drawsFromRecurringId;
-        delete merged.drawsFromPeriodDate;
+        this._writeAllocationDraws(merged, null);
       }
 
       this.transactions[date][index] = merged;
@@ -174,15 +156,14 @@ class TransactionStore {
     }
 
     if (this.transactions[date] && this.transactions[date][index]) {
-      // Track deleted ID for merge conflict resolution
       const deletedTxn = this.transactions[date][index];
       if (deletedTxn.id) {
         // Track deleted ID for merge conflict resolution (with timestamp for pruning)
         this._deletedItems.transactions.push({ id: deletedTxn.id, deletedAt: Date.now() });
       }
 
-      // Refund any allocation this expense was drawing from before removing it.
-      this._reverseAllocationDraw(deletedTxn);
+      // Refund every allocation this expense was drawing from before removing it.
+      this._reverseAllocationDraws(deletedTxn);
 
       this.transactions[date].splice(index, 1);
 

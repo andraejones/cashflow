@@ -1,5 +1,3 @@
-// Calculation service
-
 class CalculationService {
 
   constructor(store, recurringManager) {
@@ -252,7 +250,6 @@ class CalculationService {
     }
     if (!earliestDate) {
       const today = new Date();
-      // Use padded month format consistently: YYYY-MM
       const currentMonthKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
 
       monthlyBalances[currentMonthKey] = {
@@ -283,7 +280,6 @@ class CalculationService {
       const lastMonth = (year === endYear) ? endMonth : 12;
 
       for (let month = firstMonth; month <= lastMonth; month++) {
-        // Use padded month format consistently: YYYY-MM
         allMonths.push(`${year}-${String(month).padStart(2, "0")}`);
       }
     }
@@ -664,7 +660,6 @@ class CalculationService {
   }
 
   calculateMonthlySummary(year, month) {
-    // Use padded month format consistently: YYYY-MM
     const monthKey = `${year}-${String(month + 1).padStart(2, "0")}`;
     if (this._cachedSummaries[monthKey]) {
       return this._cachedSummaries[monthKey];

@@ -231,16 +231,29 @@ Object.assign(TransactionUI.prototype, {
             transactionDiv.appendChild(document.createTextNode(recurringText));
           }
 
-          // A regular expense that draws from an allocation shows which bucket it
-          // is billed against — the allocation's title and its date.
-          if (normalizedType === "expense" && t.drawsFromAllocationId) {
-            const drawInfo = this.store.getAllocationInfoById(
-              t.drawsFromAllocationId
-            );
-            if (drawInfo) {
+          // A regular expense that draws from allocations shows which buckets
+          // it is billed against — each allocation's title and date. A split
+          // across several buckets names the amount taken from each; a single
+          // draw doesn't, because there is only one number and it is the
+          // expense's own.
+          if (normalizedType === "expense") {
+            const draws = this.store
+              .getAllocationDraws(t)
+              .filter((row) => row.allocationId);
+            const labels = [];
+            draws.forEach((row) => {
+              const drawInfo = this.store.getAllocationInfoById(row.allocationId);
+              if (!drawInfo) return;
+              const share =
+                draws.length > 1 ? ` $${Utils.formatAmount(row.drawn)} from ` : " ";
+              labels.push(
+                `${share}${drawInfo.description}, ${this.formatShortDisplayDate(drawInfo.date)}`.trim()
+              );
+            });
+            if (labels.length > 0) {
               const drawSpan = document.createElement("span");
               drawSpan.className = "draw-from-allocation";
-              drawSpan.textContent = ` (Drawn from: ${drawInfo.description}, ${this.formatShortDisplayDate(drawInfo.date)})`;
+              drawSpan.textContent = ` (Drawn from: ${labels.join("; ")})`;
               transactionDiv.appendChild(drawSpan);
             }
           }
@@ -443,24 +456,30 @@ Object.assign(TransactionUI.prototype, {
             editForm.appendChild(closeoutLabel);
           }
 
-          // Regular one-time expenses can be billed against an allocation
-          // bucket. Mirror the add-modal "Draw from allocation" control so the
-          // association can be set or changed when editing in place. Skipped for
-          // recurring and allocation-bucket items (an allocation can't draw from
+          // Regular one-time expenses can be billed against one or more
+          // allocation buckets. Mirror the add-modal draw editor so the split
+          // can be set or changed when editing in place. Skipped for recurring
+          // and allocation-bucket items (an allocation can't draw from
           // another).
           if (normalizedType === "expense" && !isRecurring && !isAllocated) {
-            const drawSelect = document.createElement("select");
-            drawSelect.id = `edit-draw-allocation-${date}-${index}`;
-            drawSelect.setAttribute("aria-label", "Draw from allocation");
+            const drawEditor = document.createElement("div");
+            drawEditor.id = `edit-draw-allocations-${date}-${index}`;
+            drawEditor.className = "draw-allocation-list";
+            drawEditor.setAttribute("role", "group");
+            drawEditor.setAttribute("aria-label", "Draw from allocations");
+            // Appended before it is populated: the editor re-renders itself in
+            // place on every change, so it has to be in the document already.
+            editForm.appendChild(drawEditor);
             const count = this.populateEditDrawAllocation(
-              drawSelect,
+              drawEditor,
               date,
-              t.drawsFromAllocationId
+              t,
+              `edit-amount-${date}-${index}`
             );
             // Only surface the control when there's something to choose (a live
-            // bucket) or an existing link to preserve.
-            if (count > 0 || t.drawsFromAllocationId) {
-              editForm.appendChild(drawSelect);
+            // bucket) or an existing link to preserve — populate counts both.
+            if (count === 0) {
+              editForm.removeChild(drawEditor);
             }
           }
 
@@ -560,7 +579,6 @@ Object.assign(TransactionUI.prototype, {
           });
           editForm.appendChild(cancelButton);
 
-          // Add "Convert to Debt" button for recurring expense transactions
           if (isRecurring && normalizedType === "expense") {
             const convertToDebtButton = document.createElement("button");
             convertToDebtButton.className = "convert-debt-btn";
@@ -769,21 +787,15 @@ Object.assign(TransactionUI.prototype, {
                   if (u.transaction.debtRole) movedCopy.debtRole = u.transaction.debtRole;
                   if (u.transaction.debtName) movedCopy.debtName = u.transaction.debtName;
                 }
-                // Carry the allocation link forward. Deleting the original
-                // refunds the bucket via _reverseAllocationDraw, so the settled
-                // copy must re-draw or the spend stands while the bucket is
-                // credited back. Drop the stale drawAmount (addTransaction
-                // recomputes it on draw).
-                if (u.transaction.drawsFromAllocationId) {
-                  movedCopy.drawsFromAllocationId = u.transaction.drawsFromAllocationId;
-                }
-                // Carry the series/period provenance too — if the bucket has
-                // since been forfeited, the re-add's dangling-link cleanup
-                // keeps these as the spend's demand-history record.
-                if (u.transaction.drawsFromRecurringId) {
-                  movedCopy.drawsFromRecurringId = u.transaction.drawsFromRecurringId;
-                  movedCopy.drawsFromPeriodDate = u.transaction.drawsFromPeriodDate;
-                }
+                // Carry the whole allocation split forward. Deleting the
+                // original refunds its buckets via _reverseAllocationDraws, so
+                // the settled copy must re-draw all of them or the spend stands
+                // while the buckets are credited back. The carried rows keep
+                // their series/period provenance — if a bucket has since been
+                // forfeited, the re-add's dangling-link handling keeps that as
+                // the spend's demand-history record — and drop the stale
+                // `drawn` (addTransaction recomputes it).
+                this.store.carryAllocationDraws(u.transaction, movedCopy);
                 this.store.addTransaction(date, movedCopy);
               } else {
                 // One-time: delete from original date, create settled copy on viewed date
@@ -807,15 +819,8 @@ Object.assign(TransactionUI.prototype, {
                   if (u.transaction.debtRole) settledCopy.debtRole = u.transaction.debtRole;
                   if (u.transaction.debtName) settledCopy.debtName = u.transaction.debtName;
                 }
-                // Carry the allocation link forward (see recurring branch).
-                if (u.transaction.drawsFromAllocationId) {
-                  settledCopy.drawsFromAllocationId = u.transaction.drawsFromAllocationId;
-                }
-                // Carry the series/period provenance (see recurring branch).
-                if (u.transaction.drawsFromRecurringId) {
-                  settledCopy.drawsFromRecurringId = u.transaction.drawsFromRecurringId;
-                  settledCopy.drawsFromPeriodDate = u.transaction.drawsFromPeriodDate;
-                }
+                // Carry the allocation split forward (see recurring branch).
+                this.store.carryAllocationDraws(u.transaction, settledCopy);
                 this.store.addTransaction(date, settledCopy);
               }
               this.showTransactionDetails(date);
@@ -882,6 +887,9 @@ Object.assign(TransactionUI.prototype, {
                 delete restoreClone.id;
                 delete restoreClone._lastModified;
                 delete restoreClone.drawAmount;
+                // Re-adding re-draws from every bucket, so the clone must not
+                // carry what the deleted copy had already drawn.
+                this.store.carryAllocationDraws(restoreClone, restoreClone);
                 this.store.deleteTransaction(u.date, currentIndex);
                 this.showTransactionDetails(date);
                 this._notifyChange();
@@ -932,9 +940,9 @@ Object.assign(TransactionUI.prototype, {
       // Normalize the allocate / auto-close-out toggles and the recurrence
       // availability to match the current checkbox state for this open.
       this.syncAllocateState();
-      // Populate the "Draw from allocation" dropdown with current bucket
-      // balances for this open of the add form.
-      this.updateDrawAllocationVisibility();
+      // Build the "Draw from allocation" editor with current bucket balances
+      // for this open of the add form, starting from an empty split.
+      this.updateDrawAllocationVisibility(true);
 
       modal.style.display = "block";
       modal.setAttribute("aria-hidden", "false");

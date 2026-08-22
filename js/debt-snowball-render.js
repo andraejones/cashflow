@@ -366,7 +366,6 @@ Object.assign(DebtSnowballUI.prototype, {
     while (this.cashInfusionTargetInput.options.length > 1) {
       this.cashInfusionTargetInput.remove(1);
     }
-    // Add debt options
     const debts = this.store.getDebts();
     debts.forEach((debt) => {
       const option = document.createElement("option");
@@ -408,7 +407,6 @@ Object.assign(DebtSnowballUI.prototype, {
         this.cashInfusionAmountInput.value = "";
       }
       if (this.cashInfusionDateInput) {
-        // Default to today's date
         this.cashInfusionDateInput.value = Utils.formatDateString(new Date());
       }
       if (this.cashInfusionTargetInput) {
@@ -526,7 +524,6 @@ Object.assign(DebtSnowballUI.prototype, {
     // surviving-debt set matches the actual plan.
     const infusionAllocations = this.calculateInfusionAllocations(projection);
 
-    // Sort by date
     const sortedInfusions = [...infusions].sort((a, b) =>
       a.date.localeCompare(b.date)
     );
@@ -559,7 +556,6 @@ Object.assign(DebtSnowballUI.prototype, {
       details.appendChild(nameSpan);
       details.appendChild(meta);
 
-      // Add allocation breakdown
       const allocation = infusionAllocations[infusion.id];
       if (allocation && Object.keys(allocation).length > 0) {
         const allocationDiv = document.createElement("div");

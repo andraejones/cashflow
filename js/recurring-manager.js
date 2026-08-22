@@ -1,5 +1,3 @@
-// Recurring transaction manager
-
 class RecurringTransactionManager {
 
   constructor(store) {
@@ -8,7 +6,6 @@ class RecurringTransactionManager {
     // Key format: "YYYY-MM" + hash of recurring transaction data
     this.expansionCache = new Map();
     this.lastRecurringHash = null;
-    // Cache for US banking holidays per year
     this._holidayCache = new Map();
   }
 
@@ -16,12 +13,10 @@ class RecurringTransactionManager {
   _generateRecurringHash() {
     const recurringData = this.store.getRecurringTransactions();
     const skippedData = this.store.getSkippedTransactions();
-    // Create a string representation of the data for hashing
     const dataStr = JSON.stringify({
       recurring: recurringData,
       skipped: skippedData
     });
-    // Simple hash function
     let hash = 0;
     for (let i = 0; i < dataStr.length; i++) {
       const char = dataStr.charCodeAt(i);
@@ -37,7 +32,6 @@ class RecurringTransactionManager {
     this.lastRecurringHash = null;
   }
 
-  // Check if cache is valid for current recurring transaction state
   _isCacheValid() {
     const currentHash = this._generateRecurringHash();
     if (this.lastRecurringHash !== currentHash) {
@@ -73,13 +67,11 @@ class RecurringTransactionManager {
     }
   }
 
-  // Get cache key for a specific month
   _getCacheKey(year, month) {
     const monthStr = `${year}-${String(month + 1).padStart(2, '0')}`;
     return monthStr;
   }
 
-  // Public method to get cached data for a month
   getCached(year, month) {
     const cacheKey = this._getCacheKey(year, month);
     return this.expansionCache.get(cacheKey);
@@ -165,7 +157,6 @@ class RecurringTransactionManager {
     return holiday;
   }
 
-  // Get all US federal banking holidays for a given year
   getUSBankingHolidays(year) {
     if (this._holidayCache.has(year)) {
       return this._holidayCache.get(year);
@@ -206,7 +197,6 @@ class RecurringTransactionManager {
     // Christmas Day (Dec 25, observed)
     holidays.push(this._getObservedHoliday(year, 11, 25));
 
-    // Filter out any nulls and store in cache
     const validHolidays = holidays.filter(h => h !== null);
     this._holidayCache.set(year, validHolidays);
     return validHolidays;
@@ -350,12 +340,10 @@ class RecurringTransactionManager {
 
 
   applyRecurringTransactions(year, month) {
-    // Check cache validity and use cached result if available
     const cacheKey = this._getCacheKey(year, month);
     const cacheValid = this._isCacheValid();
 
     if (cacheValid && this.expansionCache.has(cacheKey)) {
-      // Cache hit - apply cached expanded transactions
       const cachedData = this.expansionCache.get(cacheKey);
       this._applyCachedTransactions(year, month, cachedData);
       return;
@@ -616,7 +604,6 @@ class RecurringTransactionManager {
     for (const item of cachedData) {
       const { dateString, transaction } = item;
 
-      // Check if there's a modified instance that should override this
       const key = `${transaction.recurringId}-${transaction.originalDate || dateString}`;
       if (modifiedInstances.has(key)) {
         // Modified instance exists - don't overwrite it
@@ -626,7 +613,6 @@ class RecurringTransactionManager {
       if (!transactions[dateString]) {
         transactions[dateString] = [];
       }
-      // Check if this transaction already exists
       const existsAlready = transactions[dateString].some(t =>
         t.recurringId === transaction.recurringId &&
         (t.originalDate || dateString) === (transaction.originalDate || dateString)
@@ -1063,7 +1049,6 @@ class RecurringTransactionManager {
     if (isLastDayOfMonth) {
       targetDay = endOfMonth.getDate();
     } else {
-      // Use adjustDayForMonth to handle leap years and short months
       targetDay = this.adjustDayForMonth(year, month, startDay);
     }
     let targetDate = new Date(year, month, targetDay, 12, 0, 0);
@@ -1292,7 +1277,6 @@ class RecurringTransactionManager {
       return;
     }
     const startDay = startDate.getDate();
-    // Use adjustDayForMonth to handle leap years and short months
     const targetDay = this.adjustDayForMonth(year, month, startDay);
     let targetDate = new Date(year, month, targetDay, 12, 0, 0);
     let originalDateString = null;
@@ -1343,7 +1327,6 @@ class RecurringTransactionManager {
       return;
     }
     const startDay = startDate.getDate();
-    // Use adjustDayForMonth to handle leap years and short months
     const targetDay = this.adjustDayForMonth(year, month, startDay);
     let targetDate = new Date(year, month, targetDay, 12, 0, 0);
     let originalDateString = null;
@@ -1390,7 +1373,6 @@ class RecurringTransactionManager {
     if (maxOccurrences && yearsSinceStart >= maxOccurrences) {
       return;
     }
-    // Use adjustDayForMonth to handle leap years and short months consistently
     const targetDay = this.adjustDayForMonth(year, month, startDate.getDate());
     let targetDate = new Date(year, month, targetDay, 12, 0, 0);
     let originalDateString = null;
@@ -1821,7 +1803,6 @@ class RecurringTransactionManager {
 
     const isRecurring = transaction.recurringId !== undefined;
 
-    // Invalidate cache when editing recurring transactions
     if (isRecurring) {
       this.invalidateCache();
     }
@@ -2091,7 +2072,6 @@ class RecurringTransactionManager {
     const transaction = transactions[date][index];
 
     if (transaction.recurringId) {
-      // Invalidate cache when deleting recurring transactions
       this.invalidateCache();
       if (deleteFuture) {
         const recurringId = transaction.recurringId;

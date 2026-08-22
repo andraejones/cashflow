@@ -1,5 +1,3 @@
-// Application entry point
-
 class CashflowApp {
 
   constructor(pinProtection) {
@@ -75,7 +73,6 @@ class CashflowApp {
     this._initPromise = this.init();
   }
 
-  // Static factory method for creating an initialized app
   static async create(pinProtection) {
     const app = new CashflowApp(pinProtection);
     await app._initPromise;
@@ -113,14 +110,12 @@ class CashflowApp {
       try {
         await this._syncPendingOrLoad();
         this.updateUI();
-        // Restart heartbeat after unlock
         this.cloudSync.startHeartbeat(60000);
       } catch (error) {
         console.error("Error refreshing from cloud after unlock:", error);
       }
     };
 
-    // Set up callback to stop heartbeat when app locks
     this.pinProtection.onLockCallback = () => {
       this.cloudSync.stopHeartbeat();
     };
@@ -179,7 +174,6 @@ class CashflowApp {
         return true;
       }
 
-      // Check if remote has changed before doing full load
       const hasChanges = await this.cloudSync.checkForRemoteChanges();
 
       if (hasChanges === false) {
@@ -196,7 +190,6 @@ class CashflowApp {
       return true;
     } finally {
       this._operationLock = false;
-      // If UI update was requested during lock, do it now
       if (this._pendingUpdateUI) {
         this._pendingUpdateUI = false;
         this.updateUI();

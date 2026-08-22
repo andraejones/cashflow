@@ -68,6 +68,28 @@ Object.assign(TransactionUI.prototype, {
       }
     }
 
+    // Read and validate the allocation split BEFORE anything is mutated: the
+    // date-change branches delete the row before re-adding it, and bailing out
+    // on a bad split halfway through that would leave the expense gone. null
+    // means the form had no editor at all (nothing to change about the split);
+    // an empty array means the user cleared it.
+    let editedDraws = null;
+    const drawEditor = document.getElementById(
+      `edit-draw-allocations-${date}-${index}`
+    );
+    if (drawEditor) {
+      if (type !== "expense") {
+        editedDraws = [];
+      } else {
+        const drawResult = this.collectAllocationDraws(drawEditor, amount);
+        if (drawResult.error) {
+          Utils.showNotification(drawResult.error, "error");
+          return;
+        }
+        editedDraws = drawResult.rows;
+      }
+    }
+
     const transactions = this.store.getTransactions();
     let liveIndex =
       txnId && transactions[date]
@@ -135,14 +157,13 @@ Object.assign(TransactionUI.prototype, {
           updatedFields.autoCloseout = undefined;
           updatedFields.closeoutDate = undefined;
         }
-        // Apply any allocation-draw change from the edit form. Only present for
-        // one-time, non-allocated expenses; updateTransaction reconciles the
-        // bucket (refunds the old draw, re-debits the chosen one). Clearing the
-        // selection or switching away from expense drops the link.
-        const drawEl = document.getElementById(`edit-draw-allocation-${date}-${index}`);
-        if (drawEl) {
-          updatedFields.drawsFromAllocationId =
-            type === "expense" && drawEl.value ? drawEl.value : undefined;
+        // Apply any allocation-split change from the edit form. Only present
+        // for one-time, non-allocated expenses; updateTransaction reconciles
+        // the buckets (refunds every old draw, re-debits the chosen ones). An
+        // empty list is authoritative — clearing the selection or switching
+        // away from expense drops the links.
+        if (editedDraws !== null) {
+          updatedFields.allocationDraws = editedDraws;
         }
         // Apply the edited close-out date; drop it when the type moves away
         // from expense (the bucket semantics no longer apply).
@@ -163,11 +184,9 @@ Object.assign(TransactionUI.prototype, {
       } else {
         // Date changed — move the transaction
         if (isRecurring) {
-          // Skip the original recurring occurrence
           if (!this.recurringManager.isTransactionSkipped(date, transaction.recurringId)) {
             this.recurringManager.toggleSkipTransaction(date, transaction.recurringId);
           }
-          // Store move info
           this.store.moveTransaction(transaction.recurringId, date, newDate);
           // Create one-time at new date with edited fields
           const movedTransaction = {
@@ -231,26 +250,21 @@ Object.assign(TransactionUI.prototype, {
                   carried < newDate ? newDate : carried;
               }
             }
-            // Carry the allocation draw across the re-move, honoring any change
-            // made in the edit form. Without this, deleting the old row refunds
-            // the bucket via _reverseAllocationDraw and the re-add never
-            // re-debits it — the spend stands while the bucket is silently
-            // credited back (mirrors the regular one-time branch below).
+            // Carry the allocation split across the re-move, honoring any
+            // change made in the edit form. Without this, deleting the old row
+            // refunds the buckets via _reverseAllocationDraws and the re-add
+            // never re-debits them — the spend stands while the buckets are
+            // silently credited back (mirrors the regular one-time branch
+            // below).
             if (type === "expense") {
-              const reDrawEl = document.getElementById(`edit-draw-allocation-${date}-${index}`);
-              const reDrawId = reDrawEl ? reDrawEl.value : transaction.drawsFromAllocationId;
-              if (reDrawId) {
-                reMovedTransaction.drawsFromAllocationId = reDrawId;
-                // Same target: carry the series/period provenance so demand
-                // history survives even if the bucket has been forfeited (a
-                // changed target gets freshly stamped by the re-add).
-                if (
-                  reDrawId === transaction.drawsFromAllocationId &&
-                  transaction.drawsFromRecurringId
-                ) {
-                  reMovedTransaction.drawsFromRecurringId = transaction.drawsFromRecurringId;
-                  reMovedTransaction.drawsFromPeriodDate = transaction.drawsFromPeriodDate;
-                }
+              if (editedDraws !== null) {
+                this._carryEditedDraws(
+                  transaction,
+                  reMovedTransaction,
+                  editedDraws
+                );
+              } else {
+                this.store.carryAllocationDraws(transaction, reMovedTransaction);
               }
             }
             const reMovedId = this.store.addTransaction(newDate, reMovedTransaction);
@@ -260,7 +274,6 @@ Object.assign(TransactionUI.prototype, {
           // Regular one-time transaction
           this.store.deleteTransaction(date, liveIndex);
           const newTransaction = { amount, type, description };
-          // Preserve settled status only when the new type is still expense
           if (type === "expense" && transaction.settled !== undefined) {
             newTransaction.settled = transaction.settled;
           }
@@ -278,22 +291,14 @@ Object.assign(TransactionUI.prototype, {
                 carried < newDate ? newDate : carried;
             }
           }
-          // Carry the allocation draw across the move, honoring any change made
-          // in the edit form (delete refunded the old bucket; add re-debits the
-          // chosen one at the new date/amount).
+          // Carry the allocation split across the move, honoring any change
+          // made in the edit form (the delete refunded the old buckets; the add
+          // re-debits the chosen ones at the new date/amount).
           if (type === "expense") {
-            const drawEl = document.getElementById(`edit-draw-allocation-${date}-${index}`);
-            const drawId = drawEl ? drawEl.value : transaction.drawsFromAllocationId;
-            if (drawId) {
-              newTransaction.drawsFromAllocationId = drawId;
-              // Same target: carry the series/period provenance (see above).
-              if (
-                drawId === transaction.drawsFromAllocationId &&
-                transaction.drawsFromRecurringId
-              ) {
-                newTransaction.drawsFromRecurringId = transaction.drawsFromRecurringId;
-                newTransaction.drawsFromPeriodDate = transaction.drawsFromPeriodDate;
-              }
+            if (editedDraws !== null) {
+              this._carryEditedDraws(transaction, newTransaction, editedDraws);
+            } else {
+              this.store.carryAllocationDraws(transaction, newTransaction);
             }
           }
           const newId = this.store.addTransaction(newDate, newTransaction);
@@ -321,6 +326,26 @@ Object.assign(TransactionUI.prototype, {
     if (!original || !original.id || !newId) return;
     if (movedCopy.allocated !== true) return;
     this.store.repointAllocationDraws(original.id, newId);
+  },
+
+  // Attach a split just confirmed in the edit form to a copy that is about to
+  // be re-added at a new date. A row naming a bucket the expense ALREADY drew
+  // from keeps that row's series/period provenance, so its demand history
+  // survives the move even if the bucket has since been forfeited; a row the
+  // user just added has nothing to carry and gets stamped fresh by the re-add.
+  _carryEditedDraws(original, target, rows) {
+    if (!rows || rows.length === 0) return target;
+    const existing = this.store.getAllocationDraws(original);
+    target.allocationDraws = rows.map((row) => {
+      const prior = existing.find((r) => r.allocationId === row.allocationId);
+      const copy = { allocationId: row.allocationId, amount: row.amount };
+      if (prior && prior.recurringId) {
+        copy.recurringId = prior.recurringId;
+        if (prior.periodDate) copy.periodDate = prior.periodDate;
+      }
+      return copy;
+    });
+    return target;
   },
 
   // Re-add a just-deleted one-time transaction (undo toast callback). Runs
@@ -352,20 +377,17 @@ Object.assign(TransactionUI.prototype, {
   },
 
   convertRecurringToDebt(recurringId) {
-    // Get the recurring transaction
     const recurringTransaction = this.recurringManager.getRecurringTransactionById(recurringId);
     if (!recurringTransaction) {
       Utils.showNotification("Recurring transaction not found", "error");
       return;
     }
 
-    // Check if it's an expense
     if (recurringTransaction.type !== "expense") {
       Utils.showNotification("Only expense transactions can be converted to debts", "error");
       return;
     }
 
-    // Close the transaction modal
     this.closeModals();
 
     // Open the debt snowball panel with pre-populated form
