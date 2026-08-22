@@ -996,7 +996,17 @@ class BankReconcileUI {
       // renewal). Reject when the raw descriptions each carry a distinctive word
       // the other lacks — positive evidence they're different charges. A bare
       // "Amazon" entry (no product word) still drift-matches.
-      if (this._hasConflictingProductToken(cand._tokens, bankRow._tokens)) continue;
+      //
+      // The merchant's own name is stripped from both sides first (see
+      // _productTokens) — it is not a product word, and leaving it in made
+      // this guard reject the very case pass 2 exists for.
+      if (
+        this._hasConflictingProductToken(
+          this._productTokens(cand._tokens, cand._normTokens),
+          this._productTokens(bankRow._tokens, bankRow._normTokens)
+        )
+      )
+        continue;
       if (diff < bestDiff) {
         best = cand;
         bestDiff = diff;
@@ -1173,6 +1183,43 @@ class BankReconcileUI {
         return true;
       });
     return hasUnshared(aTokens, bTokens) && hasUnshared(bTokens, aTokens);
+  }
+
+  // Raw description tokens minus the merchant's own name (prefix-tolerant,
+  // measured against that same description's NORMALIZED tokens).
+  //
+  // Only pass 2's conflict guard uses this, and only because that guard reads
+  // RAW tokens. It asks "does each side carry a distinctive PRODUCT word the
+  // other lacks?", and the payee name is not a product word — but the two
+  // sides spell it differently often enough that leaving it in reads as a
+  // conflict all by itself. "WM SUPERCENTER #778 5001 TAYLOR RD PUNTA" keeps
+  // no merchant token at all in raw form (WM is under the length floor,
+  // SUPERCENTER is a stopword), so its raw set is pure location noise —
+  // against a plain "Walmart" entry, each side had a word the other lacked and
+  // a $16.57-vs-$16.67 typo on the same day was rejected as "different
+  // charges". Both sides already agree on the normalized merchant to reach
+  // this check, so dropping that name costs the guard nothing: a real product
+  // word (Amazon MKTPLACE vs Amazon PRIME) survives on both sides and still
+  // blocks the pair.
+  //
+  // _nameCoherence's conflict check must NOT use this — it compares normalized
+  // tokens, which this would empty out entirely.
+  _productTokens(rawTokens, normTokens) {
+    const out = new Set();
+    if (!rawTokens) return out;
+    for (const t of rawTokens) {
+      let isMerchantName = false;
+      for (const n of normTokens || []) {
+        const shorter = n.length <= t.length ? n : t;
+        const longer = n.length <= t.length ? t : n;
+        if (longer.startsWith(shorter)) {
+          isMerchantName = true;
+          break;
+        }
+      }
+      if (!isMerchantName) out.add(t);
+    }
+    return out;
   }
 
   _dayGap(isoA, isoB) {
