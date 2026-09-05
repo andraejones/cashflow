@@ -581,7 +581,8 @@ Object.assign(TransactionStore.prototype, {
       // give, so a later amount edit can shrink the expense under a split that
       // was valid when it was saved without ever over-drawing.
       const want = shares[index];
-      if (want <= 0) return;
+      // Keep even a zero-share row: shrinking the expense temporarily does
+      // not unlink its buckets. A later increase must recover the saved split.
       const remaining = Math.max(0, this._roundCents(allocation.amount));
       const draw = this._roundCents(Math.min(remaining, want));
       allocation.amount = this._roundCents(allocation.amount - draw);

@@ -505,15 +505,7 @@ class BankReconcileUI {
     // share a name token — a coincidental near amount alone shouldn't pair
     // unrelated merchants (a $21.42 Walmart debit vs a $25 Mastercard payment).
     const reviewPairs = [];
-    sortedBank.forEach((b) => {
-      if (b.matched) return;
-      const a = this._bestNearMatch(b, appItems);
-      if (a) {
-        b.matched = true;
-        a.matched = true;
-        reviewPairs.push({ bank: b, app: a, diff: Math.abs(Math.abs(a.signed) - Math.abs(b.signed)) });
-      }
-    });
+    this._nearMatchPass(sortedBank, appItems, reviewPairs);
 
     // Pass 3: name-assisted review match. Amount passes can't bridge a large but
     // legitimate gap (a 25% nail-salon tip, a hold that posts far off). This pass
@@ -968,41 +960,65 @@ class BankReconcileUI {
   // candidates within 1 day and the same sign, accept only those whose amount
   // gap is both small in dollars and a small fraction of the total AND that
   // share a name token (prefix-tolerant, on the normalized merchant; no rarity
-  // guard since the tight amount gap already constrains the pairing), and return
-  // the closest-amount one.
-  _bestNearMatch(bankRow, appItems) {
-    const bankAbs = Math.abs(bankRow.signed);
-    let best = null;
-    let bestDiff = Infinity;
-    for (const cand of appItems) {
-      if (cand.matched) continue;
-      if (this._blockMatch(bankRow, cand)) continue;
-      if ((cand.signed < 0) !== (bankRow.signed < 0)) continue;
-      if (this._dayGap(bankRow.date, cand.date) > 1) continue;
-      const candAbs = Math.abs(cand.signed);
-      const diff = Math.abs(candAbs - bankAbs);
-      if (diff < 0.005) continue; // exact matches were handled in pass 1
-      const bigger = Math.max(candAbs, bankAbs);
-      if (diff > this.amountReviewThreshold) continue;
-      if (diff > 0.25 * bigger) continue;
-      if (
-        this._distinctiveSharedScore(cand._normTokens, bankRow._normTokens, () => true) <
-        this.nameMinTokenLen
-      )
-        continue;
-      // Same merchant, different product: normalization collapses "AMAZON
-      // MKTPLACE" and "Amazon Prime" both to "Amazon", so the shared-token
-      // check above passes on a coincidental near amount ($14.97 hold vs $15.16
-      // renewal). Reject when the raw descriptions each carry a distinctive word
-      // the other lacks — positive evidence they're different charges. A bare
-      // "Amazon" entry (no product word) still drift-matches.
-      if (this._hasConflictingProductToken(cand._tokens, bankRow._tokens)) continue;
-      if (diff < bestDiff) {
-        best = cand;
-        bestDiff = diff;
+  // guard since the tight amount gap already constrains the pairing). Rank ALL
+  // eligible pairs before assigning any: file order must not let a $13.49 line
+  // claim a $16.57 entry when a $16.67 bank line is a much closer partner.
+  _nearMatchPass(sortedBank, appItems, reviewPairs) {
+    const candidates = [];
+    for (const bankRow of sortedBank) {
+      if (bankRow.matched) continue;
+      const bankAbs = Math.abs(bankRow.signed);
+      for (const cand of appItems) {
+        if (cand.matched) continue;
+        if (this._blockMatch(bankRow, cand)) continue;
+        if ((cand.signed < 0) !== (bankRow.signed < 0)) continue;
+        if (this._dayGap(bankRow.date, cand.date) > 1) continue;
+        const candAbs = Math.abs(cand.signed);
+        const diff = Math.abs(candAbs - bankAbs);
+        if (diff < 0.005) continue; // exact matches were handled in pass 1
+        const bigger = Math.max(candAbs, bankAbs);
+        if (diff > this.amountReviewThreshold) continue;
+        if (diff > 0.25 * bigger) continue;
+        if (
+          this._distinctiveSharedScore(cand._normTokens, bankRow._normTokens, () => true) <
+          this.nameMinTokenLen
+        )
+          continue;
+        // Same merchant, different product: normalization collapses "AMAZON
+        // MKTPLACE" and "Amazon Prime" both to "Amazon", so the shared-token
+        // check above passes on a coincidental near amount ($14.97 hold vs $15.16
+        // renewal). Reject when the raw descriptions each carry a distinctive word
+        // the other lacks — positive evidence they're different charges. A bare
+        // "Amazon" entry (no product word) still drift-matches.
+        if (this._hasConflictingProductToken(cand._tokens, bankRow._tokens)) continue;
+        candidates.push({ bank: bankRow, app: cand, diff });
       }
     }
-    return best;
+    this._assignReviewPairs(candidates, reviewPairs, (a, b) => a.diff - b.diff);
+  }
+
+  // Each bank line and app entry can appear in only one review pair. Compare
+  // fit across the whole statement, then date proximity and stable field
+  // values to break ties.
+  _assignReviewPairs(candidates, reviewPairs, compareFit) {
+    candidates.sort((a, b) =>
+      compareFit(a, b) ||
+      this._dayGap(a.bank.date, a.app.date) - this._dayGap(b.bank.date, b.app.date) ||
+      a.bank.date.localeCompare(b.bank.date) ||
+      a.app.date.localeCompare(b.app.date) ||
+      a.bank.signed - b.bank.signed ||
+      a.app.signed - b.app.signed ||
+      String(a.bank.description).localeCompare(String(b.bank.description)) ||
+      String(a.app.description).localeCompare(String(b.app.description)) ||
+      String(a.app.id).localeCompare(String(b.app.id))
+    );
+    for (const candidate of candidates) {
+      const { bank, app, diff, viaName } = candidate;
+      if (bank.matched || app.matched) continue;
+      bank.matched = true;
+      app.matched = true;
+      reviewPairs.push({ bank, app, diff, ...(viaName ? { viaName: true } : {}) });
+    }
   }
 
   // Name-assisted pass: pair still-unmatched bank lines to app entries that
@@ -1017,13 +1033,11 @@ class BankReconcileUI {
       (bankFreq.get(tok) || 0) <= this.distinctiveMaxDocFreq &&
       (appFreq.get(tok) || 0) <= this.distinctiveMaxDocFreq;
 
+    const candidates = [];
     sortedBank.forEach((b) => {
       if (b.matched) return;
       const bankAbs = Math.abs(b.signed);
       if (bankAbs < 0.005) return;
-      let best = null;
-      let bestScore = 0;
-      let bestRatio = 0;
       for (const a of appItems) {
         if (a.matched) continue;
         if (this._blockMatch(b, a)) continue;
@@ -1036,24 +1050,21 @@ class BankReconcileUI {
         if (ratio < this.nameMatchMinRatio) continue;
         const score = this._distinctiveSharedScore(a._tokens, b._tokens, rare);
         if (score < this.nameMinTokenLen) continue;
-        // Strongest shared word wins, then the closest amount.
-        if (score > bestScore || (score === bestScore && ratio > bestRatio)) {
-          best = a;
-          bestScore = score;
-          bestRatio = ratio;
-        }
-      }
-      if (best) {
-        b.matched = true;
-        best.matched = true;
-        reviewPairs.push({
+        candidates.push({
           bank: b,
-          app: best,
-          diff: Math.abs(Math.abs(best.signed) - Math.abs(b.signed)),
+          app: a,
+          diff: Math.abs(appAbs - bankAbs),
           viaName: true,
+          score,
+          ratio,
         });
       }
     });
+    // Preserve the name pass's ranking, applied across all bank rows: the
+    // strongest shared word wins, then the closest amount ratio.
+    this._assignReviewPairs(candidates, reviewPairs, (a, b) =>
+      b.score - a.score || b.ratio - a.ratio
+    );
   }
 
   // Distinctive alphabetic words from a description, for name matching. Strips

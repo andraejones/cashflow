@@ -9730,7 +9730,133 @@ console.log("TEST 101: The Draw Editor Refuses A Split It Cannot Honor");
   if (hidden.error || hidden.rows.length !== 0) {
     throw new Error("A hidden editor must contribute no draws");
   }
+  const clamped = editor([["A", "100"], ["B", "0"]]);
+  clamped._drawEditorConfig.expenseAmount = 100;
+  clamped._drawEditorConfig.existing = [
+    { allocationId: "A", amount: 130, drawn: 100, share: 100 },
+    { allocationId: "B", amount: 70, drawn: 0, share: 0 },
+  ];
+  const unchanged = ui.collectAllocationDraws(clamped, 100);
+  if (unchanged.error || unchanged.rows[0].amount !== 130 || unchanged.rows[1].amount !== 70) {
+    throw new Error(`An untouched clamped split must preserve its instructions: ${JSON.stringify(unchanged)}`);
+  }
+  // Actually changing the expense still requires the displayed split to be
+  // valid, just like a new split: the unchanged-edit exception must be narrow.
+  if (!ui.collectAllocationDraws(clamped, 90).error) {
+    throw new Error("Changing the expense bypassed draw validation");
+  }
   console.log("✅ The editor refuses over-drawn buckets and over-committed splits");
+}
+
+// TEST 102: Amount edits must not erase the user's allocation instructions.
+console.log("TEST 102: Allocation Splits Survive Shrinking Through Zero");
+{
+  for (const reduced of [100, 0]) {
+    localStorage.clear();
+    const s = new TransactionStore();
+    const day = Utils.formatDateString(new Date());
+    const a = s.addTransaction(day, { amount: 150, type: "expense", allocated: true });
+    const b = s.addTransaction(day, { amount: 100, type: "expense", allocated: true });
+    const spendId = s.addTransaction(day, {
+      amount: 200, type: "expense", description: "Costco", settled: true,
+      allocationDraws: [{ allocationId: a, amount: 130 }, { allocationId: b, amount: 70 }],
+    });
+    s.updateTransaction(day, 2, { amount: reduced });
+    s.saveData();
+    s.cancelPendingSave();
+    const reloaded = new TransactionStore();
+    const spend = reloaded.findTransactionById(spendId);
+    reloaded.updateTransaction(spend.date, spend.index, { amount: 200 });
+    const remaining = (id) => reloaded.findTransactionById(id).transaction.amount;
+    if (remaining(a) !== 20 || remaining(b) !== 30) {
+      throw new Error(`Split lost after 200 -> ${reduced} -> reload -> 200: ${remaining(a)}, ${remaining(b)}`);
+    }
+    reloaded.deleteTransaction(spend.date, spend.index);
+    if (remaining(a) !== 150 || remaining(b) !== 100) {
+      throw new Error("Restored split did not refund every bucket on deletion");
+    }
+    reloaded.cancelPendingSave();
+  }
+  console.log("✅ Amount edits and reloads preserve zero-share allocation rows");
+}
+
+// TEST 103: A poorer candidate earlier in the CSV must not claim the entry
+// whose real partner appears later. Exercise both amount-review passes.
+console.log("TEST 103: Review Matches Prefer Fit Across The Whole Statement");
+{
+  const cases = [
+    { description: "Walmart", app: 16.57, bank: [13.49, 16.67], expected: 16.67, viaName: false },
+    { description: "Yaimaras Salon", app: 100, bank: [150, 125], expected: 125, viaName: true },
+  ];
+  for (const scenario of cases) {
+    for (const reversed of [false, true]) {
+      localStorage.clear();
+      const s = new TransactionStore();
+      const day = Utils.formatDateString(new Date());
+      s.addTransaction(day, { amount: scenario.app, type: "expense", description: scenario.description, settled: true });
+      const br = new BankReconcileUI(s, new RecurringTransactionManager(s), () => {}, () => {});
+      const amounts = reversed ? [...scenario.bank].reverse() : scenario.bank;
+      const bank = amounts.map((amount) => ({
+        date: day, postedDate: day, signed: -amount, description: scenario.description, pending: false,
+      }));
+      br._run(bank);
+      const pairs = br.result.reviewPairs;
+      if (pairs.length !== 1 || pairs[0].bank.signed !== -scenario.expected ||
+          !!pairs[0].viaName !== scenario.viaName) {
+        throw new Error(`Wrong review partner for ${scenario.description} (${amounts}): ${JSON.stringify(pairs)}`);
+      }
+      if (br.result.missingFromApp.length !== 1 || br.result.appOnlyUnmatched.length !== 0) {
+        throw new Error("Review pairing hid an unmatched bank line or reported its app entry twice");
+      }
+      // The actionable correction must use the chosen amount and converge to
+      // an exact match when reconciliation runs again.
+      br._fixAmount(pairs[0]);
+      br._run(bank);
+      if (s.transactions[day][0].amount !== scenario.expected || br.result.reviewPairs.length !== 0) {
+        throw new Error("Fix amount applied the wrong candidate or failed to converge");
+      }
+      s.cancelPendingSave();
+    }
+  }
+  // Competing candidates must each remain available until a pair is assigned.
+  // Sorting only each bank line's first choice would strand the second pair.
+  for (const reverseBank of [false, true]) {
+    for (const reverseApp of [false, true]) {
+      localStorage.clear();
+      const s = new TransactionStore();
+      const day = Utils.formatDateString(new Date());
+      const amounts = reverseApp ? [12, 10] : [10, 12];
+      amounts.forEach((amount) => s.addTransaction(day, {
+        amount, type: "expense", description: "Walmart", settled: true,
+      }));
+      const br = new BankReconcileUI(s, new RecurringTransactionManager(s), () => {}, () => {});
+      const bank = (reverseBank ? [11, 10.5] : [10.5, 11]).map((amount) => ({
+        date: day, postedDate: day, signed: -amount, description: "Walmart", pending: false,
+      }));
+      br._run(bank);
+      const pairs = br.result.reviewPairs.map((p) => `${-p.bank.signed}:${p.app.amount}`).sort();
+      if (pairs.join(",") !== "10.5:10,11:12") {
+        throw new Error(`Competing review candidates lost or reused an entry: ${pairs}`);
+      }
+      s.cancelPendingSave();
+    }
+  }
+
+  // Review ranking must not consume an entry before its exact bank match.
+  localStorage.clear();
+  const s = new TransactionStore();
+  const day = Utils.formatDateString(new Date());
+  s.addTransaction(day, { amount: 10, type: "expense", description: "Walmart", settled: true });
+  const br = new BankReconcileUI(s, new RecurringTransactionManager(s), () => {}, () => {});
+  const bank = [9.9, 10].map((amount) => ({
+    date: day, postedDate: day, signed: -amount, description: "Walmart", pending: false,
+  }));
+  br._run(bank);
+  if (!bank[1]._match || bank[0].matched || br.result.reviewPairs.length) {
+    throw new Error("A near amount displaced an exact match");
+  }
+  s.cancelPendingSave();
+  console.log("✅ Near-amount and name-assisted reviews choose the best pair regardless of CSV order");
 }
 
 // Run the async network tests sequentially (shared global.fetch mock): TEST 32

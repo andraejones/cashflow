@@ -332,6 +332,7 @@ Object.assign(TransactionUI.prototype, {
       date,
       amountElementId,
       existing,
+      expenseAmount: opts.expenseAmount !== undefined ? opts.expenseAmount : prev.expenseAmount,
       available,
       labels,
     };
@@ -536,10 +537,25 @@ Object.assign(TransactionUI.prototype, {
     const config = container._drawEditorConfig || {};
     const available = config.available || new Map();
     const labels = config.labels || new Map();
+    const rawRows = this.readAllocationDrawRows(container);
+    const existing = config.existing || [];
+    // A description/date edit must preserve the saved split, including rows
+    // temporarily clamped to zero by an amount correction. The displayed
+    // shares can differ from those instructions; re-saving them would erase
+    // that intent (or reject an untouched zero-share row).
+    if (expenseAmount === config.expenseAmount && existing.length > 0 &&
+        rawRows.length === existing.length && existing.every((r, i) =>
+          r.allocationId && rawRows[i].allocationId === r.allocationId &&
+          parseFloat(rawRows[i].amount) === r.share)) {
+      return {
+        rows: existing.map((r) => ({ allocationId: r.allocationId, amount: r.amount })),
+        error: null,
+      };
+    }
     const rows = [];
     let error = null;
     let total = 0;
-    this.readAllocationDrawRows(container).forEach((raw) => {
+    rawRows.forEach((raw) => {
       if (error || !raw.allocationId) return;
       const name = labels.get(raw.allocationId) || "That allocation";
       const value = parseFloat(raw.amount);
@@ -615,6 +631,7 @@ Object.assign(TransactionUI.prototype, {
       date,
       amountElementId,
       existing,
+      expenseAmount: Number(transaction.amount),
       // Show each row's resolved share, so a full-cover row (no figure of its
       // own) arrives in the box as the number it actually stands for.
       rows: existing.map((r) => ({

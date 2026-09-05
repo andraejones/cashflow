@@ -1124,6 +1124,33 @@ async function dismissAlert(page) {
     check("the day modal names every bucket the expense drew from",
       split.label.includes("UI Grocery Bucket") && split.label.includes("UI Household Bucket"),
       split.label);
+
+    const clampedEdit = await page.evaluate(async () => {
+      const { store, transactionUI: ui } = window.app;
+      const today = Utils.formatDateString(new Date());
+      const spend = store.transactions[today].find((t) => t.description === "UI Split Spend");
+      const locate = () => store.findTransactionById(spend.id);
+      let loc = locate();
+      store.updateTransaction(loc.date, loc.index, { amount: 40 });
+      ui.showTransactionDetails(loc.date);
+      await new Promise((r) => setTimeout(r, 300));
+      loc = locate();
+      ui.showEditForm(loc.date, loc.index);
+      document.getElementById(`edit-description-${loc.date}-${loc.index}`).value = "UI Split Renamed";
+      ui.saveEdit(loc.date, loc.index, spend.id);
+      const saved = locate().transaction;
+      const preserved = store.getAllocationDraws(saved).map((r) => r.amount);
+      const renamed = saved.description === "UI Split Renamed";
+      loc = locate();
+      store.updateTransaction(loc.date, loc.index, { amount: 90 });
+      const restored = store.getAllocationDraws(locate().transaction).map((r) => r.drawn);
+      return { renamed, preserved, restored };
+    });
+    check("a description edit preserves a split with a temporarily zero-share row",
+      clampedEdit.renamed && clampedEdit.preserved.join(",") === "50,40",
+      JSON.stringify(clampedEdit));
+    check("restoring the amount restores both bucket draws after the form edit",
+      clampedEdit.restored.join(",") === "50,40");
     await page.evaluate(() => window.app.transactionUI.closeModals());
     await sleep(200);
 
