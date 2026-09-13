@@ -1204,6 +1204,36 @@ async function dismissAlert(page) {
       freeFunds.holder === freeFunds.id);
     check("the current day shows the free-funds figure instead of a balance",
       freeFunds.shown, freeFunds.text.slice(0, 80));
+
+    // The designation flag lives on the recurring definition and outlives the
+    // series' periods. End the series the way "delete all future occurrences"
+    // does (endDate before today) and the flag still says "free funds" while
+    // there is no live bucket left to show. The current day must fall back to
+    // its real balance — keying the mode on the flag rendered that cell EMPTY,
+    // which is how a real dataset looked after deleting its designated series.
+    const endedFreeFunds = await page.evaluate(async (id) => {
+      const store = window.app.store;
+      const today = Utils.formatDateString(new Date());
+      const yesterday = Utils.formatDateString(new Date(Date.now() - 86400000));
+      store.updateRecurringTransaction(id, { endDate: yesterday });
+      window.app.recurringManager.invalidateCache();
+      window.app.updateUI();
+      await new Promise((r) => setTimeout(r, 250));
+      const row = document.querySelector(`[data-date="${today}"]`);
+      const balanceEl = row ? row.querySelector(".balance") : null;
+      return {
+        stillDesignated: store.getFreeFundsRecurringId() === id,
+        noLiveBucket: store.getFreeFundsAllocation() === null,
+        showsFreeFunds: row ? !!row.querySelector(".balance.free-funds") : false,
+        balanceText: balanceEl ? balanceEl.textContent.trim() : "",
+      };
+    }, freeFunds.id);
+    check("an ended free-funds series keeps its designation but loses its bucket",
+      endedFreeFunds.stillDesignated && endedFreeFunds.noLiveBucket,
+      JSON.stringify(endedFreeFunds));
+    check("the current day falls back to a real balance, not an empty cell",
+      !endedFreeFunds.showsFreeFunds && endedFreeFunds.balanceText.length > 0,
+      JSON.stringify(endedFreeFunds));
     await page.evaluate((id) => {
       window.app.store.setFreeFundsAllocation(null);
       window.app.store.deleteRecurringTransaction(id);

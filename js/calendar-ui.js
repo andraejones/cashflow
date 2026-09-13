@@ -333,8 +333,19 @@ class CalendarUI {
     // remaining amount instead of its running balance and past days hide
     // theirs; future days keep the normal balance so the forward plan stays
     // visible.
-    const freeFundsMode = this.store.getFreeFundsRecurringId() !== null;
-    const freeFundsBucket = freeFundsMode ? this.store.getFreeFundsAllocation() : null;
+    // The mode is keyed on a LIVE BUCKET, not on the designation flag. The flag
+    // lives on the recurring definition and outlives the series' periods: once
+    // the designated series ends (delete-all-future sets endDate, and an ended
+    // series has no live bucket — see closeOutExpiredAllocations), or before
+    // its first period arrives, the flag still says "free funds" while there is
+    // nothing to display. Keying on the flag rendered the current day's balance
+    // as an EMPTY cell in that state — no free-funds figure, and the real
+    // balance suppressed. Falling back to normal balances is the honest answer.
+    // getFreeFundsAllocation resolves the id first and returns null without
+    // scanning when nothing is designated, so this costs undesignated users
+    // nothing.
+    const freeFundsBucket = this.store.getFreeFundsAllocation();
+    const freeFundsMode = freeFundsBucket !== null;
 
     // Calculate the end date of the 30-day minimum range (DST-safe)
     const minimumEndDate = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 30);
