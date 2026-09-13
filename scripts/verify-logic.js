@@ -9859,6 +9859,194 @@ console.log("TEST 103: Review Matches Prefer Fit Across The Whole Statement");
   console.log("✅ Near-amount and name-assisted reviews choose the best pair regardless of CSV order");
 }
 
+// TEST 104: An allocation series that has ENDED holds no bucket. "Delete all
+// future occurrences" ends the series the day before the deleted occurrence,
+// which un-supersedes the PREVIOUS period — and expansion used to
+// re-materialize that period at its full definition amount. The resurrected
+// bucket was drawable, listed in the Allocated Transactions modal, and
+// reserved its money against every projected balance forever, because nothing
+// would ever arrive to supersede it. Deleting it walked the resurrection back
+// another period, and it came back at full price even when the user had
+// already spent most of it before it closed out. The rule is pinned on every
+// reader of "which bucket is live": the store's drawable list, the reserve
+// index behind the anchors, and the Allocated modal's own liveness scan.
+console.log("TEST 104: An Ended Allocation Series Leaves No Live Bucket");
+{
+  const RealDate = Date;
+  const FIXED = new RealDate(2026, 8, 13, 12, 0, 0); // Sunday 2026-09-13
+  class FrozenDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(FIXED.getTime()); else super(...a); }
+    static now() { return FIXED.getTime(); }
+  }
+  global.Date = FrozenDate;
+  try {
+    // Transcribed from js/app.js showAllocatedTransactions: the modal picks the
+    // live rolling bucket itself rather than asking getAllocations, so a fix
+    // that only satisfied the store would still leave the bucket on screen.
+    const modalLiveDates = (s) => {
+      const transactions = s.getTransactions();
+      const todayStr = "2026-09-13";
+      const live = new Map();
+      Object.keys(transactions).forEach((date) => {
+        if (date > todayStr) return;
+        transactions[date].forEach((t) => {
+          if (t.hidden === true || t.allocated !== true) return;
+          if (t.autoCloseout === true || !t.recurringId) return;
+          if (s.isTransactionSkipped(date, t.recurringId)) return;
+          const cur = live.get(t.recurringId);
+          if (!cur || date > cur) live.set(t.recurringId, date);
+        });
+      });
+      return Array.from(live.values());
+    };
+
+    const build = () => {
+      localStorage.clear();
+      const s = new TransactionStore();
+      s.resetData();
+      const rm = new RecurringTransactionManager(s);
+      const cs = new CalculationService(s, rm);
+      s.addRecurringTransaction({
+        startDate: "2026-08-03", amount: 200, type: "expense",
+        description: "Weekly spending", recurrence: "weekly",
+        allocated: true, settled: true,
+      });
+      const render = () => {
+        s.closeOutExpiredAllocations();
+        s.rollForwardAllocations();
+        cs.invalidateCache();
+        [6, 7, 8, 9].forEach((m) => rm.applyRecurringTransactions(2026, m));
+        cs.updateMonthlyBalances(new FrozenDate());
+      };
+      render();
+      return { s, rm, cs, render };
+    };
+
+    // Baseline: the live bucket is this week's (Mon 2026-09-07), reserving $200.
+    const base = build();
+    if (base.s.getAllocations().length !== 1 || base.s.getAllocations()[0].date !== "2026-09-07") {
+      throw new Error(`Expected the 09-07 bucket live, got ${JSON.stringify(base.s.getAllocations())}`);
+    }
+
+    // Spend $160 of this week's bucket, then delete all future occurrences.
+    const bucket = base.s.getAllocations()[0];
+    base.s.addTransaction("2026-09-09", {
+      amount: 160, type: "expense", description: "Shop",
+      settled: true, drawsFromAllocationId: bucket.id,
+    });
+    base.render();
+    const live = base.s.getTransactions()["2026-09-07"];
+    base.rm.deleteTransaction("2026-09-07", live.findIndex((t) => t.allocated === true), true);
+    // Renders are frequent, and the resurrection took one expansion pass to
+    // appear — a single render would have let the old bug through.
+    base.render();
+    base.render();
+
+    if (base.s.getRecurringTransactions()[0].endDate !== "2026-09-06") {
+      throw new Error("Delete-all-future must end the series the day before the occurrence");
+    }
+    if (base.s.getAllocations().length !== 0) {
+      throw new Error(`An ended series must offer no bucket: ${JSON.stringify(base.s.getAllocations())}`);
+    }
+    if (modalLiveDates(base.s).length !== 0) {
+      throw new Error(`Allocated modal still lists a bucket: ${JSON.stringify(modalLiveDates(base.s))}`);
+    }
+    if (base.cs.getReservedTotalOnOrBefore("2026-09-13") !== 0) {
+      throw new Error(
+        `An ended series must reserve nothing, held ${base.cs.getReservedTotalOnOrBefore("2026-09-13")}`
+      );
+    }
+    // The $160 already spent stays a real expense; only the bucket retires.
+    const spend = (base.s.getTransactions()["2026-09-09"] || []).find((t) => t.description === "Shop");
+    if (!spend || base.s._roundCents(spend.amount) !== 160) {
+      throw new Error("Forfeiting a bucket must not disturb what was drawn from it");
+    }
+    // And it must not come back on a fresh load, where nothing is cached.
+    base.s.saveData(true);
+    const reloaded = new TransactionStore();
+    reloaded.loadData();
+    const rrm = new RecurringTransactionManager(reloaded);
+    const rcs = new CalculationService(reloaded, rrm);
+    reloaded.closeOutExpiredAllocations();
+    [6, 7, 8, 9].forEach((m) => rrm.applyRecurringTransactions(2026, m));
+    rcs.updateMonthlyBalances(new FrozenDate());
+    if (reloaded.getAllocations().length !== 0 || modalLiveDates(reloaded).length !== 0) {
+      throw new Error("An ended series' bucket came back on reload");
+    }
+    console.log("✅ Delete-all-future retires the series' bucket instead of resurrecting the last one");
+
+    // A bucket already RESURRECTED by an older build is sitting in everyone's
+    // stored data — refusing to re-create it does nothing for them. The sweep
+    // has to retire what is already in the map, and tombstone it so the other
+    // devices follow instead of merging it back.
+    const stale = build();
+    const staleLive = stale.s.getTransactions()["2026-09-07"];
+    stale.rm.deleteTransaction("2026-09-07", staleLive.findIndex((t) => t.allocated === true), true);
+    stale.render();
+    stale.s.getTransactions()["2026-08-31"] = [
+      {
+        id: "resurrected-bucket",
+        amount: 200,
+        type: "expense",
+        description: "Weekly spending",
+        allocated: true,
+        settled: true,
+        recurringId: stale.s.getRecurringTransactions()[0].id,
+        modifiedInstance: true,
+        _lastModified: new Date().toISOString(),
+      },
+    ];
+    stale.rm.invalidateCache();
+    stale.render();
+    if (stale.s.getAllocations().length !== 0 || modalLiveDates(stale.s).length !== 0) {
+      throw new Error(
+        `A stored bucket of an ended series must be swept: ${JSON.stringify(stale.s.getAllocations())}`
+      );
+    }
+    if (stale.cs.getReservedTotalOnOrBefore("2026-09-13") !== 0) {
+      throw new Error("A swept bucket must stop reserving");
+    }
+    const tombstoned = (stale.s._deletedItems.transactions || []).some(
+      (e) => e && e.id === "resurrected-bucket"
+    );
+    if (!tombstoned) {
+      throw new Error("Forfeiting a persisted bucket must tombstone it for sync");
+    }
+    console.log("✅ A bucket left behind by an older build is swept and tombstoned");
+
+    // The narrow half: ending the series in the FUTURE (deleting an occurrence
+    // that has not happened yet) must leave the CURRENT period alone. A guard
+    // that keyed off "has an endDate" rather than "ended before today" would
+    // forfeit a bucket the user is still spending out of this week.
+    const ahead = build();
+    const future = ahead.s.getTransactions()["2026-09-21"];
+    ahead.rm.deleteTransaction("2026-09-21", future.findIndex((t) => t.allocated === true), true);
+    ahead.render();
+    ahead.render();
+    const stillLive = ahead.s.getAllocations();
+    if (stillLive.length !== 1 || stillLive[0].date !== "2026-09-07" || stillLive[0].remaining !== 200) {
+      throw new Error(`Ending a series ahead of today must keep this period live: ${JSON.stringify(stillLive)}`);
+    }
+    if (ahead.cs.getReservedTotalOnOrBefore("2026-09-13") !== 200) {
+      throw new Error("A still-running series must keep reserving its live bucket");
+    }
+    // endDate ON today is the boundary: the last period is live through it.
+    const boundary = build();
+    boundary.s.updateRecurringTransaction(boundary.s.getRecurringTransactions()[0].id, {
+      endDate: "2026-09-13",
+    });
+    boundary.rm.invalidateCache();
+    boundary.render();
+    boundary.render();
+    if (boundary.s.getAllocations().length !== 1) {
+      throw new Error("A series ending today keeps its bucket through today");
+    }
+    console.log("✅ A series ending today or later keeps its live bucket");
+  } finally {
+    global.Date = RealDate;
+  }
+}
+
 // Run the async network tests sequentially (shared global.fetch mock): TEST 32
 // first, then TEST 30, which prints the final banner.
 runTest48Savings()

@@ -1575,6 +1575,17 @@ class RecurringTransactionManager {
             // so never materialize an instance for a date already in the past.
             return;
           }
+          // A series whose endDate has already passed has no live period left
+          // — every occurrence it still owns is in the past, and no later one
+          // will arrive to supersede the newest. Materializing it would
+          // resurrect a bucket that already closed out, at its full definition
+          // amount rather than whatever was left of it, and reserve that money
+          // forever. "Delete all future occurrences" ends the series the day
+          // before the deleted occurrence, so it lands here every time; see
+          // closeOutExpiredAllocations, which retires the ones already stored.
+          if (typeof rt.endDate === "string" && rt.endDate && rt.endDate < todayStr) {
+            return;
+          }
           // Rolling allocation (no auto close-out): the live bucket is the
           // latest occurrence on/before today and must persist even though its
           // date is in the past. Earlier, superseded periods are forfeited by

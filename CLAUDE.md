@@ -11,8 +11,8 @@ CashFlow Calendar is an offline-first, single-page personal finance application 
 **No build process required.** Open `index.html` directly in a browser or serve via any static server.
 
 **Tests:** `npm test` (or run the two scripts directly with Node) — it must pass before every commit:
-- `node scripts/verify-logic.js` — 100 numbered integration tests over vm-loaded sources
-  (numbered up to TEST 101; the numbering has gaps where tests were merged).
+- `node scripts/verify-logic.js` — 98 numbered integration tests over vm-loaded sources
+  (numbered up to TEST 104; the numbering has gaps where tests were merged).
   Four of them are SWEEPS rather than scenarios, and they are the ones worth
   extending when something new is added:
     - TEST 93 puts a wrong-typed value in every field the app reads, one field
@@ -195,6 +195,20 @@ one `getAllocations` was still offering, with money already drawn from it. It
 was deleted and tombstoned (so every device followed), its reserve was released
 into every projected balance, and its drawers were left dangling. TEST 96.
 
+A series whose `endDate` is already past has **no live bucket at all** — every
+occurrence it still owns is behind us, so nothing will ever arrive to supersede
+the newest one and its reserve would be held forever. Two sites enforce that:
+`addRecurringTransactionToDate` refuses to materialize such a period, and
+`closeOutExpiredAllocations` forfeits the ones already stored. Both are needed,
+and the guard is `endDate < today`, never "has an endDate" — ending a series
+ahead of today must leave the current period live and drawable. This is what
+"delete all future occurrences" walks into: it ends the series the day BEFORE
+the deleted occurrence, which un-supersedes the previous period, and expansion
+then rebuilt that period from the definition — so a bucket the user had already
+spent down and watched close out came back at FULL price, drawable, listed in
+the Allocated modal, reserving money against every balance. Deleting that one
+walked the resurrection back another period. TEST 104.
+
 An expense's draw is a LIST, not a link. `allocationDraws` holds one row per
 bucket — `{ allocationId, amount, drawn, recurringId?, periodDate? }` — so one
 $200 run can take $130 from Groceries and $70 from Household. Three things about
@@ -311,7 +325,7 @@ local_last_sync, _backup_before_merge, calendar_view_mode
 
 - `styles.css` - CSS variables for theming (primary, accent, error colors)
 - `README.md` - Project documentation and feature overview
-- `scripts/verify-logic.js` - Standalone logic verification utility (100 tests)
+- `scripts/verify-logic.js` - Standalone logic verification utility (98 tests)
 - `scripts/verify-walk-parity.js` - Randomized balance-walk parity harness + source guard
 - `scripts/verify-ui.js` - Optional headless-Chromium UI harness (`npm run test:ui`)
 - `scripts/verify-sync.js` - Optional two-device cloud-sync harness (`npm run test:sync`)

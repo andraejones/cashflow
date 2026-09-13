@@ -762,6 +762,28 @@ Object.assign(TransactionStore.prototype, {
     const todayStr = this._todayString();
     let changed = false;
 
+    // A series whose endDate is already past has no live period left: every
+    // occurrence it still owns is in the past, and no later one will ever
+    // arrive to supersede the newest — so without this it would hold its
+    // reserve forever. This is exactly what "delete all future occurrences"
+    // used to leave behind. That action ends the series the day before the
+    // deleted occurrence, which un-supersedes the PREVIOUS period, and
+    // expansion then re-materializes that period AT ITS FULL DEFINITION
+    // AMOUNT — a bucket the user had already spent from and watched close out
+    // weeks earlier came back at full price, drawable, in the Allocated
+    // Transactions modal, reserving money against every projected balance.
+    // Deleting that one just walked the resurrection back another period.
+    // RecurringTransactionManager.addRecurringTransactionToDate refuses to
+    // re-create these; this sweep retires the ones already in the map.
+    const endedSeries = new Set();
+    this.recurringTransactions.forEach((rt) => {
+      if (!rt || rt.allocated !== true || rt.autoCloseout === true) return;
+      // Nothing coerces endDate on the way in from an import or a cloud merge.
+      if (typeof rt.endDate === "string" && rt.endDate && rt.endDate < todayStr) {
+        endedSeries.add(rt.id);
+      }
+    });
+
     // Per rolling series, the live bucket is the latest instance dated on/before
     // today. Earlier instances of that series are superseded.
     const liveRollingDate = new Map();
@@ -784,6 +806,11 @@ Object.assign(TransactionStore.prototype, {
           // reserve was released into every projected balance, and the expenses
           // billed against it were left dangling. On every device.
           if (this.isTransactionSkipped(date, t.recurringId)) {
+            return;
+          }
+          // An ended series has no live bucket at all (see endedSeries above),
+          // so none of its instances may claim the role.
+          if (endedSeries.has(t.recurringId)) {
             return;
           }
           const cur = liveRollingDate.get(t.recurringId);
@@ -809,7 +836,7 @@ Object.assign(TransactionStore.prototype, {
           forfeit = (t.closeoutDate || date) < todayStr;
         } else if (t.recurringId) {
           const live = liveRollingDate.get(t.recurringId);
-          forfeit = !!live && date < live;
+          forfeit = endedSeries.has(t.recurringId) || (!!live && date < live);
         }
         if (!forfeit) continue;
 
