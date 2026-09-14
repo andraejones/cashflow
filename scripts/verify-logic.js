@@ -8880,44 +8880,63 @@ async function runAwaitBoundaryRaceTest() {
   }
 }
 
-// TEST 96: a SKIPPED occurrence never supersedes a live allocation bucket.
+// TEST 96: a SKIPPED occurrence ENDS the period before it and holds nothing.
 //
-// "Which instance of a rolling allocation series is live?" is answered in four
-// places: getAllocations (the drawable list), _reservedTotalIndex (the money the
-// anchors hold back), _collapseSupersededRollingAllocations and
-// closeOutExpiredAllocations (the two sweeps that retire old periods), plus the
-// Allocated modal's own list. The first two excluded SKIPPED occurrences — a
-// skipped period set nothing aside, so it holds no reserve — and the sweeps did
-// not. So skipping this period made the sweeps treat the skipped date as "live"
-// and FORFEIT the previous bucket: the one getAllocations was still offering,
-// with money already drawn from it. It was deleted and tombstoned (so every
-// device followed), its remaining reserve was released into every projected
-// balance, and the expenses billed against it were left dangling.
-console.log("TEST 96: A Skipped Occurrence Never Supersedes A Live Bucket");
+// "Which period of a rolling allocation series is current?" and "does that
+// period hold money?" are different questions, and six readers have to answer
+// both the same way: getAllocations (the drawable list), _reservedTotalIndex
+// (what the anchors hold back), closeOutExpiredAllocations and
+// _collapseSupersededRollingAllocations (the sweeps that retire old periods),
+// addRecurringTransactionToDate (which refuses to re-materialize a retired
+// one), and the Allocated modal's own scan.
+//
+// The rule used to be "the latest UNSKIPPED occurrence on/before today", which
+// answered both questions at once and got the first one wrong: skipping this
+// week handed the role back to LAST week's bucket, so a skip quietly EXTENDED
+// the previous period's reserve instead of releasing it — the money stayed
+// committed against every projected balance for another period, with the
+// skipped row on screen implying the opposite. Skipping that bucket in turn
+// promoted the one before it, at its full definition amount, and so on back to
+// the series' start date.
+//
+// Now the newest occurrence on/before today wins whether or not it is skipped;
+// a skipped winner simply offers nothing. What was already drawn from the
+// bucket it retires stays a real expense, exactly as on an ordinary turnover.
+console.log("TEST 96: A Skipped Occurrence Ends The Period Before It");
 {
   const now = new Date();
-  const Y = now.getFullYear();
-  const M = now.getMonth();
-  const D = now.getDate();
-  const ds = (y, m, d) =>
-    `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-  const todayStr = ds(Y, M, D);
+  const dayMs = 86400000;
+  const ds = (offset) => Utils.formatDateString(new Date(now.getTime() + offset * dayMs));
+  const todayStr = ds(0);
+  const lastPeriod = ds(-7);
 
-  const setup = () => {
+  // Explicit rows rather than expansion, so the two periods under test are
+  // pinned to known dates regardless of what day the suite runs on.
+  const setup = ({ drawn = false, skipToday = false } = {}) => {
     localStorage.clear();
     const stamp = new Date().toISOString();
     const store = new TransactionStore();
     store.resetData();
     store.importData({
       transactions: {
-        [ds(Y, M, 1)]: [
-          { id: "x", amount: 2000, type: "balance", description: "Ending Balance", _lastModified: stamp },
+        [ds(-30)]: [
+          { id: "anchor", amount: 2000, type: "balance", description: "Ending Balance", _lastModified: stamp },
+        ],
+        [lastPeriod]: [
+          { id: "b1", amount: 200, type: "expense", description: "Grocery Bucket",
+            recurringId: "rb", allocated: true, settled: true,
+            modifiedInstance: true, _lastModified: stamp },
+        ],
+        [todayStr]: [
+          { id: "b2", amount: 200, type: "expense", description: "Grocery Bucket",
+            recurringId: "rb", allocated: true, settled: true,
+            modifiedInstance: true, _lastModified: stamp },
         ],
       },
       monthlyBalances: {},
       recurringTransactions: [
         { id: "rb", amount: 200, type: "expense", description: "Grocery Bucket",
-          recurrence: "weekly", startDate: ds(Y, M - 1, 1),
+          recurrence: "weekly", startDate: ds(-30),
           allocated: true, settled: true, _lastModified: stamp },
       ],
       debts: [], cashInfusions: [], savingsGoals: [],
@@ -8927,115 +8946,157 @@ console.log("TEST 96: A Skipped Occurrence Never Supersedes A Live Bucket");
     });
     const manager = new RecurringTransactionManager(store);
     const calc = new CalculationService(store, manager);
+    if (drawn) {
+      // Spend $50 of LAST period's bucket, billed against it.
+      store.addTransaction(ds(-6), {
+        amount: 50, type: "expense", description: "Groceries",
+        settled: true, drawsFromAllocationId: "b1",
+      });
+    }
+    // Skipped BEFORE the first render, which is how it happens in the app: the
+    // occurrence is already on screen when the user skips it. Skipping after a
+    // render would test nothing, because the ordinary turnover would already
+    // have retired last period's bucket.
+    if (skipToday) {
+      manager.toggleSkipTransaction(todayStr, "rb");
+    }
     const render = () => {
       store.closeOutExpiredAllocations();
       store.rollForwardAllocations();
-      manager.applyRecurringTransactions(Y, M);
-      calc.updateMonthlyBalances(new Date(Y, M, 1, 12, 0, 0));
+      calc.invalidateCache();
+      calc.updateMonthlyBalances(new Date());
     };
     render();
     return { store, manager, calc, render };
   };
   const bucketOf = (store) => store.getAllocations().find((a) => a.recurringId === "rb");
-
-  // (a) A bucket that has been DRAWN from must survive a skipped later period.
-  {
-    const { store, manager, calc, render } = setup();
-    const live = bucketOf(store);
-    if (!live) throw new Error("setup: no live bucket materialized");
-    store.addTransaction(todayStr, {
-      amount: 50, type: "expense", description: "Groceries",
-      settled: true, drawsFromAllocationId: live.id,
-    });
-    render();
-    const drawn = bucketOf(store);
-    if (!drawn || Math.abs(drawn.remaining - 150) > 0.005) {
-      throw new Error(`setup: the draw did not debit the bucket (${drawn && drawn.remaining})`);
-    }
-    const drawnDate = drawn.date;
-    const drawnId = drawn.id;
-
-    // The next period lands and the user skips it — "we didn't set money aside".
+  // Transcribed from js/app.js showAllocatedTransactions — the modal elects the
+  // live rolling bucket itself, so it has to be checked, not assumed.
+  const modalListsDate = (store) => {
     const transactions = store.getTransactions();
-    const nextDate = ds(Y, M, Math.min(28, Number(drawnDate.slice(8)) + 1));
-    (transactions[nextDate] = transactions[nextDate] || []).push({
-      amount: 200, type: "expense", description: "Grocery Bucket",
-      recurringId: "rb", allocated: true, settled: true,
+    const live = new Map();
+    Object.keys(transactions).forEach((date) => {
+      if (date > todayStr) return;
+      transactions[date].forEach((t) => {
+        if (t.hidden === true || t.allocated !== true) return;
+        if (t.autoCloseout === true || !t.recurringId) return;
+        const cur = live.get(t.recurringId);
+        if (!cur || date > cur) live.set(t.recurringId, date);
+      });
     });
-    manager.toggleSkipTransaction(nextDate, "rb");
+    const liveDate = live.get("rb");
+    if (!liveDate) return null;
+    return store.isTransactionSkipped(liveDate, "rb") ? null : liveDate;
+  };
 
-    const tombstonesBefore = store._deletedItems.transactions.length;
-    const changed = store.closeOutExpiredAllocations();
-    const after = bucketOf(store);
-    if (!after || after.date !== drawnDate) {
-      throw new Error(
-        `a skipped later occurrence forfeited the drawn-from bucket (was ${drawnDate}, now ${after && after.date})`
-      );
+  // (a) Skipping this period releases what LAST period had left, even when it
+  //     had been drawn from — and the draw survives as an ordinary expense.
+  {
+    // Baseline, same data without the skip: the ordinary turnover. Today's
+    // bucket is live at its own $200, last period's $150 remainder was
+    // released when today arrived, and the $50 spent stays spent.
+    {
+      const plain = setup({ drawn: true });
+      const live = bucketOf(plain.store);
+      if (!live || live.date !== todayStr || Math.abs(live.remaining - 200) > 0.005) {
+        throw new Error(`baseline: today's bucket should be live at 200, got ${JSON.stringify(live)}`);
+      }
+      if (Math.abs(plain.calc.getReservedTotalOnOrBefore(todayStr) - 200) > 0.005) {
+        throw new Error("baseline: today's bucket should reserve 200");
+      }
+      // 2000 anchored - 50 spent - 200 reserved by the live bucket.
+      if (Math.abs(plain.calc.getRunningBalanceForDate(todayStr) - 1750) > 0.005) {
+        throw new Error(`baseline balance was ${plain.calc.getRunningBalanceForDate(todayStr)}, expected 1750`);
+      }
+      plain.store.cancelPendingSave();
     }
-    if (Math.abs(after.remaining - 150) > 0.005) {
-      throw new Error(`the drawn-from bucket's remaining changed to ${after.remaining}`);
-    }
-    if (!store.findTransactionById(drawnId)) {
-      throw new Error("the drawn-from bucket row was deleted outright");
-    }
-    if (store._deletedItems.transactions.length > tombstonesBefore) {
-      throw new Error("the sweep tombstoned the live bucket — every device would follow");
-    }
-    void changed;
 
-    // ...and the collapse pass must agree with the sweep.
+    const { store, calc, render } = setup({ drawn: true, skipToday: true });
     render();
-    const afterRender = bucketOf(store);
-    if (!afterRender || afterRender.date !== drawnDate) {
-      throw new Error("a render collapsed the drawn-from bucket away");
+
+    if (bucketOf(store)) {
+      throw new Error(`a skipped period must offer no bucket, got ${JSON.stringify(bucketOf(store))}`);
     }
-    // The reserve the anchors hold back must match the drawable bucket.
+    if (modalListsDate(store) !== null) {
+      throw new Error(`the Allocated modal still lists ${modalListsDate(store)}`);
+    }
     const reserved = calc.getReservedTotalOnOrBefore(todayStr);
-    if (Math.abs(reserved - afterRender.remaining) > 0.005) {
-      throw new Error(
-        `the reserve index (${reserved}) disagrees with the drawable bucket (${afterRender.remaining})`
-      );
+    if (Math.abs(reserved) > 0.005) {
+      throw new Error(`a skipped period must reserve nothing, held ${reserved}`);
+    }
+    // Last period's $150 remainder returns to the balance: 2000 anchored
+    // - 50 spent, with nothing reserved. Under the old rule the skip handed
+    // the role back to that bucket and the $150 stayed committed (1800).
+    const balanceAfter = calc.getRunningBalanceForDate(todayStr);
+    if (Math.abs(balanceAfter - 1950) > 0.005) {
+      throw new Error(`skipping should release the retired bucket: balance ${balanceAfter}, expected 1950`);
+    }
+    // ...while the $50 already spent stays spent.
+    const spend = (store.getTransactions()[ds(-6)] || []).find((t) => t.description === "Groceries");
+    if (!spend || Math.abs(spend.amount - 50) > 0.005) {
+      throw new Error("the draw must survive its bucket being retired");
+    }
+    // The retired bucket was persisted, so every device must follow.
+    if (store.findTransactionById("b1")) {
+      throw new Error("the retired bucket row is still in the map");
+    }
+    if (!(store._deletedItems.transactions || []).some((e) => e && e.id === "b1")) {
+      throw new Error("retiring a persisted bucket must tombstone it for sync");
     }
     store.cancelPendingSave();
   }
 
-  // (b) Skipping the LATEST period falls back to the previous one, which still
-  //     holds its reserve — and every reader must say the same thing.
+  // (b) The retired period must not come BACK — not on a later render, not
+  //     through expansion, and not by skipping it too (which used to walk the
+  //     live bucket backwards one period at a time, forever). What this half
+  //     observes is the SWEEP: with the sweep correct, a row the expansion
+  //     guard or the collapse pass wrongly re-created is deleted again before
+  //     anything reads it, so reverting either of those two alone does not
+  //     move a figure here. They are kept in step with the same rule anyway —
+  //     the cost of disagreeing is churn now and a wrong reserve the moment a
+  //     cached month is replayed without a sweep in between (see TEST 87).
   {
-    const { store, manager, calc, render } = setup();
-    const transactions = store.getTransactions();
-    const dates = Object.keys(transactions)
-      .filter((d) => d <= todayStr)
-      .filter((d) => transactions[d].some((t) => t.recurringId === "rb"))
-      .sort();
-    const latest = dates[dates.length - 1];
-    if (!latest) throw new Error("setup: no past bucket instance");
-    manager.toggleSkipTransaction(latest, "rb");
+    const { store, manager, calc, render } = setup({ skipToday: true });
     render();
-
-    const live = bucketOf(store);
-    if (!live) {
-      throw new Error("skipping this period left no drawable bucket at all");
-    }
-    if (live.date === latest) {
-      throw new Error("a skipped occurrence was offered as the drawable bucket");
-    }
-    const reserved = calc.getReservedTotalOnOrBefore(todayStr);
-    if (Math.abs(reserved - live.remaining) > 0.005) {
-      throw new Error(
-        `the reserve index (${reserved}) disagrees with the drawable bucket (${live.remaining})`
-      );
-    }
-    // Stable across renders.
+    manager.applyRecurringTransactions(now.getFullYear(), now.getMonth());
     render();
-    const again = bucketOf(store);
-    if (!again || again.date !== live.date || Math.abs(again.remaining - live.remaining) > 0.005) {
-      throw new Error("the live bucket moved on a repeat render");
+    render();
+    if (bucketOf(store)) {
+      throw new Error(`expansion resurrected a retired period: ${JSON.stringify(bucketOf(store))}`);
+    }
+    if (Math.abs(calc.getReservedTotalOnOrBefore(todayStr)) > 0.005) {
+      throw new Error("a resurrected period is reserving money");
+    }
+    const stillThere = Object.keys(store.getTransactions())
+      .filter((d) => d < todayStr)
+      .filter((d) => store.getTransactions()[d].some((t) => t.recurringId === "rb"));
+    if (stillThere.length > 0) {
+      throw new Error(`retired periods left in the map: ${stillThere.join(",")}`);
     }
     store.cancelPendingSave();
   }
 
-  console.log("✅ Skipped periods hold no reserve and retire nothing; all five readers agree");
+  // (c) Unskipping puts THIS period's bucket back — its own, not the retired
+  //     one's leftovers.
+  {
+    const { store, manager, calc, render } = setup({ skipToday: true });
+    render();
+    manager.toggleSkipTransaction(todayStr, "rb");
+    render();
+    const back = bucketOf(store);
+    if (!back || back.date !== todayStr || Math.abs(back.remaining - 200) > 0.005) {
+      throw new Error(`unskipping must restore this period's bucket: ${JSON.stringify(back)}`);
+    }
+    if (Math.abs(calc.getReservedTotalOnOrBefore(todayStr) - 200) > 0.005) {
+      throw new Error("the reserve index disagrees with the restored bucket");
+    }
+    if (modalListsDate(store) !== todayStr) {
+      throw new Error("the Allocated modal disagrees with the restored bucket");
+    }
+    store.cancelPendingSave();
+  }
+
+  console.log("✅ A skipped period retires the one before it, holds nothing, and never walks backwards");
 }
 
 // TEST 97: the snowball's daily floor is normalized wherever it arrives from.

@@ -182,18 +182,30 @@ balance (TEST 86). And a single unparseable KEY used to become an Invalid Date,
 which every later `<`/`>` silently ignored, collapsing the whole table to one
 `"NaN-NaN"` entry (TEST 84).
 
-"Which instance of a rolling allocation series is LIVE?" is answered in five
-places — `getAllocations` (the drawable list), `_reservedTotalIndex` (what the
-anchors hold back), `closeOutExpiredAllocations` and
-`_collapseSupersededRollingAllocations` (the two sweeps that retire old
-periods), plus the Allocated modal's list — and **all five must apply the same
-rule: the latest occurrence dated on/before today that is NOT skipped.** A
-skipped period set nothing aside, so it holds no reserve and supersedes nothing.
-The first two excluded skips and the rest did not, so skipping this period made
-the sweeps treat the skipped date as live and FORFEIT the previous bucket: the
-one `getAllocations` was still offering, with money already drawn from it. It
-was deleted and tombstoned (so every device followed), its reserve was released
-into every projected balance, and its drawers were left dangling. TEST 96.
+"Which instance of a rolling allocation series is LIVE?" is really two
+questions, and conflating them is what went wrong twice. **Which period is
+CURRENT is decided by the calendar advancing: the latest occurrence dated
+on/before today, skipped or not. Whether that period HOLDS money is decided by
+the skip: a skipped period set nothing aside, so it reserves nothing and offers
+no draws — and it does not fall back to the period before it, which ended when
+this occurrence arrived.** Six readers must apply both halves identically:
+`getAllocations` (the drawable list), `_reservedTotalIndex` (what the anchors
+hold back), `closeOutExpiredAllocations` and
+`_collapseSupersededRollingAllocations` (the sweeps that retire old periods),
+`addRecurringTransactionToDate` (which must not re-materialize a retired
+period), and the Allocated modal's list.
+
+The first version had the sweeps electing the latest occurrence and the readers
+electing the latest UNSKIPPED one, so skipping this period made the sweeps
+forfeit the previous bucket while `getAllocations` was still offering it for
+draws — deleted and tombstoned on every device, its reserve released, its
+drawers dangling. The fix moved everything to "latest unskipped", which agreed
+but answered the wrong question: a skip then handed the role BACK to last
+period's bucket, silently extending its reserve into a period the user had
+explicitly declined, and skipping that one promoted the one before it, at full
+definition amount, back to the start date. Hence the split above. Whatever was
+already drawn from a retired bucket stays a real expense, exactly as on an
+ordinary turnover. TEST 96.
 
 A series whose `endDate` is already past has **no live bucket at all** — every
 occurrence it still owns is behind us, so nothing will ever arrive to supersede

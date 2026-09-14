@@ -720,12 +720,10 @@ class RecurringTransactionManager {
         ) {
           continue;
         }
-        // A skipped occurrence holds no reserve, so it cannot be the live
-        // bucket and cannot supersede an earlier one. getAllocations and the
-        // reserve index already exclude it; this rule must agree or the two
-        // halves disagree about which bucket is live (see
-        // closeOutExpiredAllocations for what that cost).
-        if (this.isTransactionSkipped(date, t.recurringId)) continue;
+        // A skipped occurrence still ends the period before it (it just holds
+        // no money of its own) — same rule as getAllocations and
+        // closeOutExpiredAllocations, which is what keeps a skip from handing
+        // the role back to the previous bucket.
         const cur = liveDate.get(t.recurringId);
         if (!cur || date > cur) liveDate.set(t.recurringId, date);
         if (!t.id && !t.modifiedInstance) {
@@ -1603,10 +1601,10 @@ class RecurringTransactionManager {
             const siblings = transactions[d];
             if (
               Array.isArray(siblings) &&
-              // A skipped sibling set nothing aside, so it does not supersede
-              // this period (same rule as getAllocations / the reserve index /
-              // the collapse pass).
-              !this.isTransactionSkipped(d, rt.id) &&
+              // A skipped sibling supersedes too: the period turned over, it
+              // simply set nothing aside (same rule as getAllocations / the two
+              // sweeps). Excluding skips here let a skipped period re-materialize
+              // the one before it, at its full definition amount, every render.
               siblings.some(
                 (t) => t.recurringId === rt.id && t.allocated === true
               )

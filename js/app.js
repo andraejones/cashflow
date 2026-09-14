@@ -389,10 +389,11 @@ class CashflowApp {
       transactions[date].forEach((t) => {
         if (t.hidden === true || t.allocated !== true) return;
         if (t.autoCloseout === true || !t.recurringId) return;
-        // Skipped occurrences hold no reserve, so they are not the live bucket
-        // — matching getAllocations, the reserve index, and both supersede
-        // sweeps. Listing one here would show a bucket that cannot be drawn.
-        if (this.store.isTransactionSkipped(date, t.recurringId)) return;
+        // Skipped occurrences win this election like any other — they end the
+        // previous period — they just hold no money. The row below drops a
+        // skipped winner from the list rather than falling back to the bucket
+        // before it, which is no longer live. Same rule as getAllocations, the
+        // reserve index, and both supersede sweeps.
         const cur = liveRollingDate.get(t.recurringId);
         if (!cur || date > cur) liveRollingDate.set(t.recurringId, date);
       });
@@ -412,7 +413,11 @@ class CashflowApp {
             : undefined;
         if (liveDate) {
           if (date === liveDate && !shownRolling.has(t.recurringId)) {
-            items.push({ date, transaction: t });
+            // A skipped current period set nothing aside: show nothing for the
+            // series until its next occurrence, and never the period before it.
+            if (!this.store.isTransactionSkipped(date, t.recurringId)) {
+              items.push({ date, transaction: t });
+            }
             shownRolling.add(t.recurringId);
           }
           return;

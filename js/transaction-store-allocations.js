@@ -57,12 +57,16 @@ Object.assign(TransactionStore.prototype, {
         // drawn before its own date. So for both flavors the active instance is
         // the latest one dated on/before refStr.
         if (date > refStr) return;
-        // A skipped occurrence is a non-event in the balance walk, so its
-        // bucket holds no reserve — never offer it for draws, or the draw
-        // dropdown (and the free-funds figure, which resolves through here)
-        // would show money that isn't actually set aside.
-        const skippedIds = this.skippedTransactions[date];
-        if (skippedIds && skippedIds.includes(t.recurringId)) return;
+        // SKIPPED occurrences still take part in this election, and that is the
+        // whole point. Being current and holding money are different questions:
+        // the period turns over when a newer occurrence arrives (skipped or
+        // not), while a skipped period sets nothing aside. Conflating them —
+        // electing "the latest UNSKIPPED occurrence" — meant skipping this week
+        // handed the role back to LAST week's bucket, so a skip quietly
+        // extended the previous period's money instead of releasing it, and
+        // skipping that one in turn walked back another period, forever.
+        // A skipped winner therefore ends the previous bucket and offers
+        // nothing in its place; it is dropped from the result below.
         const existing = recurringBySeries.get(t.recurringId);
         const candidate = {
           // Un-materialized instances have no id yet — use a synthetic key the
@@ -73,13 +77,24 @@ Object.assign(TransactionStore.prototype, {
           remaining: this._roundCents(t.amount),
           recurring: true,
           recurringId: t.recurringId,
+          skipped: this.isTransactionSkipped(date, t.recurringId) === true,
         };
         if (!existing || date > existing.date) {
           recurringBySeries.set(t.recurringId, candidate);
         }
       });
     });
-    const result = oneTime.concat(Array.from(recurringBySeries.values()));
+    const live = [];
+    recurringBySeries.forEach((candidate) => {
+      // The winning period was skipped: nothing was set aside, so the series
+      // has no drawable bucket until its next occurrence. It does NOT fall
+      // back to the period before it — that one ended when this occurrence
+      // arrived, and its reserve was released.
+      if (candidate.skipped) return;
+      delete candidate.skipped;
+      live.push(candidate);
+    });
+    const result = oneTime.concat(live);
     result.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     return result;
   },
@@ -796,20 +811,17 @@ Object.assign(TransactionStore.prototype, {
           t.recurringId &&
           t.type === "expense"
         ) {
-          // A SKIPPED occurrence set no money aside, so it holds no reserve and
-          // cannot supersede anything — getAllocations and the reserve index
-          // already exclude it, and this rule has to agree with them or the two
-          // halves fight. They did: skipping this week's bucket made this sweep
-          // treat the skipped date as "live" and FORFEIT the previous bucket —
-          // the one getAllocations was still offering for draws, with money
-          // already drawn from it. It was deleted and tombstoned, its remaining
-          // reserve was released into every projected balance, and the expenses
-          // billed against it were left dangling. On every device.
-          if (this.isTransactionSkipped(date, t.recurringId)) {
-            return;
-          }
-          // An ended series has no live bucket at all (see endedSeries above),
-          // so none of its instances may claim the role.
+          // A SKIPPED occurrence takes part in this election and can win it.
+          // Superseding is about the period turning over; holding money is a
+          // separate question that getAllocations and the reserve index answer
+          // by excluding skips. So a skipped winner forfeits the period before
+          // it and offers nothing in its place — which is what skipping means:
+          // no money set aside for this period, and last period's money
+          // released rather than quietly extended into this one. Whatever was
+          // already drawn from the forfeited bucket stays a real expense, the
+          // same as on any ordinary turnover. All six readers of "which period
+          // is current" must agree on this, or a bucket gets deleted here while
+          // another reader still offers it for draws.
           if (endedSeries.has(t.recurringId)) {
             return;
           }
