@@ -825,7 +825,8 @@ class CalendarUI {
               t.recurringId &&
               this.recurringManager.isTransactionSkipped(d.dateString, t.recurringId);
             const sign = t.type === "balance" ? "=" : t.type === "income" ? "+" : "-";
-            const amountClass = t.type === "balance" ? "ending-balance" : t.type;
+            const amountClass = t.type === "balance" ? "ending-balance" :
+              t.type === "income" ? "income" : "expense";
             const fallback =
               t.type === "balance" ? "Ending Balance" : t.type === "income" ? "Income" : "Expense";
             const desc = (typeof t.description === "string" && t.description.trim())

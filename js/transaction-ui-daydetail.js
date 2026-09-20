@@ -645,7 +645,7 @@ Object.assign(TransactionUI.prototype, {
               const loc = txnId ? this.store.findTransactionById(txnId) : null;
               if (loc) {
                 this.store.deleteTransaction(loc.date, loc.index);
-              } else if (this.store.getTransactions()[date]?.[index]) {
+              } else if (!txnId && this.store.getTransactions()[date]?.[index]) {
                 this.store.deleteTransaction(date, index);
               } else {
                 Utils.showNotification("Allocation no longer exists", "error");
@@ -672,7 +672,7 @@ Object.assign(TransactionUI.prototype, {
               let resolvedIndex = txnId
                 ? current.findIndex((x) => x.id === txnId)
                 : -1;
-              if (resolvedIndex === -1) {
+              if (!txnId) {
                 resolvedIndex = index;
               }
               const target = current[resolvedIndex];

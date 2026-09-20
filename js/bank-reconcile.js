@@ -315,6 +315,9 @@ class BankReconcileUI {
     const day = parseInt(m[2], 10);
     const year = parseInt(m[3], 10);
     if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+    const parsed = new Date(0);
+    parsed.setUTCFullYear(year, month - 1, day);
+    if (parsed.getUTCMonth() !== month - 1 || parsed.getUTCDate() !== day) return null;
     return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
   }
 
@@ -1596,8 +1599,9 @@ class BankReconcileUI {
     if (transaction.type === "expense") {
       transaction.settled = settled !== false;
     }
-    this.store.addTransaction(bankRow.date, transaction);
-    Utils.showNotification(`Added ${transaction.description} on ${this._shortDate(bankRow.date)}`);
+    const date = settled !== false ? bankRow.postedDate || bankRow.date : bankRow.date;
+    this.store.addTransaction(date, transaction);
+    Utils.showNotification(`Added ${transaction.description} on ${this._shortDate(date)}`);
     this._afterMutation();
   }
 
@@ -1828,8 +1832,9 @@ class BankReconcileUI {
     const list = this.store.getTransactions()[appItem.date];
     if (!Array.isArray(list)) return -1;
     if (appItem.id) {
-      const byId = list.findIndex((t) => t.id === appItem.id);
-      if (byId !== -1) return byId;
+      // A deleted identified row must not fall back to a different purchase
+      // with the same amount and description while this report is still open.
+      return list.findIndex((t) => t.id === appItem.id);
     }
     return list.findIndex(
       (t) =>

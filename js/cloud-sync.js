@@ -634,14 +634,14 @@ class CloudSync {
 
     // Add remote items first
     remoteItems.forEach(item => {
-      if (item.id && !deletedSet.has(item.id)) {
+      if (item && item.id && !deletedSet.has(item.id)) {
         merged.set(item.id, item);
       }
     });
 
     // Add/update with local items (newer wins)
     localItems.forEach(item => {
-      if (!item.id) return;
+      if (!item || !item.id) return;
       if (deletedSet.has(item.id)) return;
 
       const existing = merged.get(item.id);
@@ -1331,6 +1331,8 @@ class CloudSync {
           if (checkResponse.status === 404) {
             // Gist was deleted, will be handled below
             this._lastKnownETag = null;
+          } else {
+            throw new Error(`Could not check cloud changes: HTTP ${checkResponse.status}. Upload cancelled.`);
           }
         }
         // If 304 (notModified), no merge needed, proceed with local data

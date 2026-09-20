@@ -95,7 +95,7 @@ Object.assign(TransactionUI.prototype, {
       txnId && transactions[date]
         ? transactions[date].findIndex((x) => x.id === txnId)
         : -1;
-    if (liveIndex === -1) {
+    if (!txnId) {
       liveIndex = index;
     }
     if (!transactions[date] || !transactions[date][liveIndex]) {

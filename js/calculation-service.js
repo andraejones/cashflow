@@ -54,6 +54,7 @@ class CalculationService {
   // results unchanged. See TEST 78.
   invalidateReservedIndex() {
     this._reservedIndex = null;
+    this._cachedReservedTotals = {};
   }
 
   // Prefix-summed reserve totals, built once per cache generation.
@@ -664,6 +665,14 @@ class CalculationService {
     if (this._cachedSummaries[monthKey]) {
       return this._cachedSummaries[monthKey];
     }
+
+    // Expanding a previously unseen month can add recurring income/expenses.
+    // Do it before summing the rows so totals and balances share one snapshot.
+    let monthlyBalances = this.store.getMonthlyBalances();
+    if (!monthlyBalances[monthKey]) {
+      this.updateMonthlyBalances(new Date(year, month, 1, 12, 0, 0));
+      monthlyBalances = this.store.getMonthlyBalances();
+    }
     let monthIncome = 0;
     let monthExpense = 0;
     const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -675,12 +684,6 @@ class CalculationService {
       monthExpense = this.roundToCents(monthExpense + dailyTotals.expense);
     }
 
-    let monthlyBalances = this.store.getMonthlyBalances();
-    if (!monthlyBalances[monthKey]) {
-      const viewedDate = new Date(year, month, 1, 12, 0, 0);
-      this.updateMonthlyBalances(viewedDate);
-      monthlyBalances = this.store.getMonthlyBalances();
-    }
     let startingBalance = 0;
     let endingBalance = 0;
 

@@ -281,6 +281,11 @@ class RecurringTransactionManager {
 
 
   getNthDayOfMonth(year, month, dayOfWeek, occurrence) {
+    if (!Number.isInteger(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6 ||
+        !Number.isInteger(occurrence) || occurrence === 0 || Math.abs(occurrence) > 5 ||
+        !Number.isFinite(new Date(year, month, 1).getTime())) {
+      return null;
+    }
     if (occurrence > 0) {
       let date = new Date(year, month, 1);
       while (date.getDay() !== dayOfWeek) {
@@ -1164,6 +1169,7 @@ class RecurringTransactionManager {
     if (isLastDayOfMonthSpecial) {
       secondDate = lastDayOfMonth;
     }
+
     let occurrenceCount = 0;
     if (maxOccurrences && startDate < startOfMonth) {
       const monthsDifference =
@@ -1187,6 +1193,11 @@ class RecurringTransactionManager {
         occurrenceCount = monthsDifference * 2 - 2;
       }
     }
+    // Clamp only after counting the start month's occurrences, whose days
+    // must not depend on the viewing month's length. February still owes a
+    // payment scheduled for the 30th; Date overflow would skip it entirely.
+    firstDate = Math.min(firstDate, lastDayOfMonth);
+    secondDate = Math.min(secondDate, lastDayOfMonth);
     if (
       (!maxOccurrences || occurrenceCount < maxOccurrences) &&
       (!endDate || new Date(year, month, firstDate, 12, 0, 0) <= endDate) &&

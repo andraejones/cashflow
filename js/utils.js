@@ -415,7 +415,7 @@ const Utils = {
           event.preventDefault();
           handleClose();
         }
-        if (event.key === "Enter" && showInput) {
+        if (event.key === "Enter" && showInput && event.target === input) {
           event.preventDefault();
           handleConfirm();
         }

@@ -366,6 +366,9 @@ class SearchUI {
     });
 
     for (const rt of recurringTransactions) {
+      // Imported definitions can lack a usable start date. The calendar skips
+      // those series; search must do the same before sorting or rendering.
+      if (!Utils.parseDateString(rt.startDate)) continue;
       if (foundRecurringIds.has(rt.id)) continue;
       // "Delete this and future occurrences" on the first occurrence retires a
       // series by setting endDate to the day before startDate — an empty

@@ -10108,9 +10108,194 @@ console.log("TEST 104: An Ended Allocation Series Leaves No Live Bucket");
   }
 }
 
+console.log('TEST 109: Fresh Monthly Totals And Invalidated Reserve Lookups');
+{
+  localStorage.clear();
+  const s = new TransactionStore();
+  const rm = new RecurringTransactionManager(s);
+  const cs = new CalculationService(s, rm);
+  const assert = require('assert');
+  s.addRecurringTransaction({ id: 'monthly-income', type: 'income', amount: 100,
+    startDate: '2026-09-01', recurrence: 'monthly' });
+  assert.strictEqual(cs.calculateMonthlySummary(2026, 8).income, 100);
+  assert.strictEqual(cs.getReservedTotalOnOrBefore('2026-09-20'), 0);
+  s.addTransaction('2026-09-20', { type: 'expense', allocated: true, amount: 25 });
+  cs.invalidateReservedIndex();
+  assert.strictEqual(cs.getReservedTotalOnOrBefore('2026-09-20'), 25);
+  s.cancelPendingSave();
+}
+
+console.log('TEST 108: Recurring Auto-Close-Out Buckets Respect The Expense Date');
+{
+  localStorage.clear();
+  const s = new TransactionStore();
+  const assert = require('assert');
+  s.transactions = { '2026-09-20': [{ id: 'daily-bucket', recurringId: 'daily-series',
+    type: 'expense', amount: 50, allocated: true, autoCloseout: true }] };
+  assert.strictEqual(s.getAllocations('2026-09-20').length, 1);
+  assert.strictEqual(s.getAllocations('2026-09-21').length, 0);
+  s.transactions['2026-09-20'][0].closeoutDate = '2026-09-22';
+  assert.strictEqual(s.getAllocations('2026-09-22').length, 1);
+  assert.strictEqual(s.getAllocations('2026-09-23').length, 0);
+}
+
+console.log('TEST 106: Invalid Weekdays And Short-Month Recurrences');
+{
+  localStorage.clear();
+  const s = new TransactionStore();
+  const rm = new RecurringTransactionManager(s);
+  const assert = require('assert');
+  // A VM timeout makes a regression fail instead of hanging the test runner.
+  const context = vm.createContext({ rm });
+  for (const weekday of [-1, 7, 1.5, '1']) {
+    context.weekday = weekday;
+    assert.strictEqual(vm.runInContext('rm.getNthDayOfMonth(2026, 1, weekday, 1)', context, { timeout: 500 }), null);
+  }
+  assert.strictEqual(rm.getNthDayOfMonth(2026, 1, 1, 1).getDate(), 2);
+  s.addRecurringTransaction({ id: 'twice-monthly', startDate: '2026-01-15', amount: 10,
+    type: 'expense', recurrence: 'semi-monthly', semiMonthlyDays: [15, 30] });
+  rm.applyRecurringTransactions(2026, 1);
+  assert.deepStrictEqual(Object.keys(s.getTransactions()).sort(), ['2026-02-15', '2026-02-28']);
+  s.addRecurringTransaction({ id: 'limited-month-end', startDate: '2026-01-30', amount: 10,
+    type: 'expense', recurrence: 'semi-monthly', semiMonthlyDays: [30, 31], maxOccurrences: 2 });
+  rm.invalidateCache();
+  rm.applyRecurringTransactions(2026, 1);
+  assert.strictEqual(Object.values(s.getTransactions()).flat()
+    .filter(t => t.recurringId === 'limited-month-end').length, 0);
+}
+
+console.log('TEST 105: Reconciliation Dates And Stale Row Identity');
+{
+  localStorage.clear();
+  const s = new TransactionStore();
+  const rm = new RecurringTransactionManager(s);
+  const ui = new BankReconcileUI(s, rm);
+  ui._afterMutation = () => {};
+  const assert = require('assert');
+  for (const date of ['2/29/2025', '2/31/2026', '4/31/2026']) {
+    assert.strictEqual(ui._toIsoDate(date), null, date);
+  }
+  assert.strictEqual(ui._toIsoDate('2/29/2024'), '2024-02-29');
+  s.addTransaction('2026-09-02', { type: 'balance', amount: 100 });
+  ui._addBankRow({ date: '2026-09-01', postedDate: '2026-09-03', signed: -10, description: 'Coffee' }, true);
+  assert.strictEqual(s.getTransactions()['2026-09-03'][0].amount, 10);
+  const cs = new CalculationService(s, rm);
+  cs.updateMonthlyBalances(new Date(2026, 8, 3));
+  assert.strictEqual(cs.getRunningBalanceForDate('2026-09-03'), 90);
+  const entry = s.getTransactions()['2026-09-03'][0];
+  const snapshot = { ...entry, date: '2026-09-03', recurringId: null };
+  assert.strictEqual(ui._currentIndex(snapshot), 0);
+  s.deleteTransaction('2026-09-03', 0);
+  s.addTransaction('2026-09-03', { type: 'expense', amount: 10, description: 'Coffee' });
+  assert.strictEqual(ui._currentIndex(snapshot), -1);
+  ui._addBankRow({ date: '2026-09-04', postedDate: '2026-09-05', signed: -12, description: 'Pending' }, false);
+  assert.strictEqual(s.getTransactions()['2026-09-04'][0].settled, false);
+}
+
 // Run the async network tests sequentially (shared global.fetch mock): TEST 32
 // first, then TEST 30, which prints the final banner.
+async function runUnreadableGistTest() {
+  console.log('TEST 107: Failed Gist Checks Never Upload Unmerged Data');
+  const assert = require('assert');
+  const previousFetch = global.fetch;
+  const previousQuery = global.document.querySelector;
+  global.document.querySelector = () => null;
+  try {
+    for (const status of [403, 429, 500, 503]) {
+      localStorage.clear();
+      const s = new TransactionStore();
+      const sync = new CloudSync(s, () => {});
+      sync.getCloudCredentialsAsync = async () => ({ token: 'test', gistId: 'test' });
+      let patches = 0;
+      global.fetch = async (url, options = {}) => {
+        if (options.method === 'PATCH') patches++;
+        return { ok: false, status, headers: { get: () => null } };
+      };
+      await sync.saveToCloud(true);
+      assert.strictEqual(patches, 0, `HTTP ${status} must abort before PATCH`);
+      s.cancelPendingSave();
+    }
+    const sync = new CloudSync(new TransactionStore(), () => {});
+    assert.deepStrictEqual(sync._mergeTransactions({ '2026-09-01': [null, { id: 'local' }] },
+      { '2026-09-01': [null, { id: 'remote' }] })['2026-09-01'].map(t => t.id).sort(), ['local', 'remote']);
+  } finally {
+    global.fetch = previousFetch;
+    global.document.querySelector = previousQuery;
+  }
+}
+async function runRuntimeTailTests() {
+  const assert = require('assert');
+  console.log('TEST 110: Savings Contributions Use The Latest Goal State');
+  localStorage.clear();
+  const s = new TransactionStore();
+  const ui = new SavingsGoalsUI(s, null, () => {});
+  ui._renderList = () => {};
+  const prompt = Utils.showModalPrompt;
+  const id = s.addSavingsGoal({ name: 'Test', saved: 10, targetAmount: 100 });
+  try {
+    Utils.showModalPrompt = async () => {
+      s.updateSavingsGoal(id, { saved: 30 });
+      return '5';
+    };
+    await ui._contribute(id);
+    assert.strictEqual(s.getSavingsGoals()[0].saved, 35);
+    Utils.showModalPrompt = async () => {
+      s.deleteSavingsGoal(id);
+      return '5';
+    };
+    await ui._contribute(id);
+    assert.strictEqual(s.getSavingsGoals().length, 0);
+  } finally {
+    Utils.showModalPrompt = prompt;
+    s.cancelPendingSave();
+  }
+
+  console.log('TEST 111: Service Worker Preserves Other Apps And Finishes Cache Writes');
+  const listeners = {};
+  const deleted = [];
+  let puts = 0;
+  const response = { ok: true, clone: () => ({}) };
+  const context = vm.createContext({
+    URL,
+    self: {
+      addEventListener: (name, fn) => { listeners[name] = fn; },
+      location: { origin: 'https://example.test' },
+      clients: { claim: async () => {} },
+    },
+    caches: {
+      keys: async () => ['cashflow-static-v0', 'cashflow-static-v1', 'other-app-cache'],
+      delete: async key => { deleted.push(key); },
+      open: async () => ({ put: async () => { puts++; } }),
+    },
+    fetch: async () => response,
+  });
+  vm.runInContext(fs.readFileSync(path.join(jsDir, '../sw.js'), 'utf8'), context);
+  let activation;
+  listeners.activate({ waitUntil: promise => { activation = promise; } });
+  await activation;
+  assert.deepStrictEqual(deleted, ['cashflow-static-v0']);
+  for (const failCache of [false, true]) {
+    context.caches.open = async () => {
+      if (failCache) throw new Error('Quota exceeded');
+      return { put: async () => { puts++; } };
+    };
+    let delivered;
+    const background = [];
+    listeners.fetch({
+      request: { method: 'GET', url: 'https://example.test/js/app.js' },
+      respondWith: promise => { delivered = promise; },
+      waitUntil: promise => { background.push(promise); },
+    });
+    assert.strictEqual(await delivered, response);
+    assert.strictEqual(background.length, 1);
+    await Promise.all(background);
+  }
+  assert.strictEqual(puts, 1);
+}
+
 runTest48Savings()
+  .then(runRuntimeTailTests)
+  .then(runUnreadableGistTest)
   .then(runReplaceRemoteTest)
   .then(runBackupAbortTest)
   .then(runCredentialsTeardownTest)

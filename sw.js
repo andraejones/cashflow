@@ -59,7 +59,9 @@ self.addEventListener("activate", (event) => {
       .keys()
       .then((keys) =>
         Promise.all(
-          keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
+          keys
+            .filter((key) => key.startsWith("cashflow-static-") && key !== CACHE_NAME)
+            .map((key) => caches.delete(key))
         )
       )
       .then(() => self.clients.claim())
@@ -81,15 +83,15 @@ self.addEventListener("fetch", (event) => {
       .then((response) => {
         if (response && (response.ok || response.type === "opaque")) {
           const copy = response.clone();
-          // Refreshing the cache is best-effort and deliberately not awaited —
-          // but it CAN reject (storage quota, an evicted cache), and an
-          // unhandled rejection here fires on every intercepted request for the
-          // rest of the session. The response has already been returned either
-          // way; failing to re-cache only costs offline freshness.
-          caches
-            .open(CACHE_NAME)
-            .then((cache) => cache.put(request, copy))
-            .catch(() => {});
+          // Return the network response immediately, but keep the worker alive
+          // until its best-effort cache refresh finishes. Quota failures must
+          // not turn a successful network request into an error.
+          event.waitUntil(
+            caches
+              .open(CACHE_NAME)
+              .then((cache) => cache.put(request, copy))
+              .catch(() => {})
+          );
         }
         return response;
       })

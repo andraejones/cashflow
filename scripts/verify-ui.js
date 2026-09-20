@@ -186,6 +186,151 @@ async function dismissAlert(page) {
     check("menu is populated", boot.menuItems > 5, `${boot.menuItems} items`);
     check("build stamp is exposed", typeof boot.build === "string" && !!boot.build, boot.build);
 
+    await page.evaluate(() => {
+      if (window.app.calendarUI.viewMode !== 'agenda') window.app.calendarUI.toggleViewMode();
+      document.activeElement.blur();
+    });
+    await page.keyboard.press('Tab');
+    const agendaFocus = await page.evaluate(() => {
+      const row = document.querySelector('.agenda-row[tabindex]');
+      row.focus();
+      return row.matches(':focus-visible') && getComputedStyle(row).outlineStyle !== 'none';
+    });
+    check('keyboard focus remains visible on agenda rows', agendaFocus);
+
+    await page.evaluate(() => {
+      window.__cancelResult = 'pending';
+      Utils.showModalPrompt('Keyboard test', 'Test', { inputValue: 'must not submit' })
+        .then(value => { window.__cancelResult = value; });
+    });
+    await sleep(100);
+    await page.focus('#appModalCancel');
+    await page.keyboard.press('Enter');
+    check('Enter on prompt Cancel cancels rather than submitting',
+      await page.evaluate(() => window.__cancelResult === null));
+    await page.evaluate(() => Utils.cancelActiveModalDialog());
+
+    await page.evaluate(() => {
+      window.__resetResult = 'pending';
+      window.pinProtection.showUnlockDialog().then(value => { window.__resetResult = value; });
+    });
+    await sleep(100);
+    await page.focus('#appModalReset');
+    await page.keyboard.press('Enter');
+    check('Enter on unlock Reset activates the reset button',
+      await page.evaluate(() => window.__resetResult === 'reset'));
+    await page.evaluate(() => Utils.cancelActiveModalDialog());
+
+    const staleDayActions = await page.evaluate(async () => {
+      const { store, transactionUI: ui, calendarUI } = window.app;
+      const saved = store.exportData();
+      const confirm = Utils.showModalConfirm;
+      const date = Utils.formatDateString(new Date());
+      const results = {};
+      try {
+        store.transactions = {};
+        store.recurringTransactions = [];
+        store.addTransaction(date, { type: 'expense', amount: 10, allocated: true });
+        store.addTransaction(date, { type: 'expense', amount: 20, allocated: true });
+        ui.showTransactionDetails(date);
+        Utils.showModalConfirm = async () => {
+          store.deleteTransaction(date, 0);
+          return true;
+        };
+        document.querySelector('#modalTransactions .settle-btn').click();
+        await new Promise(resolve => setTimeout(resolve, 0));
+        results.closeout = store.transactions[date]?.length === 1 && store.transactions[date][0].amount === 20;
+        store.transactions = {};
+        store.addTransaction(date, { type: 'expense', amount: 10, settled: false });
+        store.addTransaction(date, { type: 'expense', amount: 20, settled: false });
+        ui.showTransactionDetails(date);
+        const staleButton = document.querySelector('#modalTransactions .settle-btn');
+        store.deleteTransaction(date, 0);
+        staleButton.click();
+        results.settle = store.transactions[date][0].settled === false;
+        store.transactions[date][0].type = 'expense"><img src=x onerror="window.__typeInjected=true">';
+        calendarUI.generateCalendar();
+        results.typeEscaped = !document.querySelector('#calendarAgenda img');
+      } finally {
+        Utils.showModalConfirm = confirm;
+        store.importData(saved);
+        window.app.recurringManager.invalidateCache();
+        ui.closeModals();
+        calendarUI.generateCalendar();
+      }
+      return results;
+    });
+    check('stale close-out confirmation preserves the next allocation', staleDayActions.closeout);
+    check('stale settle button preserves the next expense', staleDayActions.settle);
+    check('imported transaction types cannot inject agenda markup', staleDayActions.typeEscaped);
+
+    const searchAndEditChecks = await page.evaluate(async () => {
+      const { store, transactionUI: ui, searchUI, recurringManager, calendarUI } = window.app;
+      const saved = store.exportData();
+      const confirm = Utils.showModalConfirm;
+      const logError = console.error;
+      const date = Utils.formatDateString(new Date());
+      const results = {};
+      try {
+        store.transactions = {};
+        store.recurringTransactions = [{ id: 'bad-start', amount: 10, type: 'expense', description: 'search probe', recurrence: 'monthly' }];
+        store.addTransaction(date, { amount: 20, type: 'expense', description: 'search probe' });
+        try {
+          searchUI.showSearchModal('search probe');
+          results.search = searchUI.searchResults.length === 1;
+        } catch (_) {
+          results.search = false;
+        }
+        searchUI.hideSearchModal();
+        store.recurringTransactions = [];
+        store.transactions = {};
+        const id = store.addTransaction(date, { amount: 10, type: 'expense' });
+        store.addTransaction(date, { amount: 20, type: 'expense' });
+        ui.showTransactionDetails(date);
+        document.getElementById(`edit-amount-${date}-0`).value = '99';
+        store.deleteTransaction(date, 0);
+        console.error = () => {}; // Missing stale targets intentionally report an error.
+        ui.saveEdit(date, 0, id);
+        results.edit = store.transactions[date][0].amount === 20;
+        store.transactions = {};
+        const deletedId = store.addTransaction(date, { amount: 10, type: 'expense' });
+        store.addTransaction(date, { amount: 20, type: 'expense' });
+        Utils.showModalConfirm = async () => {
+          store.deleteTransaction(date, 0);
+          return true;
+        };
+        await ui.deleteTransaction(date, 0, deletedId);
+        results.delete = store.transactions[date]?.length === 1 && store.transactions[date][0].amount === 20;
+      } finally {
+        console.error = logError;
+        Utils.showModalConfirm = confirm;
+        store.importData(saved);
+        recurringManager.invalidateCache();
+        ui.closeModals();
+        calendarUI.generateCalendar();
+      }
+      return results;
+    });
+    check('search skips recurring definitions with unusable start dates', searchAndEditChecks.search);
+    check('stale edit form preserves the next transaction', searchAndEditChecks.edit);
+    check('stale delete confirmation preserves the next transaction', searchAndEditChecks.delete);
+
+    await page.evaluate(() => window.app.searchUI.showSearchModal());
+    await sleep(150);
+    const focusableSelector = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+    await page.evaluate(selector => {
+      const visible = [...document.querySelector('#searchModal').querySelectorAll(selector)]
+        .filter(el => !el.disabled && el.getClientRects().length > 0);
+      visible[visible.length - 1].focus();
+    }, focusableSelector);
+    await page.keyboard.press('Tab');
+    check('search focus wraps past hidden and disabled controls', await page.evaluate(selector => {
+      const first = [...document.querySelector('#searchModal').querySelectorAll(selector)]
+        .find(el => !el.disabled && el.getClientRects().length > 0);
+      return document.activeElement === first;
+    }, focusableSelector));
+    await page.evaluate(() => window.app.searchUI.hideSearchModal());
+
     // ---- No horizontal overflow at any supported width -------------------
     // A bare `1fr` grid track is minmax(auto, 1fr): the `auto` minimum will not
     // shrink below the widest cell's min-content width, so a four-figure day

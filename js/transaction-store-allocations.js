@@ -78,6 +78,7 @@ Object.assign(TransactionStore.prototype, {
           recurring: true,
           recurringId: t.recurringId,
           skipped: this.isTransactionSkipped(date, t.recurringId) === true,
+          expired: t.autoCloseout === true && (t.closeoutDate || date) < refStr,
         };
         if (!existing || date > existing.date) {
           recurringBySeries.set(t.recurringId, candidate);
@@ -90,8 +91,9 @@ Object.assign(TransactionStore.prototype, {
       // has no drawable bucket until its next occurrence. It does NOT fall
       // back to the period before it — that one ended when this occurrence
       // arrived, and its reserve was released.
-      if (candidate.skipped) return;
+      if (candidate.skipped || candidate.expired) return;
       delete candidate.skipped;
+      delete candidate.expired;
       live.push(candidate);
     });
     const result = oneTime.concat(live);

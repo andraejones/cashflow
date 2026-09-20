@@ -189,9 +189,9 @@ class TransactionUI {
 
     modal.addEventListener("keydown", (event) => {
       if (event.key === "Tab") {
-        const focusableElements = modal.querySelectorAll(
+        const focusableElements = [...modal.querySelectorAll(
           'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-        );
+        )].filter((el) => !el.disabled && el.getClientRects().length > 0);
 
         const firstElement = focusableElements[0];
         const lastElement = focusableElements[focusableElements.length - 1];
@@ -286,8 +286,7 @@ class TransactionUI {
     // the captured index, both before reading and right before the mutation.
     const liveIndexOf = () => {
       const arr = this.store.getTransactions()[date] || [];
-      const byId = txnId ? arr.findIndex((x) => x.id === txnId) : -1;
-      if (byId !== -1) return byId;
+      if (txnId) return arr.findIndex((x) => x.id === txnId);
       return arr[index] ? index : -1;
     };
 

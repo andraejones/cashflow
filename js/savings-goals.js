@@ -211,9 +211,12 @@ class SavingsGoalsUI {
       Utils.showNotification("Please enter a valid amount", "error");
       return;
     }
+    // Sync may replace or remove the goal while the prompt is open.
+    const currentGoal = this.store.getSavingsGoals().find((g) => g.id === goalId);
+    if (!currentGoal) return;
     const saved = Math.max(
       0,
-      Math.round((goal.saved + amount) * 100) / 100
+      Math.round((currentGoal.saved + amount) * 100) / 100
     );
     this.store.updateSavingsGoal(goalId, { saved });
     this._renderList();
