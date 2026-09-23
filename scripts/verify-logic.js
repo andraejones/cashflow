@@ -9689,6 +9689,356 @@ console.log("TEST 113: The Balance Table's Month Range Does Not Grow Per Render"
   console.log("✅ Repeated renders keep the same month range");
 }
 
+console.log("TEST 114: The Snowball Projection Pays Exactly The Debt Payments The Calendar Pays");
+{
+  // The projection schedules minimums from each debt's template and used to
+  // drop EVERY debt-linked row from the day's cashflow, on the theory that it
+  // injects them all itself. It did not: a skipped minimum was still injected
+  // (the template expansion never sees the skip list), while a moved minimum's
+  // copy, a carried-forward settled copy and a force-generated payoff with
+  // auto-generate off were never paid by anyone. The payoff that fell out of
+  // that drove the minimum series' endDate, so the calendar then either lost
+  // a real final payment or kept phantom ones after the debt was cleared.
+  const RealDate = Date;
+  let FIXED = new RealDate(2026, 8, 23, 12, 0, 0);
+  class FrozenDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(FIXED.getTime()); else super(...a); }
+    static now() { return FIXED.getTime(); }
+  }
+  global.Date = FrozenDate;
+  const setup = (debtFields) => {
+    localStorage.clear();
+    const s = new TransactionStore();
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    const cs = new CalculationService(s, rm);
+    const ui = new DebtSnowballUI(s, rm, () => {}, cs);
+    ui.renderPlan = () => {};
+    const id = s.addDebt({ name: "Card", balance: 1000, minPayment: 100, dueDay: 15,
+      recurrence: "monthly", interestRate: 0, dueStartDate: "2026-10-15", ...debtFields });
+    ui.ensureMinimumPaymentRecurring(s.getDebts()[0]);
+    return { s, rm, cs, ui, id, debt: s.getDebts()[0] };
+  };
+  const visibleDebtRows = (s) => Object.keys(s.getTransactions()).sort().flatMap((d) =>
+    s.getTransactions()[d]
+      .filter((t) => t.debtId && t.hidden !== true && Number(t.amount) > 0 &&
+        !(t.recurringId && s.isTransactionSkipped(d, t.recurringId)))
+      .map((t) => `${d} ${t.amount}`));
+  try {
+    // (a) A skipped future minimum is not paid.
+    {
+      const { s, rm, ui, id, debt } = setup();
+      s.addRecurringTransaction({ startDate: "2026-09-01", amount: 3000, type: "income",
+        description: "Pay", recurrence: "monthly" });
+      s.setDebtSnowballSettings({ dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false });
+      rm.toggleSkipTransaction("2026-11-15", debt.minRecurringId);
+      const proj = ui.calculateSnowballProjection(2026, 10, false);
+      const snap = ui.getDebtSummaries(new Date(2026, 11, 1))[0].remaining;
+      if (proj.viewBalances[id] !== 900 || snap !== 900) {
+        throw new Error(`Skipped minimum: projection ${proj.viewBalances[id]}, snapshot ${snap}, expected 900 both`);
+      }
+      // Ten real payments from Oct 15 with November skipped: the last is Aug 15.
+      const p = proj.payoffByDebtId[id];
+      if (p.year !== 2027 || p.month !== 7) {
+        throw new Error(`Skipped minimum: payoff ${p.year}-${p.month + 1}, expected 2027-08`);
+      }
+      s.cancelPendingSave();
+    }
+    // (b) A MOVED future minimum is paid on its new date, once.
+    {
+      const { s, rm, ui, id, debt } = setup();
+      s.addRecurringTransaction({ startDate: "2026-09-01", amount: 3000, type: "income",
+        description: "Pay", recurrence: "monthly" });
+      s.setDebtSnowballSettings({ dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false });
+      rm.toggleSkipTransaction("2026-10-15", debt.minRecurringId);
+      s.moveTransaction(debt.minRecurringId, "2026-10-15", "2026-10-20");
+      s.addTransaction("2026-10-20", { amount: 100, type: "expense", description: "Debt Payment: Card",
+        settled: true, movedFrom: "2026-10-15", originalRecurringId: debt.minRecurringId,
+        debtId: id, debtRole: "minimum", debtName: "Card" });
+      const proj = ui.calculateSnowballProjection(2026, 9, false);
+      if (proj.viewBalances[id] !== 900) {
+        throw new Error(`Moved minimum: end-October balance ${proj.viewBalances[id]}, expected 900`);
+      }
+      const p = proj.payoffByDebtId[id];
+      if (p.year !== 2027 || p.month !== 6) {
+        throw new Error(`Moved minimum: payoff ${p.year}-${p.month + 1}, expected 2027-07`);
+      }
+      s.cancelPendingSave();
+    }
+    // (c) A force-generated payoff with auto-generate OFF clears the debt, and
+    // no minimum survives it.
+    {
+      FIXED = new RealDate(2026, 8, 10, 12, 0, 0);
+      const { s, rm, ui, id } = setup({ dueStartDate: "2026-09-15" });
+      s.addTransaction("2026-09-01", { amount: 5000, type: "income", description: "Pay" });
+      s.setDebtSnowballSettings({ dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false });
+      rm.applyRecurringTransactions(2026, 8);
+      ui.ensureSnowballPaymentForMonth(2026, 8, true);
+      ui.ensureSnowballPaymentsForHorizon(2026, 8);
+      for (let m = 8; m < 21; m++) rm.applyRecurringTransactions(2026 + Math.floor(m / 12), m % 12);
+      const rows = visibleDebtRows(s);
+      if (rows.length !== 1 || rows[0] !== "2026-09-11 1000") {
+        throw new Error(`Forced payoff with auto-generate off left debt spending: ${JSON.stringify(rows)}`);
+      }
+      const p = ui.calculateSnowballProjection(2026, 8, false).payoffByDebtId[id];
+      if (!p || p.year !== 2026 || p.month !== 8 || p.day !== 11) {
+        throw new Error(`Forced payoff not seen by the projection: ${JSON.stringify(p)}`);
+      }
+      s.cancelPendingSave();
+      FIXED = new RealDate(2026, 8, 23, 12, 0, 0);
+    }
+    // (d) Semi-monthly with one payment skipped: the other, real payment is
+    // kept at full amount rather than zeroed to match the month's target.
+    {
+      const { s, rm, ui, debt } = setup({ recurrence: "semi-monthly", semiMonthlyDays: [1, 15],
+        dueStartDate: "2026-10-01", balance: 5000 });
+      s.addRecurringTransaction({ startDate: "2026-09-01", amount: 3000, type: "income",
+        description: "Pay", recurrence: "monthly" });
+      s.setDebtSnowballSettings({ dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false });
+      rm.toggleSkipTransaction("2026-11-01", debt.minRecurringId);
+      ui.ensureSnowballPaymentsForHorizon(2026, 8);
+      rm.applyRecurringTransactions(2026, 10);
+      const nov = visibleDebtRows(s).filter((r) => r.startsWith("2026-11"));
+      if (nov.length !== 1 || nov[0] !== "2026-11-15 100") {
+        throw new Error(`Semi-monthly skip zeroed the real payment: ${JSON.stringify(nov)}`);
+      }
+      s.cancelPendingSave();
+    }
+    console.log("✅ Skipped, moved and force-generated debt payments reach the projection exactly once");
+  } finally {
+    global.Date = RealDate;
+  }
+}
+
+console.log("TEST 115: A \"This And Future\" Edit On A Month-End Clamp Keeps The Due Day");
+{
+  // A monthly bill due the 29th-31st lands on the last day of each shorter
+  // month. Splitting the series on that clamped occurrence used to anchor the
+  // new series there, so a bill due the 29th became "monthly on the 28th"
+  // after a February edit — every later payment a day early.
+  const split = (rt, clickDate) => {
+    localStorage.clear();
+    const s = new TransactionStore();
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    s.addRecurringTransaction(rt);
+    const [cy, cm] = clickDate.split("-").map(Number);
+    rm.applyRecurringTransactions(cy, cm - 1);
+    const idx = s.getTransactions()[clickDate].findIndex((t) => t.recurringId === rt.id);
+    rm.editTransaction(clickDate, idx, { amount: 75, type: "expense", description: "Bill" }, "future");
+    rm.invalidateCache();
+    for (let m = 0; m < 7; m++) rm.applyRecurringTransactions(2026, m);
+    const rows = [];
+    Object.keys(s.getTransactions()).sort().forEach((d) =>
+      s.getTransactions()[d].forEach((t) => rows.push(`${d}:${t.amount}`)));
+    s.cancelPendingSave();
+    return { rows: rows.join(" "), series: s.getRecurringTransactions().length };
+  };
+  const a = split({ id: "a", startDate: "2026-01-29", amount: 50, type: "expense",
+    description: "Bill", recurrence: "monthly" }, "2026-02-28");
+  const aWant = "2026-01-29:50 2026-02-28:75 2026-03-29:75 2026-04-29:75 2026-05-29:75 2026-06-29:75 2026-07-29:75";
+  if (a.rows !== aWant) throw new Error(`Day-29 split drifted: ${a.rows}`);
+  // Business-day adjusted: May 31 2026 is a Sunday and lands on Fri May 29 —
+  // exactly once, from the new series.
+  const b = split({ id: "b", startDate: "2026-01-31", amount: 50, type: "expense",
+    description: "Bill", recurrence: "monthly", businessDayAdjustment: "previous" }, "2026-04-30");
+  const bWant = "2026-01-30:50 2026-02-27:50 2026-03-31:50 2026-04-30:75 2026-05-29:75 2026-06-30:75 2026-07-31:75";
+  if (b.rows !== bWant) throw new Error(`Adjusted day-31 split wrong: ${b.rows}`);
+  // The edited occurrence was the last one the cap allows: no empty successor.
+  const c = split({ id: "c", startDate: "2026-01-31", amount: 50, type: "expense",
+    description: "Bill", recurrence: "monthly", maxOccurrences: 4 }, "2026-04-30");
+  if (c.rows !== "2026-01-31:50 2026-02-28:50 2026-03-31:50 2026-04-30:75" || c.series !== 1) {
+    throw new Error(`Capped split wrong: ${c.rows} (${c.series} series)`);
+  }
+  // countOccurrencesBefore sizes the new series' cap. A "last day of every
+  // month" series started Jun 30 has paid only Jun 30 before Jul 31.
+  const rmCount = new RecurringTransactionManager(new TransactionStore());
+  const lastDay = { startDate: "2026-06-30", recurrence: "monthly", lastDayOfMonth: true };
+  const counted = rmCount.countOccurrencesBefore(lastDay, new Date(2026, 6, 31, 12));
+  if (counted !== 1) throw new Error(`Last-day series counted ${counted} occurrences before Jul 31, expected 1`);
+  if (rmCount.countOccurrencesBefore(lastDay, new Date(2026, 7, 1, 12)) !== 2) {
+    throw new Error("Last-day series must count Jun 30 and Jul 31 before Aug 1");
+  }
+  console.log("✅ A split on a clamped month-end occurrence keeps the series' due day");
+}
+
+console.log("TEST 116: A Monthly Series Keeps Its Day Across A Reload");
+{
+  // loadData stamps lastDayOfMonth on a monthly series whose flag is ABSENT
+  // and whose start is a month's last day — the legacy inference. Writers only
+  // ever set the flag when true, so a bill started Sep 30 with the box
+  // unchecked ran on the 30th until the next reload and on the 31st after it.
+  const octoberDay = (s, id) => {
+    const rm = new RecurringTransactionManager(s);
+    rm.applyRecurringTransactions(2026, 9);
+    return Object.keys(s.getTransactions()).find((d) =>
+      s.getTransactions()[d].some((t) => t.recurringId === id));
+  };
+  localStorage.clear();
+  const s = new TransactionStore();
+  s.resetData();
+  s.addRecurringTransaction({ id: "rent", startDate: "2026-09-30", amount: 900,
+    type: "expense", description: "Rent", recurrence: "monthly" });
+  // A series moved onto a month-end start (bank reconcile's "Move series").
+  s.addRecurringTransaction({ id: "gym", startDate: "2026-09-29", amount: 30,
+    type: "expense", description: "Gym", recurrence: "monthly" });
+  delete s.getRecurringTransactions().find((r) => r.id === "gym").lastDayOfMonth;
+  s.updateRecurringTransaction("gym", { startDate: "2026-09-30" });
+  if (octoberDay(s, "rent") !== "2026-10-30") throw new Error("Rent not on the 30th in-session");
+  s.saveData(false);
+  s.cancelPendingSave();
+  const reloaded = new TransactionStore();
+  const rentDay = octoberDay(reloaded, "rent");
+  if (rentDay !== "2026-10-30") throw new Error(`Rent moved to ${rentDay} after a reload`);
+  const gymDay = octoberDay(reloaded, "gym");
+  if (gymDay !== "2026-10-30") throw new Error(`Moved series landed on ${gymDay} after a reload`);
+  reloaded.cancelPendingSave();
+  // A "this and future" split landing on a 30th: the new series is created
+  // through the store, so it is pinned too.
+  localStorage.clear();
+  const s2 = new TransactionStore();
+  s2.resetData();
+  const rm2 = new RecurringTransactionManager(s2);
+  s2.addRecurringTransaction({ id: "bill", startDate: "2026-08-30", amount: 40,
+    type: "expense", description: "Bill", recurrence: "monthly" });
+  rm2.applyRecurringTransactions(2026, 8);
+  const idx = s2.getTransactions()["2026-09-30"].findIndex((t) => t.recurringId === "bill");
+  rm2.editTransaction("2026-09-30", idx, { amount: 45, type: "expense", description: "Bill" }, "future");
+  const successor = s2.getRecurringTransactions().find((r) => r.id !== "bill");
+  s2.saveData(false);
+  s2.cancelPendingSave();
+  const s2r = new TransactionStore();
+  const splitDay = octoberDay(s2r, successor.id);
+  if (splitDay !== "2026-10-30") throw new Error(`Split series landed on ${splitDay} after a reload`);
+  s2r.cancelPendingSave();
+  // Genuine legacy data still migrates — on import too, so the in-session
+  // schedule matches the one after the next reload.
+  localStorage.clear();
+  const s3 = new TransactionStore();
+  s3.resetData();
+  s3.importData({ transactions: {}, monthlyBalances: {}, recurringTransactions: [{ id: "legacy",
+    startDate: "2026-06-30", amount: 10, type: "expense", description: "Old",
+    recurrence: "monthly" }] });
+  const legacyDay = octoberDay(s3, "legacy");
+  if (legacyDay !== "2026-10-31") throw new Error(`Imported legacy last-day series ran on ${legacyDay}`);
+  s3.cancelPendingSave();
+  console.log("✅ Monthly series keep their day across reloads; legacy last-day series still migrate");
+}
+
+console.log("TEST 117: Concurrent Draws On Two Devices Both Reach The Bucket");
+{
+  // A bucket's amount is its remainder, debited in place, and the merge keeps
+  // the newer copy of each row — so a draw made on one device between syncs
+  // was lost from the bucket while its expense survived: spend counted twice.
+  // For a recurring bucket the first draw of a period also MINTS its id, so
+  // two devices each minted one and the merge kept both: the period reserved
+  // twice over.
+  const RealDate = Date;
+  let T = new RealDate(2026, 8, 23, 12, 0, 0).getTime();
+  class FrozenDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(T); else super(...a); }
+    static now() { return T; }
+  }
+  global.Date = FrozenDate;
+  const clone = (x) => JSON.parse(JSON.stringify(x));
+  const device = (data) => {
+    localStorage.clear();
+    const s = new TransactionStore();
+    s.resetData();
+    if (data) s.importData(clone(data));
+    return s;
+  };
+  const rows = (data) => Object.keys(data.transactions).flatMap((d) => data.transactions[d]);
+  try {
+    // (a) One-time bucket, $20 on device A and $30 on device B.
+    const base = device();
+    base.addTransaction("2026-09-20", { amount: 200, type: "expense", allocated: true,
+      settled: true, description: "Groceries" });
+    const bucketId = base.getTransactions()["2026-09-20"][0].id;
+    const baseData = clone(base.exportData());
+    base.cancelPendingSave();
+    const draw = (s, id, amount, desc) => s.addTransaction("2026-09-23", { amount,
+      type: "expense", description: desc, allocationDraws: [{ allocationId: id, amount: null }] });
+    T += 60000;
+    const A = device(baseData);
+    draw(A, bucketId, 20, "A");
+    const aData = clone(A.exportData());
+    A.cancelPendingSave();
+    T += 60000;
+    const B = device(baseData);
+    draw(B, bucketId, 30, "B");
+    const bData = clone(B.exportData());
+    const sync = new CloudSync(B, () => {});
+    for (const [l, r] of [[bData, aData], [aData, bData]]) {
+      const m = sync._mergeData(clone(l), clone(r));
+      const bucket = rows(m).find((t) => t.id === bucketId);
+      if (bucket.amount !== 150) throw new Error(`Merged one-time bucket holds ${bucket.amount}, expected 150`);
+    }
+    // A merge with a copy of itself changes nothing.
+    const self = sync._mergeData(clone(bData), clone(bData));
+    if (rows(self).find((t) => t.id === bucketId).amount !== 170) {
+      throw new Error("A self-merge moved the bucket");
+    }
+    B.cancelPendingSave();
+
+    // (b) Recurring bucket: both devices make the period's FIRST draw.
+    const rbase = device();
+    rbase.addRecurringTransaction({ id: "groc", startDate: "2026-09-19", amount: 200,
+      type: "expense", allocated: true, settled: true, description: "Groceries",
+      recurrence: "weekly" });
+    const rbaseData = clone(rbase.exportData());
+    rbase.cancelPendingSave();
+    const drawPeriod = (s, amount, desc) => {
+      new RecurringTransactionManager(s).applyRecurringTransactions(2026, 8);
+      const live = s.getAllocations("2026-09-23").find((a) => a.recurringId === "groc");
+      draw(s, live.id, amount, desc);
+    };
+    T += 60000;
+    const RA = device(rbaseData);
+    drawPeriod(RA, 20, "A");
+    const raData = clone(RA.exportData());
+    T += 60000;
+    const RB = device(rbaseData);
+    drawPeriod(RB, 30, "B");
+    const rbData = clone(RB.exportData());
+    const rsync = new CloudSync(RB, () => {});
+    const m = rsync._mergeData(clone(rbData), clone(raData));
+    const periodBuckets = (m.transactions["2026-09-19"] || []).filter((t) => t.allocated === true);
+    if (periodBuckets.length !== 1 || periodBuckets[0].amount !== 150) {
+      throw new Error(`Merged period buckets: ${JSON.stringify(periodBuckets.map((t) => t.amount))}, expected one of 150`);
+    }
+    const keeperId = periodBuckets[0].id;
+    const loserId = [raData, rbData].map((d) => d.transactions["2026-09-19"][0].id)
+      .find((id) => id !== keeperId);
+    if (!m._deletedItems.transactions.some((d) => d.id === loserId)) {
+      throw new Error("The collapsed duplicate bucket was not tombstoned");
+    }
+    if (rows(m).some((t) => t.drawsFromAllocationId && t.drawsFromAllocationId !== keeperId)) {
+      throw new Error("A draw still points at the collapsed duplicate");
+    }
+    // The losing device drew $10 more from its own copy before pulling; the
+    // pull converges on the same single bucket.
+    T += 60000;
+    const lost = device(loserId === raData.transactions["2026-09-19"][0].id ? raData : rbData);
+    draw(lost, loserId, 10, "late");
+    const lostData = clone(lost.exportData());
+    const pulled = rsync._mergeData(lostData, clone(m));
+    const after = (pulled.transactions["2026-09-19"] || []).filter((t) => t.allocated === true);
+    if (after.length !== 1 || after[0].id !== keeperId || after[0].amount !== 140) {
+      throw new Error(`After the pull: ${JSON.stringify(after.map((t) => `${t.id}:${t.amount}`))}, expected ${keeperId}:140`);
+    }
+    const C = device(pulled);
+    const cs = new CalculationService(C, new RecurringTransactionManager(C));
+    if (cs.getReservedTotalOnOrBefore("2026-09-23") !== 140) {
+      throw new Error(`Converged data reserves ${cs.getReservedTotalOnOrBefore("2026-09-23")}, expected 140`);
+    }
+    [RA, RB, lost, C].forEach((s) => s.cancelPendingSave());
+    console.log("✅ Concurrent draws reach the bucket; duplicate period buckets collapse and converge");
+  } finally {
+    global.Date = RealDate;
+  }
+}
+
 console.log('TEST 109: Fresh Monthly Totals And Invalidated Reserve Lookups');
 {
   localStorage.clear();

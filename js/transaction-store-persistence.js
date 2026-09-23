@@ -302,13 +302,7 @@ Object.assign(TransactionStore.prototype, {
           // explicit flag, so stamp it on any legacy monthly recurrence that
           // relied on the old inference — preserving its dates exactly (the
           // user can turn it off if the start date was a coincidence).
-          if (
-            rt.recurrence === "monthly" &&
-            !rt.daySpecific &&
-            rt.lastDayOfMonth === undefined &&
-            Utils.isLastCalendarDayOfMonth(rt.startDate)
-          ) {
-            rt.lastDayOfMonth = true;
+          if (this._migrateLegacyLastDayOfMonth(rt)) {
             // Persist the stamped flag (encrypt() is only available in
             // saveData(), so defer like the other load-time migrations).
             this._needsMigrationSave = true;
@@ -493,6 +487,26 @@ Object.assign(TransactionStore.prototype, {
         (e) => e && typeof e.at === "number" && e.at > thirtyDaysAgo
       );
     }
+  },
+
+  // "Last day of every month" used to be inferred from a start date that
+  // landed on its month's last day. It is an explicit flag now, and every
+  // writer sets it (see TransactionStore._pinLastDayOfMonth), so an ABSENT
+  // flag means a series from before the flag existed: stamp it on the ones
+  // that relied on the old inference, preserving their dates exactly (the
+  // user can turn it off if the start date was a coincidence). Returns true
+  // when it stamped.
+  _migrateLegacyLastDayOfMonth(rt) {
+    if (
+      rt.recurrence === "monthly" &&
+      !rt.daySpecific &&
+      rt.lastDayOfMonth === undefined &&
+      Utils.isLastCalendarDayOfMonth(rt.startDate)
+    ) {
+      rt.lastDayOfMonth = true;
+      return true;
+    }
+    return false;
   },
 
   _filterPersistedTransactions(transactions) {
@@ -750,6 +764,13 @@ Object.assign(TransactionStore.prototype, {
           data.recurringTransactions, "imported recurringTransactions"
         ) || []
       ).filter((rt) => rt && typeof rt === "object" && !Array.isArray(rt));
+      // Same legacy last-day migration loadData applies. Without it an
+      // imported (or cloud-merged) legacy series expanded on its start day for
+      // the rest of the session and on the month's last day after the next
+      // reload — the same data, two schedules.
+      this.recurringTransactions.forEach((rt) => {
+        this._migrateLegacyLastDayOfMonth(rt);
+      });
       // These three are assigned raw from the parsed file — the only inputs to
       // the balance walk that no form guard ever sees. Repair them before
       // anything walks them (see _repairWalkAmounts).

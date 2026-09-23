@@ -739,6 +739,9 @@ Object.assign(DebtSnowballUI.prototype, {
       const list = transactions[ds] || [];
       let baseNet = 0;
       let anchor = null;
+      // Debt-linked expenses the sim does NOT schedule itself: real payments
+      // that must come off the debt as well as out of checking.
+      let debtPayments = null;
       list.forEach((t) => {
         const isSkipped =
           t.recurringId &&
@@ -748,16 +751,43 @@ Object.assign(DebtSnowballUI.prototype, {
           anchor = Number(t.amount) || 0;
           return;
         }
-        // Debt minimums and snowball payoffs are injected by the sim — exclude
-        // the materialized rows here so they are not double-counted.
-        if (t.debtRole === "minimum" || t.snowballGenerated === true) return;
+        // Rows the sim injects itself are excluded so they are not
+        // double-counted: recurring minimum instances (injected from each
+        // debt's template in ensureMinimumsForMonth), and snowball payoffs
+        // while the sweep is on (it recomputes them). A snowball row with the
+        // sweep off is only kept by the sync if the user force-generated it
+        // (snowballForced); any other one is about to be swept, so it stays
+        // excluded too.
+        //
+        // Everything ELSE carrying a debtId used to be excluded as well — and
+        // was then never paid by anyone: the copy a MOVED or carried-forward
+        // SETTLED minimum leaves behind (no recurringId, debtRole kept), and a
+        // force-generated payoff while auto-generate is off. The calendar
+        // spends all of those, the debt snapshot credits all of those, and the
+        // projection saw none of them — so a debt cleared by a forced payoff
+        // kept "needing" its minimums for months, and the maintenance passes
+        // materialized them as real phantom spending after the payoff.
+        if (
+          (t.debtRole === "minimum" && t.recurringId) ||
+          (t.snowballGenerated === true &&
+            (applySnowball || t.snowballForced !== true))
+        ) {
+          return;
+        }
         if (t.type === "income") {
           baseNet = roundToCents(baseNet + (Number(t.amount) || 0));
         } else if (t.type === "expense") {
-          baseNet = roundToCents(baseNet - (Number(t.amount) || 0));
+          const amount = Number(t.amount) || 0;
+          baseNet = roundToCents(baseNet - amount);
+          if (t.debtId && amount > 0) {
+            (debtPayments = debtPayments || []).push({
+              debtId: t.debtId,
+              amount: roundToCents(amount),
+            });
+          }
         }
       });
-      cached = { baseNet, anchor };
+      cached = { baseNet, anchor, debtPayments };
       dayFlowCache.set(ds, cached);
       return cached;
     };
@@ -785,6 +815,19 @@ Object.assign(DebtSnowballUI.prototype, {
         );
         occurrences.forEach((occ) => {
           if (occ.dateString < projectionStartDateString) return;
+          // The throwaway expansion knows nothing of the real skip list, so
+          // honor it here. A skipped minimum is not paid on the calendar or in
+          // the debt snapshot; injecting it anyway paid the debt down faster
+          // than reality, and the payoff-driven endDate then cut the series
+          // short, dropping the real final payment. (A skip that is really a
+          // MOVE leaves a non-recurring copy on the new date, which getDayFlow
+          // books as a real payment.)
+          if (
+            this.recurringManager &&
+            this.recurringManager.isTransactionSkipped(occ.dateString, template.id)
+          ) {
+            return;
+          }
           const amount = roundToCents(occ.amount);
           if (amount <= 0) return;
           if (!minsByDate.has(occ.dateString)) {
@@ -810,6 +853,21 @@ Object.assign(DebtSnowballUI.prototype, {
       }
       infusionsByDate.get(infusion.date).push(infusion);
     });
+
+    // Credit a day's real debt payments (see getDayFlow) to the debt balances.
+    // Their checking side is already in baseNet. Returns the debt ids each one
+    // cleared, so the main walk can stamp the payoff day.
+    const applyDebtPayments = (balanceMap, flow) => {
+      const cleared = [];
+      if (!flow.debtPayments) return cleared;
+      flow.debtPayments.forEach(({ debtId, amount }) => {
+        const b = Number(balanceMap[debtId]) || 0;
+        if (b <= 0) return;
+        balanceMap[debtId] = roundToCents(b - Math.min(b, amount));
+        if (balanceMap[debtId] <= epsilon) cleared.push(debtId);
+      });
+      return cleared;
+    };
 
     const accrueInterest = (balanceMap, debtId) => {
       const debt = debtById[debtId];
@@ -853,6 +911,7 @@ Object.assign(DebtSnowballUI.prototype, {
           prevMonthKey = mk;
         }
         const flow = getDayFlow(day.ds, day.year, day.month);
+        applyDebtPayments(bal, flow);
         if (flow.anchor !== null) {
           // Ending Balance = gross bank total; keep allocation reserves
           // reserved across the anchor (same rule as CalculationService's
@@ -995,6 +1054,11 @@ Object.assign(DebtSnowballUI.prototype, {
       } else {
         checking = roundToCents(checking + flow.baseNet);
       }
+      applyDebtPayments(balances, flow).forEach((debtId) => {
+        if (!payoffByDebtId[debtId]) {
+          payoffByDebtId[debtId] = { year, month, day, seq: payoffSeq++ };
+        }
+      });
       const mins = minsByDate.get(ds);
       if (mins) {
         mins.forEach(({ debtId, amount }) => {
@@ -1209,7 +1273,16 @@ Object.assign(DebtSnowballUI.prototype, {
           monthlyTotalsByDebtId[debtId] = 0;
           return;
         }
-        const occurrences = this.getRecurringOccurrencesForMonth(template, year, month);
+        // Skip-aware, like the plan projection's minimum schedule.
+        const occurrences = this.getRecurringOccurrencesForMonth(
+          template,
+          year,
+          month
+        ).filter(
+          (occ) =>
+            !this.recurringManager ||
+            !this.recurringManager.isTransactionSkipped(occ.dateString, template.id)
+        );
         const totalPayment = roundToCents(
           occurrences.reduce((sum, occ) => sum + occ.amount, 0)
         );

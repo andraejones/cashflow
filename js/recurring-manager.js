@@ -1683,7 +1683,7 @@ class RecurringTransactionManager {
       if (d <= 0) return 0;
       return Math.ceil(d / step);
     };
-    const monthsStep = (step) => {
+    const monthsStep = (step, lastDayOfMonth = false) => {
       const monthsDiff =
         (beforeDate.getFullYear() - startDate.getFullYear()) * 12 +
         (beforeDate.getMonth() - startDate.getMonth());
@@ -1694,8 +1694,20 @@ class RecurringTransactionManager {
         // Most recent anniversary is in a prior period — definitely passed
         return k + 1;
       }
-      // Anniversary is in the current period; counted only if it has passed
-      return k + (beforeDate.getDate() > startDate.getDate() ? 1 : 0);
+      // Anniversary is in the current period; counted only if it has passed.
+      // It falls where the expansion puts it: the month's last day for a
+      // "last day of every month" series (a Jun 30 start pays Jul 31, which
+      // comparing against the start's 30 counted as already past), otherwise
+      // the start day clamped to the month.
+      const daysInMonth = new Date(
+        beforeDate.getFullYear(),
+        beforeDate.getMonth() + 1,
+        0
+      ).getDate();
+      const anniversaryDay = lastDayOfMonth
+        ? daysInMonth
+        : Math.min(startDate.getDate(), daysInMonth);
+      return k + (beforeDate.getDate() > anniversaryDay ? 1 : 0);
     };
 
     switch (rt.recurrence) {
@@ -1735,7 +1747,7 @@ class RecurringTransactionManager {
             break;
           }
         }
-        count = monthsStep(1);
+        count = monthsStep(1, rt.lastDayOfMonth === true);
         break;
 
       case "semi-monthly": {
@@ -1863,13 +1875,72 @@ class RecurringTransactionManager {
       // at the landing date silently rewrites the recurrence pattern — e.g. a
       // monthly bill due the 1st, adjusted back to Fri Oct 30, would become
       // "monthly on the 30th" from the split forward.
-      const scheduledStart = transaction.originalDate
+      let scheduledStart = transaction.originalDate
         ? Utils.parseDateString(transaction.originalDate)
         : startDate;
+      // Month-end clamp. A monthly series due on the 29th-31st lands on the
+      // last day of every shorter month, and anchoring the new series on that
+      // clamped occurrence rewrote the pattern the same way: split on Feb 28, a
+      // bill due the 29th became "monthly on the 28th" for good, a day early
+      // every month after. So a clamped occurrence is edited IN PLACE (a
+      // modified instance of the old series) and the new series starts at the
+      // next occurrence instead — which is never clamped, because every month
+      // that follows a short month has 31 days.
+      const originalStart = Utils.parseDateString(recurringTransaction.startDate);
+      let editClickedInPlace = false;
+      if (
+        recurringTransaction.recurrence === "monthly" &&
+        !recurringTransaction.daySpecific &&
+        recurringTransaction.lastDayOfMonth !== true &&
+        originalStart &&
+        scheduledStart &&
+        originalStart.getDate() > scheduledStart.getDate()
+      ) {
+        const next = new Date(
+          scheduledStart.getFullYear(),
+          scheduledStart.getMonth() + 1,
+          originalStart.getDate(),
+          12, 0, 0
+        );
+        if (next.getDate() === originalStart.getDate()) {
+          editClickedInPlace = true;
+          scheduledStart = next;
+        }
+      }
       // Split boundary for ending the old series / clearing skips: the earlier
       // of the scheduled and landing dates, so the edited occurrence can't
       // re-expand from the old series whichever direction the adjustment moved.
-      const splitCutoff = scheduledStart < startDate ? scheduledStart : startDate;
+      // When the clicked occurrence stays with the old series, the boundary is
+      // the NEXT occurrence's, computed the same way.
+      const splitLanding = editClickedInPlace
+        ? this.adjustForBusinessDay(
+            scheduledStart,
+            recurringTransaction.businessDayAdjustment
+          ).adjustedDate
+        : startDate;
+      const splitCutoff =
+        scheduledStart < splitLanding ? scheduledStart : splitLanding;
+      if (editClickedInPlace) {
+        this.store.updateTransaction(date, index, {
+          ...updatedTransaction,
+          modifiedInstance: true,
+        });
+        // Nothing left for a new series to carry: the old one ends (or runs
+        // out of occurrences) before the next occurrence.
+        const nextString = Utils.formatDateString(scheduledStart);
+        const endedBefore =
+          typeof recurringTransaction.endDate === "string" &&
+          recurringTransaction.endDate &&
+          recurringTransaction.endDate < nextString;
+        const exhausted =
+          recurringTransaction.maxOccurrences &&
+          recurringTransaction.maxOccurrences -
+            this.countOccurrencesBefore(recurringTransaction, scheduledStart) < 1;
+        if (endedBefore || exhausted) {
+          this.store.saveData();
+          return true;
+        }
+      }
       const newRecurringId = Utils.generateUniqueId();
 
       const newRecurringTransaction = {
@@ -2000,7 +2071,9 @@ class RecurringTransactionManager {
         });
       }
       this.store.addRecurringTransaction(newRecurringTransaction);
-      const instanceUpdates = {
+      // A clicked occurrence edited in place (month-end clamp, above) stays
+      // with the old series; there is nothing to re-point.
+      const instanceUpdates = editClickedInPlace ? null : {
         amount: updatedTransaction.amount,
         type: updatedTransaction.type,
         description: updatedTransaction.description,
@@ -2008,13 +2081,15 @@ class RecurringTransactionManager {
       };
       // The clicked instance would otherwise keep stale expense-only flags
       // through the spread merge when the series' type moves off expense.
-      if (updatedTransaction.type !== "expense") {
-        instanceUpdates.settled = undefined;
-        instanceUpdates.allocated = undefined;
-        instanceUpdates.autoCloseout = undefined;
-        instanceUpdates.closeoutDate = undefined;
+      if (instanceUpdates) {
+        if (updatedTransaction.type !== "expense") {
+          instanceUpdates.settled = undefined;
+          instanceUpdates.allocated = undefined;
+          instanceUpdates.autoCloseout = undefined;
+          instanceUpdates.closeoutDate = undefined;
+        }
+        this.store.updateTransaction(date, index, instanceUpdates);
       }
-      this.store.updateTransaction(date, index, instanceUpdates);
       const skippedTransactions = this.store.getSkippedTransactions();
       Object.keys(skippedTransactions).forEach((skipDate) => {
         if (Utils.parseDateString(skipDate) >= splitCutoff) {

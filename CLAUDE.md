@@ -11,8 +11,8 @@ CashFlow Calendar is an offline-first, single-page personal finance application 
 **No build process required.** Open `index.html` directly in a browser or serve via any static server.
 
 **Tests:** `npm test` (or run the two scripts directly with Node) — it must pass before every commit:
-- `node scripts/verify-logic.js` — 107 numbered integration tests over vm-loaded sources
-  (numbered up to TEST 113; the numbering has gaps where tests were merged or
+- `node scripts/verify-logic.js` — 111 numbered integration tests over vm-loaded sources
+  (numbered up to TEST 117; the numbering has gaps where tests were merged or
   removed along with the feature they covered).
   Four of them are SWEEPS rather than scenarios, and they are the ones worth
   extending when something new is added:
@@ -158,6 +158,17 @@ data before committing a new hash.
 
 **RecurringTransactionManager** (`recurring-manager.js`) - Expands recurring transactions into specific dates. Handles complex recurrence patterns: standard intervals, custom intervals, day-specific rules, business day adjustments, and variable amounts.
 
+`lastDayOfMonth` must be EXPLICIT on every monthly series. An absent flag is
+how `_migrateLegacyLastDayOfMonth` (run by both `loadData` and `importData`)
+recognizes pre-flag legacy data, stamping `true` when the start is a month's
+last day — so a new series written without the flag ran on the 30th until the
+next reload and on the 31st after it. `TransactionStore._pinLastDayOfMonth`
+writes `false` on add (and on an update that changes the start), covering every
+writer (TEST 116). A "this and future" split on a month-end-CLAMPED occurrence
+edits that occurrence in place and starts the new series at the next one
+(never clamped: every month after a short month has 31 days); anchoring on the
+clamped day turned a bill due the 29th into one due the 28th (TEST 115).
+
 **CalculationService** (`calculation-service.js`) - Computes daily running balances and monthly summaries with caching. `walkDays(start, end, opts)` is THE single day-by-day balance walk (anchor resets to entered − reserves, unsettled/allocation accumulators); every balance path — monthly balances, running balance, day breakdown, 30-day minimum, and both calendar loops — steps through it. Companion helpers: `getMonthSeed`, `getCellExpense`, `getCarriedUnsettledList`. Never re-implement the walk; the parity harness fails if calendar-ui forks it.
 
 `getReservedTotalOnOrBefore` answers from a prefix-summed index built once per
@@ -296,7 +307,28 @@ and what `computeMinimumPaymentEndDate` writes. Using one date for both made
 expansion and cleanup fight forever over a business-day-adjusted final payment
 (TEST 83).
 
+The projection must pay exactly the debt payments the calendar pays.
+`getDayFlow` excludes only the rows the sim schedules itself — recurring
+minimum instances (injected from each debt's template, **skip-aware**: the
+throwaway template expansion never sees the real skip list) and snowball rows
+while the sweep is on. Every OTHER debt-linked expense — a moved or
+carried-forward-settled minimum's copy, a force-generated payoff with
+auto-generate off — is a real payment: it leaves checking AND comes off the
+debt. Getting this wrong moves the payoff, and the payoff drives the minimum
+series' `endDate`, so the calendar then drops a real final payment or keeps
+phantom ones after the debt is cleared. `adjustMinimumPaymentTransactions`
+leaves skipped rows out of a month's total for the same reason (TEST 114).
+
 **CloudSync** (`cloud-sync.js`) - GitHub Gist integration with bi-directional sync and debounced saves. Also owns the GitHub token at rest: it encrypts/decrypts `github_token_encrypted` with an AES-GCM key derived from the plaintext `_device_id` (PinProtection is not involved in token storage).
+
+An allocation bucket's `amount` is its REMAINDER, debited in place, while the
+merge is last-write-wins per row — so a draw made on another device between
+syncs would vanish from the bucket while its expense survived.
+`_reconcileAllocationRemainders` re-derives every bucket after the per-row
+merge (winning copy's amount + its own side's draws = the original; minus every
+merged draw), collapses two devices' first-draw materializations of one
+recurring period onto the smallest id (tombstoning the other), and re-points
+draws at a vanished bucket through their series/period provenance (TEST 117).
 
 **PinProtection** (`pin-protection.js`) - PIN setup/verification, XOR encryption of the TransactionStore data (transactions, debts, etc.) keyed by the current PIN, and session inactivity monitoring (120s timeout). It does **not** read or write `github_token_encrypted` — that is CloudSync's, encrypted separately via `_device_id`.
 
@@ -345,7 +377,7 @@ local_last_sync, _backup_before_merge, calendar_view_mode
 
 - `styles.css` - CSS variables for theming (primary, accent, error colors)
 - `README.md` - Project documentation and feature overview
-- `scripts/verify-logic.js` - Standalone logic verification utility (107 tests)
+- `scripts/verify-logic.js` - Standalone logic verification utility (111 tests)
 - `scripts/verify-walk-parity.js` - Randomized balance-walk parity harness + source guard
 - `scripts/verify-ui.js` - Optional headless-Chromium UI harness (`npm run test:ui`)
 - `scripts/verify-sync.js` - Optional two-device cloud-sync harness (`npm run test:sync`)

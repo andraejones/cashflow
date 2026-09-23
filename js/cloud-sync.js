@@ -712,6 +712,173 @@ class CloudSync {
     return deduped;
   }
 
+  // Re-derive every allocation bucket's remainder after the per-row merge.
+  //
+  // A bucket's `amount` IS its remaining balance, debited in place by each
+  // draw, and the per-row merge keeps whichever copy of the bucket is newer.
+  // So two devices drawing from the same bucket between syncs lost one of the
+  // debits: $20 drawn on one phone and $30 on the other left a $200 bucket at
+  // $170 beside both expenses — $20 of spending counted twice, once as spent
+  // and once as still reserved, and the free-funds figure the family spends
+  // against overstated by the same $20.
+  //
+  // Each side's own data is internally consistent (every draw debits its
+  // bucket in the same step), so the winning copy's ORIGINAL amount is its
+  // remainder plus the draws recorded on its own side. The merged remainder is
+  // that original minus every draw in the merged data. On a self-merge, or
+  // when no draw differs, that is the winner's own amount, so nothing changes;
+  // the next merge in either direction re-derives the same figure.
+  //
+  // The same race has a second shape for RECURRING buckets. A period's bucket
+  // is a pure expansion until its first draw materializes it under a fresh id,
+  // so two devices making that first draw each minted their own id — and the
+  // merge, keyed on id, kept both. That reserved the period twice ($350 held
+  // back against a $200 bucket), and since only one of the two is ever offered
+  // for draws, the other was an invisible reserve until the period turned
+  // over. Duplicates of one (series, date) collapse onto the smallest id — the
+  // same keeper on every device, so they converge — and every draw whose
+  // bucket id is gone is re-pointed through the series/period provenance it
+  // was stamped with, which also catches a device that keeps drawing from the
+  // loser until it next pulls.
+  //
+  // Mutates `mergedTxns` by replacing corrected rows with copies — the inputs
+  // are never touched. Returns the ids of collapsed duplicates, which the
+  // caller tombstones so the losing device's copy cannot come back.
+  _reconcileAllocationRemainders(localTxns, remoteTxns, mergedTxns) {
+    const store = this.store;
+    if (
+      !store ||
+      typeof store._normalizeAllocationDraws !== "function" ||
+      typeof store._writeAllocationDraws !== "function"
+    ) {
+      return [];
+    }
+    const round = (value) => Math.round((Number(value) || 0) * 100) / 100;
+    const isBucket = (t) =>
+      !!t && t.allocated === true && t.type === "expense" && !!t.id;
+
+    // 1. Collapse duplicate materializations of one recurring period.
+    const keeperBySlot = new Map();
+    Object.keys(mergedTxns).forEach((date) => {
+      mergedTxns[date].forEach((t) => {
+        if (!isBucket(t) || typeof t.recurringId !== "string") return;
+        const slot = `${t.recurringId}|${date}`;
+        const keeper = keeperBySlot.get(slot);
+        if (!keeper || t.id < keeper.id) keeperBySlot.set(slot, t);
+      });
+    });
+    const losers = [];
+    Object.keys(mergedTxns).forEach((date) => {
+      const list = mergedTxns[date];
+      for (let i = list.length - 1; i >= 0; i--) {
+        const t = list[i];
+        if (!isBucket(t) || typeof t.recurringId !== "string") continue;
+        if (keeperBySlot.get(`${t.recurringId}|${date}`) !== t) {
+          losers.push(t.id);
+          list.splice(i, 1);
+        }
+      }
+      if (list.length === 0) delete mergedTxns[date];
+    });
+
+    // 2. Re-point draws at a bucket that no longer exists to the live bucket
+    // of the same series and period, when there is one. A draw on a bucket
+    // that was forfeited finds none and is left as history, as before.
+    const liveBucketIds = new Set();
+    Object.keys(mergedTxns).forEach((date) => {
+      mergedTxns[date].forEach((t) => {
+        if (isBucket(t)) liveBucketIds.add(t.id);
+      });
+    });
+    const now = new Date().toISOString();
+    Object.keys(mergedTxns).forEach((date) => {
+      const list = mergedTxns[date];
+      for (let i = 0; i < list.length; i++) {
+        const t = list[i];
+        if (!t || t.type !== "expense" || t.allocated === true) continue;
+        const rows = store._normalizeAllocationDraws(t);
+        let changed = false;
+        rows.forEach((row) => {
+          if (!row.allocationId || liveBucketIds.has(row.allocationId)) return;
+          if (!row.recurringId || !row.periodDate) return;
+          const keeper = keeperBySlot.get(`${row.recurringId}|${row.periodDate}`);
+          if (keeper && keeper.id !== row.allocationId) {
+            row.allocationId = keeper.id;
+            changed = true;
+          }
+        });
+        if (changed) {
+          const copy = { ...t, _lastModified: now };
+          store._writeAllocationDraws(copy, rows);
+          list[i] = copy;
+        }
+      }
+    });
+
+    // 3. Re-derive each bucket's remainder from the draws that reference it.
+    const scan = (txns) => {
+      const drawnByBucket = new Map();
+      const buckets = new Map();
+      Object.keys(txns).forEach((date) => {
+        const list = txns[date];
+        if (!Array.isArray(list)) return;
+        list.forEach((t) => {
+          if (!t || typeof t !== "object") return;
+          if (t.allocated === true && t.type === "expense") {
+            if (t.id) buckets.set(t.id, t);
+            return;
+          }
+          if (t.type !== "expense") return;
+          store._normalizeAllocationDraws(t).forEach((row) => {
+            if (!row.allocationId || !row.drawn) return;
+            drawnByBucket.set(
+              row.allocationId,
+              round((drawnByBucket.get(row.allocationId) || 0) + row.drawn)
+            );
+          });
+        });
+      });
+      return { drawnByBucket, buckets };
+    };
+    const local = scan(localTxns);
+    const remote = scan(remoteTxns);
+    const merged = scan(mergedTxns);
+
+    Object.keys(mergedTxns).forEach((date) => {
+      const list = mergedTxns[date];
+      for (let i = 0; i < list.length; i++) {
+        const bucket = list[i];
+        if (
+          !bucket ||
+          bucket.allocated !== true ||
+          bucket.type !== "expense" ||
+          !bucket.id
+        ) {
+          continue;
+        }
+        // The merge keeps the original objects, so identity says which side won.
+        const side =
+          local.buckets.get(bucket.id) === bucket
+            ? local
+            : remote.buckets.get(bucket.id) === bucket
+              ? remote
+              : null;
+        if (!side) continue;
+        const original = round(
+          Number(bucket.amount) + (side.drawnByBucket.get(bucket.id) || 0)
+        );
+        const remaining = Math.max(
+          0,
+          round(original - (merged.drawnByBucket.get(bucket.id) || 0))
+        );
+        if (Math.abs(remaining - (Number(bucket.amount) || 0)) >= 0.005) {
+          list[i] = { ...bucket, amount: remaining };
+        }
+      }
+    });
+    return losers;
+  }
+
   // Merge skipped transactions (date -> array of recurring IDs). A plain union
   // can never propagate an UNskip — the other side's stale skip always
   // resurrects it — so timestamped skip events (recorded by
@@ -921,12 +1088,27 @@ class CloudSync {
       skips: mergedSkipEvents
     };
 
+    const mergedTransactions = this._mergeTransactions(
+      asMap(localData.transactions),
+      asMap(remoteData.transactions),
+      deletedTransactionIds
+    );
+    const collapsedBucketIds = this._reconcileAllocationRemainders(
+      asMap(localData.transactions),
+      asMap(remoteData.transactions),
+      mergedTransactions
+    );
+    if (collapsedBucketIds.length > 0) {
+      const tombstoned = new Set(deletedItems.transactions.map(idOf));
+      collapsedBucketIds.forEach((id) => {
+        if (!tombstoned.has(id)) {
+          deletedItems.transactions.push({ id, deletedAt: Date.now() });
+        }
+      });
+    }
+
     const merged = {
-      transactions: this._mergeTransactions(
-        asMap(localData.transactions),
-        asMap(remoteData.transactions),
-        deletedTransactionIds
-      ),
+      transactions: mergedTransactions,
       recurringTransactions: this._mergeById(
         asItems(localData.recurringTransactions),
         asItems(remoteData.recurringTransactions),

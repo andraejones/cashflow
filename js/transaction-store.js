@@ -186,6 +186,7 @@ class TransactionStore {
       recurringTransaction.id = Utils.generateUniqueId();
     }
     recurringTransaction._lastModified = new Date().toISOString();
+    this._pinLastDayOfMonth(recurringTransaction);
 
     this.recurringTransactions.push(recurringTransaction);
     this.debouncedSave();
@@ -208,11 +209,40 @@ class TransactionStore {
         ...updates,
         _lastModified: new Date().toISOString(),
       };
+      // A new start date (bank reconcile's "Move series") can land on a
+      // month's last day just as a new series can — see _pinLastDayOfMonth.
+      if (updates.startDate !== undefined || updates.recurrence !== undefined) {
+        this._pinLastDayOfMonth(this.recurringTransactions[index]);
+      }
       this.debouncedSave();
       return true;
     }
 
     return false;
+  }
+
+
+  // Give a monthly series an explicit `lastDayOfMonth` when it has none.
+  //
+  // loadData's migration reads an ABSENT flag as a pre-flag legacy series and
+  // stamps `true` on any whose start date is its month's last day. The writers
+  // only ever set the flag when it is true — the add form when the box is
+  // checked, the "this and future" split when the old series had it — so a
+  // bill entered on Sep 30 with the box UNCHECKED expanded on the 30th for the
+  // rest of the session and then, on the next reload, became "last day of
+  // every month": Oct 31, Dec 31, every balance after them a day off. The
+  // same happened to a split landing on a 30th and to a series created from a
+  // bank-statement suggestion. Pinning `false` here records what the series
+  // actually does today (the expansion treats absent as false), so the
+  // migration only ever sees genuine legacy data.
+  _pinLastDayOfMonth(recurringTransaction) {
+    if (
+      recurringTransaction &&
+      recurringTransaction.recurrence === "monthly" &&
+      recurringTransaction.lastDayOfMonth === undefined
+    ) {
+      recurringTransaction.lastDayOfMonth = false;
+    }
   }
 
 

@@ -472,6 +472,13 @@ Object.assign(DebtSnowballUI.prototype, {
         if (!Object.prototype.hasOwnProperty.call(minPaidByDebtId, t.debtId)) {
           return;
         }
+        // A skipped occurrence pays nothing, and the projection's target leaves
+        // it out — so it must not count toward the month's total either, or a
+        // semi-monthly debt with one payment skipped had its OTHER, real
+        // payment zeroed to make the sum match.
+        if (this.store.isTransactionSkipped(dateKey, t.recurringId) === true) {
+          return;
+        }
         if (!minOccurrencesByDebtId[t.debtId]) {
           minOccurrencesByDebtId[t.debtId] = [];
         }
