@@ -15,6 +15,10 @@ const WEEKDAY_LABELS = [
 // CalculationService.updateMonthlyBalances, which projects +6 months).
 const SNOWBALL_FORWARD_HORIZON = 6;
 
+// Rank of a debt with no explicit payoffPriority (the form accepts 1–99), so
+// unranked debts sort after every prioritized one. See makePayoffOrder.
+const UNRANKED_PAYOFF = 100;
+
 class DebtSnowballUI {
   constructor(store, recurringManager, onUpdate, calculationService = null) {
     this.store = store;
@@ -34,6 +38,7 @@ class DebtSnowballUI {
     this.debtDueDayInput = document.getElementById("debtDueDay");
     this.debtDueDayPatternInput = document.getElementById("debtDueDayPattern");
     this.debtInterestInput = document.getElementById("debtInterestRate");
+    this.debtPayoffPriorityInput = document.getElementById("debtPayoffPriority");
     this.debtAdvancedOptions = document.getElementById(
       "debtAdvancedRecurrenceOptions"
     );
@@ -673,6 +678,10 @@ class DebtSnowballUI {
           ? debt.interestRate
           : "";
     }
+    if (this.debtPayoffPriorityInput) {
+      this.debtPayoffPriorityInput.value =
+        debt && Number.isInteger(debt.payoffPriority) ? debt.payoffPriority : "";
+    }
     if (!debt || debt.dueStartDate) {
       this.syncDueDayFromStartDate();
     }
@@ -693,6 +702,7 @@ class DebtSnowballUI {
     if (this.debtDueDayInput) this.debtDueDayInput.value = 1;
     if (this.debtDueDayPatternInput) this.debtDueDayPatternInput.value = "";
     if (this.debtInterestInput) this.debtInterestInput.value = "";
+    if (this.debtPayoffPriorityInput) this.debtPayoffPriorityInput.value = "";
     if (this.debtAdvancedOptions) {
       this.debtAdvancedOptions.innerHTML = "";
       this.debtAdvancedOptions.style.display = "none";
@@ -712,6 +722,8 @@ class DebtSnowballUI {
     const dueDayInput = parseInt(this.debtDueDayInput?.value || "1", 10);
     const dueDayPatternInput = this.debtDueDayPatternInput?.value || "";
     const interestRate = parseFloat(this.debtInterestInput?.value || "0");
+    const priorityInput = (this.debtPayoffPriorityInput?.value || "").trim();
+    const payoffPriority = priorityInput === "" ? null : Number(priorityInput);
     const advancedOptions = this.collectDebtAdvancedOptions(recurrence);
     const dueDayPattern =
       recurrence === "monthly" ? dueDayPatternInput : "";
@@ -757,6 +769,16 @@ class DebtSnowballUI {
       Utils.showNotification("Please enter a valid minimum payment", "error");
       return;
     }
+    if (
+      payoffPriority !== null &&
+      !(Number.isInteger(payoffPriority) && payoffPriority >= 1 && payoffPriority <= 99)
+    ) {
+      Utils.showNotification(
+        "Payoff priority must be a whole number from 1 to 99",
+        "error"
+      );
+      return;
+    }
 
     if (this.editingDebtId) {
       const debt = this.store.getDebts().find((d) => d.id === this.editingDebtId);
@@ -774,6 +796,7 @@ class DebtSnowballUI {
         dueStartDate: normalizedStartDate,
         ...advancedOptions,
         interestRate: Number.isFinite(interestRate) ? interestRate : 0,
+        payoffPriority,
       });
       const updatedDebt = {
         ...debt,
@@ -786,6 +809,7 @@ class DebtSnowballUI {
         dueStartDate: normalizedStartDate,
         ...advancedOptions,
         interestRate: Number.isFinite(interestRate) ? interestRate : 0,
+        payoffPriority,
       };
       this.ensureMinimumPaymentRecurring(updatedDebt);
       Utils.showNotification("Debt updated");
@@ -800,6 +824,7 @@ class DebtSnowballUI {
         dueStartDate: normalizedStartDate,
         ...advancedOptions,
         interestRate: Number.isFinite(interestRate) ? interestRate : 0,
+        payoffPriority,
       };
       const debtId = this.store.addDebt(debt);
       const createdDebt = this.store.getDebts().find((d) => d.id === debtId);

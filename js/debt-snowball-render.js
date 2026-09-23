@@ -52,7 +52,10 @@ Object.assign(DebtSnowballUI.prototype, {
         typeof debt.interestRate === "number" && debt.interestRate > 0
           ? ` • ${debt.interestRate.toFixed(2)}%`
           : "";
-      meta.textContent = `Balance $${Utils.formatAmount(balance)} • Paid $${Utils.formatAmount(paid)} • Min $${Utils.formatAmount(minPayment)} • Due ${scheduleLabel}${interest}`;
+      const priority = this._debtPayoffRank(debt);
+      const priorityLabel =
+        priority !== UNRANKED_PAYOFF ? ` • Priority ${priority}` : "";
+      meta.textContent = `Balance $${Utils.formatAmount(balance)} • Paid $${Utils.formatAmount(paid)} • Min $${Utils.formatAmount(minPayment)} • Due ${scheduleLabel}${interest}${priorityLabel}`;
       details.appendChild(meta);
 
       row.appendChild(details);
@@ -223,21 +226,15 @@ Object.assign(DebtSnowballUI.prototype, {
     const monthInfo = projection.monthTargets?.[monthKey] || {};
     const viewIndex = this.getMonthIndex(viewYear, viewMonth);
     // Order debts by the sequence in which the projection actually clears them.
-    // The daily-floor engine pays off the smallest *running* balance first, and
-    // minimum payments reshuffle that order between now and the payoff month, so
-    // the snowball's true next target is the debt that clears soonest — not the
-    // one with the smallest balance today. Debts that never clear within the
-    // horizon (interest outruns payments) have no payoff and sort last.
+    // The daily-floor engine pays debts off in payoff order (priority, then the
+    // smallest *running* balance), and minimum payments can clear a debt ahead
+    // of that, so the snowball's true next target is the debt that clears
+    // soonest — not the one with the smallest balance today. Debts that never
+    // clear within the horizon (interest outruns payments) have no payoff and
+    // sort last, among themselves in that same payoff order.
     const payoffRank = (debtId) => {
       const p = projection.payoffByDebtId?.[debtId];
       return p && typeof p.seq === "number" ? p.seq : Number.POSITIVE_INFINITY;
-    };
-    const byClearanceOrder = (a, b) => {
-      const ra = payoffRank(a.debt.id);
-      const rb = payoffRank(b.debt.id);
-      if (ra !== rb) return ra - rb;
-      if (a.remaining !== b.remaining) return a.remaining - b.remaining;
-      return a.debt.name.localeCompare(b.debt.name);
     };
     const summaries = this.store
       .getDebts()
@@ -263,6 +260,15 @@ Object.assign(DebtSnowballUI.prototype, {
           this.getMonthIndex(p.year, p.month) === viewIndex
         );
       });
+    const remainingById = {};
+    summaries.forEach((s) => { remainingById[s.debt.id] = s.remaining; });
+    const byPendingPayoffOrder = this.makePayoffOrder()(remainingById);
+    const byClearanceOrder = (a, b) => {
+      const ra = payoffRank(a.debt.id);
+      const rb = payoffRank(b.debt.id);
+      if (ra !== rb) return ra - rb;
+      return byPendingPayoffOrder(a.debt.id, b.debt.id);
+    };
 
     if (summaries.length === 0) {
       this.planSummary.textContent = "No active debts to target.";
@@ -318,6 +324,14 @@ Object.assign(DebtSnowballUI.prototype, {
       const name = document.createElement("span");
       name.className = "debt-plan-name";
       name.textContent = summary.debt.name;
+      const priority = this._debtPayoffRank(summary.debt);
+      if (priority !== UNRANKED_PAYOFF) {
+        const priorityBadge = document.createElement("span");
+        priorityBadge.className = "debt-plan-badge debt-plan-priority";
+        priorityBadge.textContent = `★${priority}`;
+        priorityBadge.title = `Payoff priority ${priority}`;
+        name.appendChild(priorityBadge);
+      }
       if (isTarget) {
         const badge = document.createElement("span");
         badge.className = "debt-plan-badge";

@@ -225,6 +225,43 @@ Object.assign(DebtSnowballUI.prototype, {
     }
   },
 
+  // A debt's explicit payoff priority (1 = first), or UNRANKED_PAYOFF for the
+  // default "smallest balance first" group. Typeof-guarded: the comparator
+  // runs inside the calendar render, and nothing but _normalizeDebt coerces
+  // the field on the way in.
+  _debtPayoffRank(debt) {
+    const p = debt ? debt.payoffPriority : null;
+    return Number.isInteger(p) && p >= 1 && p <= 99 ? p : UNRANKED_PAYOFF;
+  },
+
+  // THE snowball payoff order — explicit payoffPriority (lower first), then
+  // smallest balance, then name, then id. Every site that decides which debt
+  // the snowball works on next (the projection's lump-sum sweep and monthly
+  // target, both infusion redistributions, and the historical snapshot) must
+  // sort with this, or the calendar pays one debt while the snapshot and the
+  // infusion breakdown credit another. Priorities are read once here; call
+  // the returned function with the balance map the site is sorting by.
+  makePayoffOrder() {
+    const rankById = {};
+    const nameById = {};
+    this.store.getDebts().forEach((debt) => {
+      rankById[debt.id] = this._debtPayoffRank(debt);
+      nameById[debt.id] = typeof debt.name === "string" ? debt.name : "";
+    });
+    const rankOf = (id) =>
+      rankById[id] === undefined ? UNRANKED_PAYOFF : rankById[id];
+    return (balanceMap) => (a, b) => {
+      const byRank = rankOf(a) - rankOf(b);
+      if (byRank !== 0) return byRank;
+      const byBalance =
+        (Number(balanceMap[a]) || 0) - (Number(balanceMap[b]) || 0);
+      if (byBalance !== 0) return byBalance;
+      const byName = (nameById[a] || "").localeCompare(nameById[b] || "");
+      if (byName !== 0) return byName;
+      return String(a).localeCompare(String(b));
+    };
+  },
+
   // Ensure every past debt-payment occurrence is materialized before the
   // snapshot reads "paid so far" from the transaction store. Debt minimum
   // payments are recurring and expanded lazily as months are viewed; without
@@ -268,6 +305,7 @@ Object.assign(DebtSnowballUI.prototype, {
 
   getHistoricalDebtSnapshot(cutoffDate = null) {
     const debts = this.store.getDebts();
+    const byPayoffOrder = this.makePayoffOrder();
     // Materialize past debt payments first so "paid"/"remaining" do not depend
     // on which months happen to have been rendered this session.
     this.ensureDebtHistoryExpanded(cutoffDate);
@@ -280,7 +318,6 @@ Object.assign(DebtSnowballUI.prototype, {
       Math.round((Number(value) || 0) * 100) / 100;
     const remainingByDebtId = {};
     const paidByDebtId = {};
-    const debtNameById = {};
     const eventsByDate = new Map();
 
     const ensureDateBucket = (dateString) => {
@@ -297,7 +334,6 @@ Object.assign(DebtSnowballUI.prototype, {
     debts.forEach((debt) => {
       remainingByDebtId[debt.id] = roundToCents(Number(debt.balance) || 0);
       paidByDebtId[debt.id] = 0;
-      debtNameById[debt.id] = debt.name || "";
     });
 
     Object.keys(transactions).forEach((dateKey) => {
@@ -389,8 +425,7 @@ Object.assign(DebtSnowballUI.prototype, {
       }
     };
 
-    // Auto-distribution: smallest remaining balance first (name tiebreak).
-    // Also used for a targeted infusion whose target is already paid off by its
+    // Auto-distribution in snowball payoff order (makePayoffOrder). Also used for a targeted infusion whose target is already paid off by its
     // date — the projection's daily walk redistributes that windfall to the
     // surviving debts, so this snapshot must do the same or payoff dates jump
     // back once the infusion date passes into history.
@@ -401,12 +436,7 @@ Object.assign(DebtSnowballUI.prototype, {
       }
       const debtOrder = Object.keys(remainingByDebtId)
         .filter((debtId) => remainingByDebtId[debtId] > 0)
-        .sort((leftId, rightId) => {
-          if (remainingByDebtId[leftId] !== remainingByDebtId[rightId]) {
-            return remainingByDebtId[leftId] - remainingByDebtId[rightId];
-          }
-          return debtNameById[leftId].localeCompare(debtNameById[rightId]);
-        });
+        .sort(byPayoffOrder(remainingByDebtId));
 
       debtOrder.forEach((debtId) => {
         if (remainingInfusion <= 0) {
@@ -521,6 +551,7 @@ Object.assign(DebtSnowballUI.prototype, {
       this.calculationService.invalidateCache();
     }
     const debts = this.store.getDebts();
+    const byPayoffOrder = this.makePayoffOrder();
     const settings = this.store.getDebtSnowballSettings();
     const dailyFloor = Number(settings.dailyFloor) || 0;
     const extraStartIndex = this.parseExtraStartMonthIndex(
@@ -600,10 +631,10 @@ Object.assign(DebtSnowballUI.prototype, {
 
     const payoffByDebtId = {};
     // Monotonic counter stamped on each payoff as it is recorded, so the UI can
-    // present debts in true clearance order. The daily-floor walk clears the
-    // smallest *running* balance first, and minimum payments reshuffle that order
-    // over time, so the snowball's real sequence is when each debt clears — not
-    // which is smallest today. Pure display metadata; the projection never reads
+    // present debts in true clearance order. The daily-floor walk clears debts
+    // in payoff order (priority, then smallest *running* balance), and minimum
+    // payments can clear a debt ahead of that, so the snowball's real sequence
+    // is when each debt clears — not which is smallest today. Pure display metadata; the projection never reads
     // it back.
     let payoffSeq = 0;
     Object.keys(balances).forEach((debtId) => {
@@ -949,7 +980,7 @@ Object.assign(DebtSnowballUI.prototype, {
       if (!curMonthKey || !curMonthInfo) return;
       const unpaid = Object.keys(balances)
         .filter((id) => balances[id] > epsilon)
-        .sort((a, b) => balances[a] - balances[b]);
+        .sort(byPayoffOrder(balances));
       curMonthInfo.targetDebtId = unpaid.length ? unpaid[0] : null;
       monthTargets[curMonthKey] = curMonthInfo;
       curMonthKey = null;
@@ -1019,7 +1050,7 @@ Object.assign(DebtSnowballUI.prototype, {
             let remaining = amount;
             const order = Object.keys(balances)
               .filter((id) => balances[id] > 0)
-              .sort((a, b) => balances[a] - balances[b]);
+              .sort(byPayoffOrder(balances));
             for (const debtId of order) {
               if (remaining <= epsilon) break;
               const b = Number(balances[debtId]) || 0;
@@ -1079,12 +1110,14 @@ Object.assign(DebtSnowballUI.prototype, {
       }
 
       // Floor-driven payoff: sweep durable surplus above the floor into full
-      // payoffs, smallest balance first, on this exact day.
+      // payoffs, in snowball payoff order (makePayoffOrder), on this exact
+      // day. Strict: when the head debt cannot be covered yet, nothing behind
+      // it is paid either — the surplus waits for the prioritized debt.
       if (applySnowball && monthIndex >= extraStartIndex) {
         while (true) {
           const order = Object.keys(balances)
             .filter((id) => balances[id] > epsilon)
-            .sort((a, b) => balances[a] - balances[b]);
+            .sort(byPayoffOrder(balances));
           if (!order.length) break;
           const debtId = order[0];
           const remaining = roundToCents(balances[debtId]);
@@ -1157,6 +1190,7 @@ Object.assign(DebtSnowballUI.prototype, {
     // reconstruct from their own month.
     const infusions = this.store.getCashInfusions();
     const debts = this.store.getDebts();
+    const byPayoffOrder = this.makePayoffOrder();
     const settings = this.store.getDebtSnowballSettings();
     const roundToCents = (value) =>
       Math.round((Number(value) || 0) * 100) / 100;
@@ -1346,7 +1380,7 @@ Object.assign(DebtSnowballUI.prototype, {
           // historical snapshot - apply snowball priority
           const debtOrder = Object.keys(balances)
             .filter((debtId) => balances[debtId] > 0)
-            .sort((a, b) => balances[a] - balances[b]);
+            .sort(byPayoffOrder(balances));
 
           let remaining = infusionAmount;
           debtOrder.forEach((debtId) => {

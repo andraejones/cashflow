@@ -11,8 +11,8 @@ CashFlow Calendar is an offline-first, single-page personal finance application 
 **No build process required.** Open `index.html` directly in a browser or serve via any static server.
 
 **Tests:** `npm test` (or run the two scripts directly with Node) — it must pass before every commit:
-- `node scripts/verify-logic.js` — 111 numbered integration tests over vm-loaded sources
-  (numbered up to TEST 117; the numbering has gaps where tests were merged or
+- `node scripts/verify-logic.js` — 112 numbered integration tests over vm-loaded sources
+  (numbered up to TEST 118; the numbering has gaps where tests were merged or
   removed along with the feature they covered).
   Four of them are SWEEPS rather than scenarios, and they are the ones worth
   extending when something new is added:
@@ -319,6 +319,19 @@ series' `endDate`, so the calendar then drops a real final payment or keeps
 phantom ones after the debt is cleared. `adjustMinimumPaymentTransactions`
 leaves skipped rows out of a month's total for the same reason (TEST 114).
 
+Payoff ORDER is one rule with one implementation: `makePayoffOrder()` (engine
+companion) — a debt's optional `payoffPriority` (whole 1–99, lower first;
+`null` = auto, ranked `UNRANKED_PAYOFF`), then smallest balance, then name,
+then id. Five sites decide "which debt next" and all must sort with it: the
+floor sweep, the monthly `targetDebtId`, the projection's untargeted-infusion
+redistribution, `calculateInfusionAllocations`, and the snapshot's
+`distributeAuto`; the plan list uses it as the fallback for debts that never
+clear. The sweep is STRICT — if the head debt cannot be covered yet, nothing
+behind it is paid, so surplus waits for the prioritized debt. A hand-rolled
+smallest-first sort at any one site lets the calendar pay one debt while the
+snapshot or infusion breakdown credits another (TEST 118 fails on each).
+`_normalizePayoffPriority` coerces the field on the way in.
+
 **CloudSync** (`cloud-sync.js`) - GitHub Gist integration with bi-directional sync and debounced saves. Also owns the GitHub token at rest: it encrypts/decrypts `github_token_encrypted` with an AES-GCM key derived from the plaintext `_device_id` (PinProtection is not involved in token storage).
 
 An allocation bucket's `amount` is its REMAINDER, debited in place, while the
@@ -377,7 +390,7 @@ local_last_sync, _backup_before_merge, calendar_view_mode
 
 - `styles.css` - CSS variables for theming (primary, accent, error colors)
 - `README.md` - Project documentation and feature overview
-- `scripts/verify-logic.js` - Standalone logic verification utility (111 tests)
+- `scripts/verify-logic.js` - Standalone logic verification utility (112 tests)
 - `scripts/verify-walk-parity.js` - Randomized balance-walk parity harness + source guard
 - `scripts/verify-ui.js` - Optional headless-Chromium UI harness (`npm run test:ui`)
 - `scripts/verify-sync.js` - Optional two-device cloud-sync harness (`npm run test:sync`)

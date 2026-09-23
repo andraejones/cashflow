@@ -130,7 +130,20 @@ Object.assign(TransactionStore.prototype, {
       endDate: typeof debt.endDate === "string" ? debt.endDate : "",
       maxOccurrences: this._finiteNumber(debt.maxOccurrences) || null,
       interestRate: this._finiteNumber(debt.interestRate),
+      payoffPriority: this._normalizePayoffPriority(debt.payoffPriority),
     };
+  },
+
+  // A debt's explicit snowball payoff priority: a whole number 1–99 (1 = paid
+  // first), or null for the default smallest-balance-first order. Anything
+  // else — a fraction, zero, a negative, a non-numeric string from an import —
+  // falls back to null rather than to some rank the user never chose. The
+  // range must match what makePayoffOrder treats as ranked.
+  _normalizePayoffPriority(value) {
+    if (value === null || value === undefined || value === "") return null;
+    if (typeof value !== "number" && typeof value !== "string") return null;
+    const n = Number(value);
+    return Number.isInteger(n) && n >= 1 && n <= 99 ? n : null;
   },
 
   // Cash infusions were the last domain collection still coercing with

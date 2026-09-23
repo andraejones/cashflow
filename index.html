@@ -298,6 +298,10 @@
             <input type="number" id="debtMinPayment" step="0.01" min="0" />
             <label for="debtInterestRate">Interest Rate (%)</label>
             <input type="number" id="debtInterestRate" step="0.01" min="0" />
+            <label for="debtPayoffPriority">Payoff priority</label>
+            <input type="number" id="debtPayoffPriority" min="1" max="99" step="1"
+              placeholder="Auto (smallest first)"
+              title="1 = pay off first. Leave blank to follow the smallest balance first." />
             <label for="debtRecurrence">Recurrence</label>
             <select id="debtRecurrence">
               <option value="once">One-time</option>

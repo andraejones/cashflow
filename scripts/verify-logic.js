@@ -7893,7 +7893,7 @@ console.log("TEST 93: Every Stored Field Survives Every Wrong Shape");
       (p, f, v) => p.recurringTransactions.forEach((r) => { r[f] = v; })],
     ["debt", ["name", "balance", "minPayment", "dueDay", "dueDayPattern", "recurrence",
       "dueStartDate", "businessDayAdjustment", "semiMonthlyDays", "semiMonthlyLastDay",
-      "customInterval", "endDate", "maxOccurrences", "interestRate", "minRecurringId",
+      "customInterval", "endDate", "maxOccurrences", "interestRate", "payoffPriority", "minRecurringId",
       "_lastModified", "id"],
       (p, f, v) => p.debts.forEach((d) => { d[f] = v; })],
     ["infusion", ["name", "amount", "date", "targetDebtId", "_lastModified", "id"],
@@ -10121,6 +10121,171 @@ console.log('TEST 105: Reconciliation Dates And Stale Row Identity');
   assert.strictEqual(ui._currentIndex(snapshot), -1);
   ui._addBankRow({ date: '2026-09-04', postedDate: '2026-09-05', signed: -12, description: 'Pending' }, false);
   assert.strictEqual(s.getTransactions()['2026-09-04'][0].settled, false);
+}
+
+// TEST 118: A user-set payoff priority reorders the snowball — and every site
+// that decides "which debt next" agrees on it. Five places sort debts for the
+// snowball (the lump-sum sweep, the monthly target, both infusion
+// redistributions, the historical snapshot); each used to hand-roll
+// smallest-first. Pinned here: prioritized debts clear first, lowest number
+// first, and strictly (a smaller auto debt waits even when it would fit);
+// equal priorities fall back to smallest-first; an untargeted infusion lands
+// on the priority head identically in the projection, the snapshot and the
+// infusion breakdown; bad stored values normalize to "auto"; and clearing the
+// priorities restores the exact smallest-first baseline.
+console.log("TEST 118: Payoff Priority Orders The Snowball");
+{
+  const T118_RealDate = Date;
+  const T118_TODAY = new T118_RealDate(2026, 5, 15, 12, 0, 0); // 2026-06-15
+  class T118_FrozenDate extends T118_RealDate {
+    constructor(...args) {
+      if (args.length === 0) { super(T118_TODAY.getTime()); } else { super(...args); }
+    }
+    static now() { return T118_TODAY.getTime(); }
+  }
+  global.Date = T118_FrozenDate;
+  try {
+    const assert = require("assert");
+    // Eight zero-interest, zero-minimum debts ($100 … $800), so only lump sums
+    // and infusions ever clear one and the clearance order IS the payoff order.
+    const build = ({ income, infusion }) => {
+      localStorage.clear();
+      const s = new TransactionStore();
+      s.resetData();
+      const rm = new RecurringTransactionManager(s);
+      const calc = new CalculationService(s, rm);
+      const ui = Object.create(DebtSnowballUI.prototype);
+      ui.store = s;
+      ui.recurringManager = rm;
+      ui.calculationService = calc;
+      ui.daySpecificOptions = [];
+      if (income) {
+        s.addRecurringTransaction({
+          startDate: "2026-06-01", amount: income, type: "income",
+          description: "Salary", recurrence: "monthly",
+        });
+      }
+      const ids = {};
+      for (let n = 1; n <= 8; n++) {
+        ids[`D${n}`] = s.addDebt({
+          name: `D${n}`, balance: n * 100, minPayment: 0, dueDay: 28,
+          recurrence: "monthly", interestRate: 0, dueStartDate: "2026-06-28",
+        });
+      }
+      if (infusion) {
+        s.addCashInfusion({ name: "Bonus", amount: infusion, date: "2026-07-01", targetDebtId: null });
+      }
+      s.setDebtSnowballSettings({ dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: true });
+      const setPriorities = (map) => {
+        Object.keys(ids).forEach((key) => {
+          s.updateDebt(ids[key], { payoffPriority: key in map ? map[key] : null });
+        });
+      };
+      const project = () => {
+        rm.invalidateCache();
+        rm.applyRecurringTransactions(2026, 5);
+        return ui.calculateSnowballProjection(2026, 5, true);
+      };
+      const clearanceOrder = (projection) =>
+        Object.keys(ids)
+          .filter((key) => projection.payoffByDebtId[ids[key]])
+          .sort((a, b) =>
+            projection.payoffByDebtId[ids[a]].seq - projection.payoffByDebtId[ids[b]].seq);
+      const payoffDay = (projection, key) => {
+        const p = projection.payoffByDebtId[ids[key]];
+        return p ? `${p.year}-${p.month}-${p.day}` : null;
+      };
+      return { s, ui, ids, setPriorities, project, clearanceOrder, payoffDay };
+    };
+
+    // (a) Baseline, then two LARGER debts prioritized.
+    {
+      const t = build({ income: 1000 });
+      const baseline = t.project();
+      const baseOrder = t.clearanceOrder(baseline);
+      assert.deepStrictEqual(baseOrder, ["D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8"],
+        "no priorities → smallest balance first");
+      const baseDays = Object.keys(t.ids).map((k) => t.payoffDay(baseline, k));
+
+      t.setPriorities({ D7: 1, D8: 2 });
+      const prioritized = t.project();
+      const order = t.clearanceOrder(prioritized);
+      assert.deepStrictEqual(order.slice(0, 2), ["D7", "D8"],
+        `prioritized debts clear first, in priority order (got ${order.join(",")})`);
+      assert.deepStrictEqual(order.slice(2), ["D1", "D2", "D3", "D4", "D5", "D6"],
+        "unranked debts follow, smallest first");
+      // Strict: $1000 on hand pays D7 ($700) on the first projected day, and the
+      // $300 left over would clear D1 — but D1 must wait for D8.
+      const seqOf = (key) => prioritized.payoffByDebtId[t.ids[key]].seq;
+      assert.ok(seqOf("D1") > seqOf("D8"), "a smaller unranked debt never jumps a prioritized one");
+      assert.strictEqual(t.payoffDay(prioritized, "D7"), t.payoffDay(baseline, "D1"),
+        "D7 is paid on the first projected day — the day D1 used to be");
+      assert.strictEqual(t.payoffDay(prioritized, "D1") === t.payoffDay(baseline, "D1"), false,
+        "the priority actually moved D1's payoff");
+
+      // The month's snowball target (what the calendar's snowball row is
+      // written against) follows the priority too: at June's end D7 is paid,
+      // so the target is D8 — not D1, the smallest still open.
+      assert.strictEqual(baseline.monthTargets["2026-06"].targetDebtId, t.ids.D5);
+      assert.strictEqual(prioritized.monthTargets["2026-06"].targetDebtId, t.ids.D8,
+        "the monthly target is the priority head");
+
+      // (b) Equal priority → smallest of the tied group first.
+      t.setPriorities({ D2: 1, D8: 1 });
+      const tied = t.clearanceOrder(t.project());
+      assert.deepStrictEqual(tied.slice(0, 2), ["D2", "D8"], "equal priorities fall back to smallest-first");
+
+      // (c) Clearing every priority restores the baseline exactly.
+      t.setPriorities({});
+      const restored = t.project();
+      assert.deepStrictEqual(t.clearanceOrder(restored), baseOrder);
+      assert.deepStrictEqual(Object.keys(t.ids).map((k) => t.payoffDay(restored, k)), baseDays,
+        "clearing priorities restores every payoff day");
+    }
+
+    // (d) An untargeted infusion lands on the priority head — identically in
+    // the projection, the historical snapshot and the infusion breakdown.
+    {
+      const t = build({ infusion: 850 });
+      t.setPriorities({ D8: 1, D7: 2 });
+      const projection = t.project();
+      const infId = t.s.getCashInfusions()[0].id;
+      const split = t.ui.calculateInfusionAllocations(projection)[infId] || {};
+      assert.strictEqual(split[t.ids.D8], 800, "infusion clears the priority-1 debt");
+      assert.strictEqual(split[t.ids.D7], 50, "the rest goes to priority 2");
+      assert.strictEqual(Object.keys(split).length, 2, "nothing reaches the unranked debts");
+      assert.ok(projection.payoffByDebtId[t.ids.D8], "the projection clears D8 with the infusion");
+      assert.ok(!projection.payoffByDebtId[t.ids.D1], "the projection does not spend it on D1");
+      const snap = t.ui.getHistoricalDebtSnapshot(new T118_RealDate(2026, 7, 1));
+      assert.strictEqual(snap.remainingByDebtId[t.ids.D8], 0, "snapshot agrees: D8 cleared");
+      assert.strictEqual(snap.remainingByDebtId[t.ids.D7], 650, "snapshot agrees: $50 on D7");
+      assert.strictEqual(snap.remainingByDebtId[t.ids.D1], 100, "snapshot agrees: D1 untouched");
+
+      // Same data without priorities spends it smallest-first (the old rule).
+      t.setPriorities({});
+      const base = t.ui.calculateInfusionAllocations(t.project())[infId] || {};
+      assert.strictEqual(base[t.ids.D1], 100);
+      assert.strictEqual(base[t.ids.D4], 250);
+    }
+
+    // (e) Stored values normalize; only a whole 1–99 is a rank.
+    {
+      const t = build({});
+      const cases = [["abc", null], [-1, null], [0, null], [1.5, null], [Infinity, null],
+        [null, null], [100, null], [{}, null], [true, null], ["2", 2], [99, 99], [1, 1]];
+      cases.forEach(([input, expected]) => {
+        t.s.updateDebt(t.ids.D1, { payoffPriority: input });
+        const stored = t.s.getDebts().find((d) => d.id === t.ids.D1).payoffPriority;
+        assert.strictEqual(stored, expected, `payoffPriority ${String(input)} → ${expected}`);
+      });
+      // A wrong shape that bypassed the store still sorts as unranked.
+      assert.strictEqual(t.ui._debtPayoffRank({ payoffPriority: "1" }), UNRANKED_PAYOFF);
+      assert.strictEqual(t.ui._debtPayoffRank(null), UNRANKED_PAYOFF);
+    }
+    console.log("✅ Payoff priority orders the snowball; all five sort sites agree");
+  } finally {
+    global.Date = T118_RealDate;
+  }
 }
 
 // Run the async network tests sequentially (shared global.fetch mock): TEST 32

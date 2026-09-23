@@ -1338,6 +1338,13 @@ body.app-locked .fab-today {
   vertical-align: middle;
 }
 
+.debt-plan-badge.debt-plan-priority {
+  background-color: transparent;
+  color: var(--primary-color);
+  border: 1px solid var(--primary-color);
+  text-transform: none;
+}
+
 .debt-plan-payoff {
   flex: 0 0 auto;
   font-size: 0.85rem;

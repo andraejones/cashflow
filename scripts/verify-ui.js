@@ -886,6 +886,92 @@ async function dismissAlert(page) {
     await sleep(300);
     check("Escape leaves the debt panel open", await panelIsOpen());
 
+    // ---- Payoff priority through the real debt form ------------------------
+    // The vm harness drives the store and the engine; only a browser proves
+    // the form input is wired both ways (showDebtForm fills it, saveDebt reads
+    // and validates it) and that the priority reorders the rendered plan. No
+    // income, so neither debt clears and the plan's order is decided by the
+    // payoff-order fallback alone — without the priority, Small sorts first.
+    const priorityIds = await page.evaluate(() => {
+      const store = window.app.store;
+      const due = Utils.formatDateString(new Date());
+      const small = store.addDebt({ name: "UI Prio Small", balance: 50, minPayment: 0,
+        recurrence: "monthly", dueStartDate: due, interestRate: 0 });
+      const big = store.addDebt({ name: "UI Prio Big", balance: 5000, minPayment: 0,
+        recurrence: "monthly", dueStartDate: due, interestRate: 0 });
+      window.app.debtSnowball.refresh();
+      return { small, big };
+    });
+    await sleep(300);
+    const planOrder = () =>
+      page.evaluate(() =>
+        [...document.querySelectorAll("#snowballPlanList .debt-plan-name")]
+          .map((el) => el.firstChild.textContent)
+          .filter((name) => name.startsWith("UI Prio")));
+    const orderBefore = await planOrder();
+    const editBig = async (value) => {
+      await page.evaluate((id) => {
+        const btn = [...document.querySelectorAll("#debtList button")].find(
+          (b) => b.dataset.action === "edit" && b.dataset.debtId === id);
+        btn.click();
+      }, priorityIds.big);
+      await sleep(250);
+      await page.evaluate((v) => {
+        document.getElementById("debtPayoffPriority").value = v;
+        document.getElementById("saveDebtButton").click();
+      }, value);
+      await sleep(400);
+    };
+    await editBig("1.5");
+    const refused = await page.evaluate((id) => ({
+      stored: window.app.store.getDebts().find((d) => d.id === id).payoffPriority,
+      formOpen: document.getElementById("debtForm").style.display === "block",
+    }), priorityIds.big);
+    check("a fractional payoff priority is refused",
+      refused.stored === null && refused.formOpen, JSON.stringify(refused));
+    await page.evaluate(() => window.app.debtSnowball.hideDebtForm());
+    await editBig("1");
+    const saved = await page.evaluate((id) => {
+      const big = window.app.store.getDebts().find((d) => d.id === id);
+      const row = [...document.querySelectorAll("#debtList .debt-item")]
+        .find((r) => r.textContent.includes("UI Prio Big"));
+      const badge = [...document.querySelectorAll("#snowballPlanList .debt-plan-item")]
+        .find((r) => r.textContent.includes("UI Prio Big"))
+        ?.querySelector(".debt-plan-priority");
+      return {
+        stored: big.payoffPriority,
+        meta: !!row && row.textContent.includes("Priority 1"),
+        badge: badge ? badge.textContent : null,
+      };
+    }, priorityIds.big);
+    const orderAfter = await planOrder();
+    check("the plan puts the smaller debt first without a priority",
+      orderBefore.join(",") === "UI Prio Small,UI Prio Big", orderBefore.join(","));
+    check("saving priority 1 through the form stores it",
+      saved.stored === 1, `stored ${saved.stored}`);
+    check("the debt list and plan show the priority",
+      saved.meta && saved.badge === "★1", JSON.stringify(saved));
+    check("the prioritized debt moves ahead in the plan",
+      orderAfter.join(",") === "UI Prio Big,UI Prio Small", orderAfter.join(","));
+    await page.evaluate(async (ids) => {
+      window.app.debtSnowball.editDebt(ids.big);
+      await new Promise((r) => setTimeout(r, 100));
+      const form = window.app.debtSnowball;
+      const shown = form.debtPayoffPriorityInput.value;
+      form.hideDebtForm();
+      const store = window.app.store;
+      [ids.small, ids.big].forEach((id) => {
+        const debt = store.getDebts().find((d) => d.id === id);
+        if (debt && debt.minRecurringId) store.deleteRecurringTransaction(debt.minRecurringId);
+        store.deleteDebt(id);
+      });
+      window.app.recurringManager.invalidateCache();
+      window.app.debtSnowball.refresh();
+      window.__prioShownOnEdit = shown;
+    }, priorityIds);
+    check("reopening the form shows the saved priority",
+      (await page.evaluate(() => window.__prioShownOnEdit)) === "1");
+
     // ---- Search round trip ------------------------------------------------
     await page.evaluate(() => {
       window.app.debtSnowball.hideView();
