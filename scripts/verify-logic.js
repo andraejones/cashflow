@@ -10108,6 +10108,137 @@ console.log("TEST 104: An Ended Allocation Series Leaves No Live Bucket");
   }
 }
 
+console.log("TEST 112: The First Render After A Cold Start Retires A Turned-Over Bucket");
+{
+  // Pure recurring expansions are never persisted, so a cold start (or a sync
+  // that imports a merged copy) hands updateUI a map without them. Its sweeps
+  // elect on "a later occurrence on/before today", and that later occurrence
+  // is exactly such an expansion — so they used to run blind, and a drawn
+  // rolling bucket whose period had turned over was reserved alongside its
+  // supersedor for the whole first render. Found against a real export: the
+  // first render's 30-day Minimum was the bucket's remainder too low.
+  const RealDate = Date;
+  const FIXED = new RealDate(2026, 8, 23, 12, 0, 0); // Wednesday 2026-09-23
+  class FrozenDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(FIXED.getTime()); else super(...a); }
+    static now() { return FIXED.getTime(); }
+  }
+  global.Date = FrozenDate;
+  try {
+    if (typeof CashflowApp === "undefined") {
+      vm.runInThisContext(fs.readFileSync(path.join(jsDir, "app.js"), "utf8"));
+    }
+    localStorage.clear();
+    const seed = new TransactionStore();
+    seed.resetData();
+    seed.addTransaction("2026-09-01", { amount: 1000, type: "income", description: "Pay" });
+    // Weekly Saturday grocery bucket; 09-12 was drawn from, so it is stored.
+    seed.addRecurringTransaction({
+      id: "grocery", startDate: "2026-08-15", amount: 200, type: "expense",
+      description: "Grocery", recurrence: "weekly", allocated: true, settled: true,
+    });
+    seed.transactions["2026-09-12"] = [{
+      amount: 176.84, type: "expense", description: "Grocery", recurringId: "grocery",
+      settled: true, allocated: true, id: "grocery-0912", modifiedInstance: true,
+    }];
+    seed.addTransaction("2026-09-13", {
+      amount: 23.16, type: "expense", description: "Walmart", settled: true,
+      allocationDraws: [{ allocationId: "grocery-0912", amount: null, drawn: 23.16,
+        recurringId: "grocery", periodDate: "2026-09-12" }],
+      drawsFromAllocationId: "grocery-0912", drawAmount: 23.16,
+      drawsFromRecurringId: "grocery", drawsFromPeriodDate: "2026-09-12",
+    });
+    // Weekly Sunday bill left unsettled on 09-13; 09-20 has since arrived.
+    seed.addRecurringTransaction({
+      id: "pounce", startDate: "2026-07-19", amount: 75, type: "expense",
+      description: "Pounce", recurrence: "weekly", settled: true,
+    });
+    seed.transactions["2026-09-13"].push({
+      amount: 75, type: "expense", description: "Pounce", recurringId: "pounce",
+      settled: false, id: "pounce-0913", modifiedInstance: true,
+    });
+    seed.saveData(false);
+    seed.cancelPendingSave();
+
+    const s = new TransactionStore(); // cold start: no expansions in the map
+    const rm = new RecurringTransactionManager(s);
+    const cs = new CalculationService(s, rm);
+    const renders = [];
+    const app = {
+      _operationLock: false, store: s, recurringManager: rm, calculationService: cs,
+      whatIf: { refreshBanner() {} },
+      calendarUI: {
+        // What generateCalendar does to the store: expand the viewed month,
+        // then walk every month (which expands the rest of the range).
+        generateCalendar() {
+          rm.applyRecurringTransactions(2026, 8);
+          cs.updateMonthlyBalances(new FrozenDate());
+          renders.push({
+            balance: cs.getRunningBalanceForDate("2026-09-23"),
+            reserved: cs.getReservedTotalOnOrBefore("2026-09-23"),
+          });
+        },
+      },
+    };
+    CashflowApp.prototype.updateUI.call(app);
+    const shown = renders[renders.length - 1];
+    const stored0912 = (s.getTransactions()["2026-09-12"] || []).filter((t) => t.allocated === true);
+    if (stored0912.length !== 0) {
+      throw new Error("The superseded 09-12 bucket survived the first render");
+    }
+    // Live bucket is 09-19's, at the full $200. Nothing else reserved.
+    if (shown.reserved !== 200) {
+      throw new Error(`First render reserves ${shown.reserved}, expected only the live 200`);
+    }
+    const pounce = s.getTransactions()["2026-09-13"].find((t) => t.id === "pounce-0913");
+    if (!pounce || pounce.settled !== true) {
+      throw new Error("The 09-13 bill with a later occurrence stayed unsettled after the first render");
+    }
+    renders.length = 0;
+    CashflowApp.prototype.updateUI.call(app);
+    if (renders.length !== 1) {
+      throw new Error(`A steady-state updateUI rendered ${renders.length} times, expected once`);
+    }
+    if (renders[0].balance !== shown.balance || renders[0].reserved !== shown.reserved) {
+      throw new Error(`Second render moved the balance: ${JSON.stringify(shown)} -> ${JSON.stringify(renders[0])}`);
+    }
+    s.cancelPendingSave();
+    console.log("✅ The first render after a cold start matches every render after it");
+  } finally {
+    global.Date = RealDate;
+  }
+}
+
+console.log("TEST 113: The Balance Table's Month Range Does Not Grow Per Render");
+{
+  // updateMonthlyBalances expands one month past the latest date it sees. When
+  // that date came from ANY map key, the expansions it had just written were
+  // the next call's latest date: one more month expanded, walked and persisted
+  // into monthlyBalances per render, for the life of the session.
+  localStorage.clear();
+  const s = new TransactionStore();
+  s.resetData();
+  const rm = new RecurringTransactionManager(s);
+  const cs = new CalculationService(s, rm);
+  s.addTransaction("2026-09-01", { amount: 500, type: "income", description: "Pay" });
+  s.addRecurringTransaction({ id: "rent", startDate: "2026-09-05", amount: 100,
+    type: "expense", description: "Rent", recurrence: "monthly" });
+  const viewed = new Date(2026, 8, 15, 12);
+  cs.updateMonthlyBalances(viewed);
+  const first = Object.keys(s.getMonthlyBalances()).sort();
+  for (let i = 0; i < 5; i++) cs.updateMonthlyBalances(viewed);
+  const later = Object.keys(s.getMonthlyBalances()).sort();
+  if (JSON.stringify(first) !== JSON.stringify(later)) {
+    throw new Error(`Month range grew across renders: ${first[first.length - 1]} -> ${later[later.length - 1]}`);
+  }
+  // viewed + 6 months, plus the one-month tail.
+  if (later[later.length - 1] !== "2027-04") {
+    throw new Error(`Expected the range to end at 2027-04, got ${later[later.length - 1]}`);
+  }
+  s.cancelPendingSave();
+  console.log("✅ Repeated renders keep the same month range");
+}
+
 console.log('TEST 109: Fresh Monthly Totals And Invalidated Reserve Lookups');
 {
   localStorage.clear();

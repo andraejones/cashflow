@@ -11,8 +11,8 @@ CashFlow Calendar is an offline-first, single-page personal finance application 
 **No build process required.** Open `index.html` directly in a browser or serve via any static server.
 
 **Tests:** `npm test` (or run the two scripts directly with Node) — it must pass before every commit:
-- `node scripts/verify-logic.js` — 98 numbered integration tests over vm-loaded sources
-  (numbered up to TEST 104; the numbering has gaps where tests were merged).
+- `node scripts/verify-logic.js` — 112 numbered integration tests over vm-loaded sources
+  (numbered up to TEST 113; the numbering has gaps where tests were merged).
   Four of them are SWEEPS rather than scenarios, and they are the ones worth
   extending when something new is added:
     - TEST 93 puts a wrong-typed value in every field the app reads, one field
@@ -266,6 +266,19 @@ transactions map wholesale — i.e. after every auto-sync push, which imports th
 merged copy. Either way its reserve was subtracted from every projected balance
 with nothing on screen to explain it. TEST 87 pins both halves.
 
+The sweeps in `updateUI` (`autoSettleExpiredRecurring`,
+`closeOutExpiredAllocations`) run **again after `generateCalendar`**, and the
+calendar re-renders only if that second pass changed something. Pure expansions
+are never persisted, so on a cold start (or after a sync imports a merged copy)
+the "later occurrence on/before today" both sweeps elect on usually does not
+exist until the render expands its month. Without the second pass, a DRAWN
+rolling bucket whose period turned over while the app was closed was reserved
+alongside its supersedor for the whole first render. TEST 112. Relatedly,
+`updateMonthlyBalances` derives its month range from rows that exist in their
+own right, never from pure expansions — those are its own output, and counting
+them grew the range (and the persisted `monthlyBalances`) by a month per render
+(TEST 113).
+
 **CalendarUI** (`calendar-ui.js`) - Renders monthly calendar grid with daily balances, month navigation, and highlighting (lowest balance, negative balance, minimum balance ranges). The per-day balance-variant figures ("Balance before holdbacks", "Balance excluding allocations") live in the day-detail modal via `CalculationService.getDayBalanceBreakdown`, not in the calendar cells.
 
 **TransactionUI** (`transaction-ui.js`) - Add/edit transaction modals and recurrence form UI. Supports settle/unsettle toggling for one-time expenses and displays carried-forward unsettled transactions on today's date. The allocation-draw editor (`renderAllocationDrawEditor` / `collectAllocationDraws` in `transaction-ui-forms.js`) is shared by the add modal and the day-detail inline edit form; it enforces what the store can only clamp — one row per bucket, no row over what its bucket has available to this expense, no split totalling more than the expense.
@@ -337,7 +350,7 @@ local_last_sync, _backup_before_merge, calendar_view_mode
 
 - `styles.css` - CSS variables for theming (primary, accent, error colors)
 - `README.md` - Project documentation and feature overview
-- `scripts/verify-logic.js` - Standalone logic verification utility (98 tests)
+- `scripts/verify-logic.js` - Standalone logic verification utility (112 tests)
 - `scripts/verify-walk-parity.js` - Randomized balance-walk parity harness + source guard
 - `scripts/verify-ui.js` - Optional headless-Chromium UI harness (`npm run test:ui`)
 - `scripts/verify-sync.js` - Optional two-device cloud-sync harness (`npm run test:sync`)

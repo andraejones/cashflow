@@ -214,6 +214,24 @@ class CashflowApp {
       this.recurringManager.invalidateCache();
     }
     this.calendarUI.generateCalendar();
+    // Both sweeps above decide on "a later occurrence dated on/before today",
+    // and on a cold start (or right after a sync imports a merged copy) that
+    // later occurrence is usually a pure expansion — never persisted, so it
+    // does not exist until generateCalendar expands its month. A drawn rolling
+    // bucket whose period turned over while the app was closed therefore
+    // survived the first render and was reserved ALONGSIDE its supersedor,
+    // pulling every balance and the 30-day Minimum down by its remainder until
+    // something happened to re-render. Re-running them against the expanded
+    // map settles it on the render the user actually sees; they change nothing
+    // (and cost one scan each) on every render that isn't a turnover.
+    const settledLate = this.store.autoSettleExpiredRecurring();
+    const closedOutLate = this.store.closeOutExpiredAllocations();
+    if (closedOutLate) {
+      this.recurringManager.invalidateCache();
+    }
+    if (settledLate || closedOutLate) {
+      this.calendarUI.generateCalendar();
+    }
     // Banner tracks the live draft set (drafts can also vanish via sync merge).
     this.whatIf.refreshBanner();
   }

@@ -455,6 +455,7 @@ class TransactionStore {
     if (changed) {
       this.debouncedSave();
     }
+    return changed;
   }
 
 

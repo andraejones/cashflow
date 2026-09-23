@@ -183,6 +183,24 @@ class CalculationService {
     let earliestDate = null;
     let latestDate = null;
     for (const dateString in transactions) {
+      // Only rows that exist in their own right define the range — never a
+      // pure recurring expansion (the rows _filterPersistedTransactions drops).
+      // Those are this method's own OUTPUT: it expands one month past the
+      // latest date, so counting them made every call reach a month further
+      // than the last — one more month expanded, walked and persisted into
+      // monthlyBalances on every render, for as long as the session lasted.
+      // Months a series actually covers are still reached through its
+      // startDate below and the viewed-month floor.
+      const list = transactions[dateString];
+      if (
+        !Array.isArray(list) ||
+        !list.some(
+          (t) =>
+            t && (!t.recurringId || t.modifiedInstance || t.movedFrom !== undefined)
+        )
+      ) {
+        continue;
+      }
       // Parse through the shared guard, and skip anything it can't read. These
       // are raw MAP KEYS: nothing validates them on the way in from an import
       // or a cloud merge, so one junk key ("garbage", a truncated "2026-08")
