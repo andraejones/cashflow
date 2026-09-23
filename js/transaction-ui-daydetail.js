@@ -200,9 +200,7 @@ Object.assign(TransactionUI.prototype, {
             transactionDiv.classList.add("allocated-transaction");
           }
           let statusLabel = "";
-          if (t.whatIf === true) {
-            statusLabel = " (What-if draft)";
-          } else if (isSkipped) {
+          if (isSkipped) {
             statusLabel = isAuthorizedLater ? " (Authorized)" : " (Skipped)";
           } else if (isHidden) {
             statusLabel = " (Hidden - Debt Snowball)";

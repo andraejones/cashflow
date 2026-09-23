@@ -37,8 +37,6 @@ const CORE_ASSETS = [
   "./js/debt-snowball-engine.js",
   "./js/debt-snowball-payments.js",
   "./js/debt-snowball-render.js",
-  "./js/what-if.js",
-  "./js/savings-goals.js",
   "./js/cloud-sync.js",
   "./js/pin-protection.js",
   "./js/app.js"

@@ -1131,7 +1131,7 @@ async function dismissAlert(page) {
     }, corrupt);
     await sleep(300);
 
-    // ---- Allocations, free funds, what-if, savings goals -------------------
+    // ---- Allocations and free funds -----------------------------------------
     // Four feature surfaces the vm harnesses can drive only as data. Here they
     // go through the real DOM: the modals that build their own markup, the
     // draw dropdown that is populated from live buckets, and the calendar
@@ -1387,77 +1387,10 @@ async function dismissAlert(page) {
     }, freeFunds.id);
     await sleep(250);
 
-    // What-if: a draft must move the banner's minimum and must never reach
-    // localStorage, and Discard must put everything back.
-    await page.evaluate(() => window.app.whatIf.openForm());
-    await sleep(250);
-    await page.evaluate(() => {
-      document.getElementById("whatIfDate").value =
-        Utils.formatDateString(new Date(Date.now() + 3 * 86400000));
-      document.getElementById("whatIfAmount").value = "5000";
-      document.getElementById("whatIfType").value = "expense";
-      document.getElementById("whatIfDescription").value = "UI Draft";
-      document.getElementById("whatIfAddButton").click();
-    });
-    await sleep(450);
-    const draft = await page.evaluate(() => {
-      const banner = document.getElementById("whatIfBanner");
-      return {
-        bannerShown: !banner.hidden,
-        bannerText: banner.textContent.replace(/\s+/g, " ").trim().slice(0, 120),
-        inStore: window.app.store.getWhatIfTransactions().length,
-        persisted: String(localStorage.getItem("transactions")).includes("UI Draft"),
-        inExport: JSON.stringify(window.app.store.exportData()).includes("UI Draft"),
-      };
-    });
-    check("a what-if draft raises the banner", draft.bannerShown && draft.inStore === 1,
-      draft.bannerText);
-    check("a what-if draft never reaches localStorage", !draft.persisted);
-    check("a what-if draft never reaches an export", !draft.inExport);
-    await page.evaluate(() => window.app.whatIf.discardAll());
-    await sleep(350);
-    check("discarding removes the draft and the banner",
-      await page.evaluate(() =>
-        window.app.store.getWhatIfTransactions().length === 0 &&
-        document.getElementById("whatIfBanner").hidden === true));
-
-    // Savings goals: the modal builds its rows at runtime, including the
-    // feasibility line that reuses the balance walk.
-    await page.evaluate(() => {
-      window.app.store.addSavingsGoal({
-        name: "UI Trip Fund", targetAmount: 500, saved: 100,
-        targetDate: Utils.formatDateString(new Date(Date.now() + 90 * 86400000)),
-      });
-      window.app.savingsGoals.show();
-    });
-    await sleep(400);
-    const goals = await page.evaluate(() => {
-      const list = document.getElementById("savingsGoalsList");
-      return {
-        open: document.getElementById("savingsGoalsModal").style.display === "block",
-        text: list.textContent.replace(/\s+/g, " ").trim(),
-        rows: list.querySelectorAll(".savings-goal-row").length,
-        bars: list.querySelectorAll(".savings-goal-bar-fill").length,
-        overflow: document.documentElement.scrollWidth <= window.innerWidth + 1,
-      };
-    });
-    check("the Savings Goals modal renders the goal",
-      goals.open && goals.rows === 1 && goals.text.includes("UI Trip Fund"));
-    check("the goal shows a progress bar and a status line",
-      goals.bars === 1 && /to go|On track|Tight|funded/.test(goals.text),
-      goals.text.slice(0, 120));
-    check("the Savings Goals modal doesn't scroll the page sideways", goals.overflow);
-    await page.keyboard.press("Escape");
-    await sleep(250);
-    check("Escape closes the Savings Goals modal",
-      await page.evaluate(() =>
-        document.getElementById("savingsGoalsModal").style.display !== "block"));
-
     // Clean up everything this phase added so the PIN phase below sees a
     // dataset it recognises.
     await page.evaluate(() => {
       const store = window.app.store;
-      store.getSavingsGoals().slice().forEach((g) => store.deleteSavingsGoal(g.id));
       const transactions = store.getTransactions();
       Object.keys(transactions).forEach((date) => {
         for (let i = transactions[date].length - 1; i >= 0; i--) {
@@ -1735,8 +1668,14 @@ async function dismissAlert(page) {
     });
     check("service worker precaches the app", swState.entries > 0,
       `${swState.entries} entries in ${swState.cacheName}`);
-    check("every app script is precached", swState.scripts >= 25,
-      `${swState.scripts} scripts`);
+    // Counted off index.html rather than hard-coded, so adding or removing a
+    // script can't leave this threshold stale in either direction.
+    const pageScripts = (
+      fs.readFileSync(path.join(ROOT, "index.html"), "utf8").match(/<script src="js\//g) || []
+    ).length;
+    check("every app script is precached",
+      pageScripts > 0 && swState.scripts >= pageScripts,
+      `${swState.scripts} of ${pageScripts} scripts`);
 
     await page.evaluate(() => {
       window.app.store.addTransaction(Utils.formatDateString(new Date()), {

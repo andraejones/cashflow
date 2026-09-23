@@ -87,12 +87,6 @@ class CalculationService {
       let rows = null;
       list.forEach((t) => {
         if (t.type !== "expense" || t.allocated !== true) return;
-        // A hypothetical must not reserve real money. Drafts never carry
-        // `allocated` today, which is why this needed no guard — but
-        // getAllocations already opts out here (it requires a stored id), and
-        // a reserve total that disagreed with the drawable buckets would move
-        // every anchor's balance with nothing on screen to explain it.
-        if (t.whatIf === true) return;
         if (
           t.recurringId &&
           this.recurringManager.isTransactionSkipped(d, t.recurringId)
@@ -729,52 +723,6 @@ class CalculationService {
     this._cachedSummaries[monthKey] = result;
 
     return result;
-  }
-
-  // Minimum projected running balance from today (inclusive) through
-  // `endDateString`, walking the same per-day balance math as calculateMinimum
-  // but over an arbitrary horizon. Used by savings goals to answer "how much
-  // could leave the account before this date without dipping below the floor".
-  // Horizon is capped at ~2 years; returns null for past/invalid dates.
-  getMinimumBalanceThrough(endDateString) {
-    if (!endDateString) return null;
-    const today = new Date();
-    const todayYear = today.getFullYear();
-    const todayMonth = today.getMonth();
-    const todayDay = today.getDate();
-    const end = Utils.parseDateString(endDateString);
-    const todayMidday = new Date(todayYear, todayMonth, todayDay, 12, 0, 0);
-    const horizonDays = Math.min(
-      730,
-      Math.round((end - todayMidday) / 86400000)
-    );
-    if (isNaN(horizonDays) || horizonDays < 0) return null;
-
-    this.invalidateCache();
-
-    const summary = this.calculateMonthlySummary(todayYear, todayMonth);
-    const monthStartStr = `${todayYear}-${String(todayMonth + 1).padStart(2, "0")}-01`;
-    const todayStr = Utils.formatDateString(todayMidday);
-    const balanceToday = this.walkDays(monthStartStr, todayStr, {
-      seedBalance: summary.startingBalance,
-    }).balance;
-
-    let minBalance = balanceToday;
-    const tomorrowStr = Utils.formatDateString(
-      new Date(todayYear, todayMonth, todayDay + 1, 12, 0, 0)
-    );
-    const horizonEndStr = Utils.formatDateString(
-      new Date(todayYear, todayMonth, todayDay + horizonDays, 12, 0, 0)
-    );
-    this.walkDays(tomorrowStr, horizonEndStr, {
-      seedBalance: balanceToday,
-      ensureRecurringExpansion: true,
-      onDay: (r) => {
-        if (r.balance < minBalance) minBalance = r.balance;
-      },
-    });
-
-    return minBalance;
   }
 
   // Free-funds shortfall cushion (pure math, derived at render — nothing is

@@ -5,7 +5,7 @@
 // carried-unsettled accumulator resets to 0) is implemented in several places
 // that must agree:
 //   - CalculationService.updateMonthlyBalances / getRunningBalanceForDate /
-//     getDayBalanceBreakdown / calculateMinimum / getMinimumBalanceThrough
+//     getDayBalanceBreakdown / calculateMinimum
 //   - CalendarUI.generateCalendar's per-day display loop and its today→+30
 //     min/crisis loop (transcribed below — DOM-free copies of the exact math,
 //     see the calendar-ui.js line references at each transcription).
@@ -543,10 +543,6 @@ function runInvariants(world) {
     if (currentBalance < lowest) lowest = currentBalance;
   }
   assertEq(lowest, min, '(c) calendar min/crisis transcription == calculateMinimum');
-
-  // getMinimumBalanceThrough over the same 30-day horizon must agree too.
-  const mbt = calc.getMinimumBalanceThrough(offsetDateStr(30));
-  assertEq(mbt, min, '(c) getMinimumBalanceThrough(+30) == calculateMinimum');
 
   // --- Cold-cache re-check: results must not depend on warm caches --------------
   calc.invalidateCache();

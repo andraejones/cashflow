@@ -44,7 +44,7 @@ class TransactionUI {
   initEventListeners() {
     // Bind ONLY the close buttons of the two modals this class owns. A blanket
     // document.querySelectorAll(".close") also captured #appModalClose and the
-    // Recent/Allocated/What-If/Savings/Reconcile/Notes close buttons, so
+    // Recent/Allocated/Reconcile/Notes close buttons, so
     // dismissing a confirmation dialog opened from the day modal tore the day
     // modal down with it (and reset the half-filled add form). It also
     // overwrote the Notes modal's inline onclick, since .onclick replaces

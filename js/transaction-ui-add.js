@@ -1,5 +1,5 @@
 // TransactionUI — the add-transaction flow (form parsing, recurrence
-// assembly, allocation/draw wiring, what-if handoff). Prototype companion of
+// assembly, allocation/draw wiring). Prototype companion of
 // TransactionUI (class declared in transaction-ui.js); no build step — loaded
 // as a plain script after the class file and before app.js (see index.html).
 

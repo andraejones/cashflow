@@ -26,8 +26,6 @@ Updated for appVersion 2.0.0 on 2026-08-21 (source of truth: `js/transaction-sto
 - Hidden transactions (e.g. debt-snowball generated) are shown with a visual distinction.
 - Debt snowball planner (a full-page view): every debt pays only its minimum while you declare a **minimum daily cashflow floor**; whatever your projected daily checking balance carries above that floor — durably, so a payoff never drops a later day below it — is swept into a full debt payoff, smallest-balance first, on the exact day the cash is available (independent of the debt's due date). Freed-up minimums of paid-off debts raise that surplus naturally, so there is no separate set-aside fund. (This suits lenders that apply overpayments as pre-payments rather than to principal.) Includes a per-debt interest rate field, a configurable month to start applying the floor, one-time cash infusions, remaining-balance display on each day-view debt payment, and a "Convert to Debt" shortcut from any recurring expense.
 - Two calendar layouts: an agenda list (the default, one row per day with that day's line items) and the classic month grid. The choice persists.
-- What-if preview: try a hypothetical transaction without saving it. Drafts ride in the live balance walk — so every projected balance and the 30-day minimum reflect them — and a banner shows the swing with Apply / Discard. They are never written to storage, an export, or the cloud.
-- Savings goals: name, target amount, target date and amount saved so far, with a progress bar and a feasibility line computed from the same balance walk (the lowest projected balance through the target date, less the snowball's daily floor).
 - Bank statement reconciliation: upload a Suncoast transaction-history CSV and compare it against the calendar for the statement period, entirely on the device. The report offers to add a bank line that is missing from the app, settle an entry the bank has cleared (dating it to the day it posted), re-date a drifted entry or shift its whole series, fix an amount, and it suggests recurring series for payees that repeat on the statement.
 - Search with advanced filters, sort by date/amount/description, pagination (50 results per page), and CSV export. A search box is also available inline in the top toolbar.
 - Monthly summary shows the projected minimum balance for the next 30 days and a Notes link.
@@ -41,8 +39,6 @@ A toolbar across the top of the calendar holds a hamburger menu and an inline se
 - **Switch to Calendar View** / **Switch to Agenda View** — toggles the two layouts.
 - **Recent Transactions** — quick list of recent entries; click one to open its day to edit or delete.
 - **Allocated** — list of allocation buckets, soonest to farthest, with the free-funds star.
-- **What-If Preview** — add a hypothetical transaction and see the swing.
-- **Savings Goals** — add and track goals.
 - **Debt Snowball** — opens the full-page debt planner.
 - **Reconcile Bank Statement** — compare a bank CSV against the calendar.
 - **Save to Device** / **Load from Device** — JSON export/import.
@@ -79,7 +75,7 @@ In addition, a day holding an allocation bucket gets a light-purple background h
 
 ## Data format
 
-The exported JSON schema includes: `transactions`, `monthlyBalances`, `recurringTransactions`, `skippedTransactions`, `movedTransactions`, `debts`, `cashInfusions`, `savingsGoals`, `debtSnowballSettings`, `monthlyNotes`, `_deletedItems`, and metadata fields (`lastUpdated`, `lastExported`, `appVersion`). See `CLAUDE.md` for localStorage key details.
+The exported JSON schema includes: `transactions`, `monthlyBalances`, `recurringTransactions`, `skippedTransactions`, `movedTransactions`, `debts`, `cashInfusions`, `debtSnowballSettings`, `monthlyNotes`, `_deletedItems`, and metadata fields (`lastUpdated`, `lastExported`, `appVersion`). See `CLAUDE.md` for localStorage key details.
 
 ## Project structure
 

@@ -21,7 +21,7 @@ global.window = {
   removeEventListener: () => {},
 };
 // Form fields the tests want a UI method to read. Empty by default, so
-// getElementById keeps returning null for every test that predates it; TEST 48
+// getElementById keeps returning null for every test that predates it; TEST 49
 // fills it in to drive a real form-submit path headlessly.
 global.__domFields = {};
 global.document = {
@@ -149,9 +149,7 @@ const files = [
   'debt-snowball-engine.js',
   'debt-snowball-payments.js',
   'debt-snowball-render.js',
-  'bank-reconcile.js',
-  'what-if.js',
-  'savings-goals.js'
+  'bank-reconcile.js'
 ];
 
 files.forEach(file => {
@@ -2323,7 +2321,7 @@ function runBackupAbortTest() {
     transactions: {}, monthlyBalances: {}, recurringTransactions: [],
     skippedTransactions: {}, movedTransactions: {},
     debts: [{ id: "R", name: "Remote Card", balance: 200, _lastModified: new Date().toISOString() }],
-    cashInfusions: [], savingsGoals: [], monthlyNotes: {},
+    cashInfusions: [], monthlyNotes: {},
     debtSnowballSettings: { dailyFloor: 0, autoGenerate: false },
     _deletedItems: {}, lastUpdated: new Date().toISOString(),
   };
@@ -2907,132 +2905,6 @@ console.log("TEST 37: Skipped Recurring Allocation Bucket Is Not Offered Or Disp
   console.log("✅ Skipped allocation buckets are hidden from draws and free-funds until unskipped");
 }
 
-// TEST 38: What-if drafts (whatIf: true) overlay the in-memory transactions
-// map so every balance walk sees them, but they must never reach localStorage,
-// exports, or cloud sync. Applying commits them as real transactions;
-// discarding removes them without a trace.
-console.log("TEST 38: What-If Drafts Affect The Walk But Never Persist Until Applied");
-{
-  const s = new TransactionStore();
-  s.resetData();
-  const t38 = new Date();
-  const day = (offset) =>
-    Utils.formatDateString(
-      new Date(t38.getFullYear(), t38.getMonth(), t38.getDate() + offset)
-    );
-
-  s.addTransaction(day(0), { amount: 500, type: "income", description: "Pay" });
-  s.addWhatIfTransaction(day(1), {
-    amount: 120, type: "expense", description: "New tires", settled: true,
-  });
-
-  // The walk sees the draft.
-  const rm = new RecurringTransactionManager(s);
-  const cs = new CalculationService(s, rm);
-  const totals = cs.calculateDailyTotals(day(1));
-  if (totals.expense !== 120) {
-    throw new Error(`Draft not visible to the balance walk: ${JSON.stringify(totals)}`);
-  }
-
-  // Persistence and export never see it.
-  s.saveData(false);
-  const raw = JSON.parse(global.localStorage.getItem("transactions"));
-  const rawHasDraft = Object.keys(raw).some((d) =>
-    raw[d].some((t) => t.whatIf === true || t.description === "New tires")
-  );
-  if (rawHasDraft) throw new Error("What-if draft leaked into localStorage");
-  const exported = s.exportData();
-  const exportHasDraft = Object.keys(exported.transactions).some((d) =>
-    exported.transactions[d].some((t) => t.whatIf === true)
-  );
-  if (exportHasDraft) throw new Error("What-if draft leaked into exportData");
-
-  // Discard removes it from the live map.
-  if (s.clearWhatIfTransactions() !== 1) {
-    throw new Error("clearWhatIfTransactions should report 1 removed draft");
-  }
-  if ((s.getTransactions()[day(1)] || []).length !== 0 && s.getTransactions()[day(1)]) {
-    throw new Error("Discarded draft still present");
-  }
-
-  // Apply commits the draft as a real, persisted transaction.
-  s.addWhatIfTransaction(day(2), {
-    amount: 75, type: "expense", description: "Committed", settled: true,
-  });
-  if (s.applyWhatIfTransactions() !== 1) {
-    throw new Error("applyWhatIfTransactions should report 1 committed draft");
-  }
-  const committed = (s.getTransactions()[day(2)] || []).find(
-    (t) => t.description === "Committed"
-  );
-  if (!committed || committed.whatIf !== undefined || !committed.id) {
-    throw new Error(`Applied draft is not a real transaction: ${JSON.stringify(committed)}`);
-  }
-  const exported2 = s.exportData();
-  const exportedCommitted = (exported2.transactions[day(2)] || []).some(
-    (t) => t.description === "Committed"
-  );
-  if (!exportedCommitted) throw new Error("Applied draft missing from exportData");
-  s.cancelPendingSave();
-  console.log("✅ What-if drafts overlay the walk, never persist, and commit cleanly on apply");
-}
-
-// TEST 39: Savings goals are a first-class synced collection: CRUD +
-// normalization, persistence round-trip, export/import, and tombstoned
-// deletion that survives a cloud merge (the remote copy must not resurrect).
-console.log("TEST 39: Savings Goals CRUD, Round-Trip, And Tombstoned Merge");
-{
-  const s = new TransactionStore();
-  s.resetData();
-  const goalId = s.addSavingsGoal({
-    name: "Vacation", targetAmount: 1200, targetDate: "2027-03-01", saved: 100,
-  });
-  s.updateSavingsGoal(goalId, { saved: 250 });
-  s.flushPendingSave();
-
-  // Reload from the same mock storage.
-  const reloaded = new TransactionStore();
-  const rGoal = reloaded.getSavingsGoals().find((g) => g.id === goalId);
-  if (!rGoal || rGoal.saved !== 250 || rGoal.name !== "Vacation") {
-    throw new Error(`Goal did not round-trip storage: ${JSON.stringify(rGoal)}`);
-  }
-
-  // Export/import round-trip.
-  const exported = s.exportData();
-  const s2 = new TransactionStore();
-  s2.resetData();
-  if (!s2.importData(JSON.parse(JSON.stringify(exported)))) {
-    throw new Error("importData rejected an export containing savingsGoals");
-  }
-  if (s2.getSavingsGoals().length !== 1) {
-    throw new Error("Imported data lost the savings goal");
-  }
-  s2.cancelPendingSave();
-
-  // Delete tombstones the goal; a merge with a remote that still has it must
-  // not resurrect it — while a different remote-only goal still comes through.
-  s.deleteSavingsGoal(goalId);
-  if (!s._deletedItems.savingsGoals.some((d) => d.id === goalId)) {
-    throw new Error("deleteSavingsGoal did not record a tombstone");
-  }
-  const sync = new CloudSync(s, () => {});
-  const merged = sync._mergeData(s.exportData(), JSON.parse(JSON.stringify(exported)));
-  if (merged.savingsGoals.length !== 0) {
-    throw new Error("Cloud merge resurrected a deleted savings goal");
-  }
-  const remoteWithNew = JSON.parse(JSON.stringify(exported));
-  remoteWithNew.savingsGoals = [{
-    id: "t39-remote-goal", name: "Roof", targetAmount: 5000,
-    targetDate: "2027-06-01", saved: 0, _lastModified: new Date().toISOString(),
-  }];
-  const merged2 = sync._mergeData(s.exportData(), remoteWithNew);
-  if (merged2.savingsGoals.length !== 1 || merged2.savingsGoals[0].id !== "t39-remote-goal") {
-    throw new Error(`Remote-only goal should merge in: ${JSON.stringify(merged2.savingsGoals)}`);
-  }
-  s.cancelPendingSave();
-  console.log("✅ Savings goals persist, export, import, and merge with tombstones");
-}
-
 // TEST 40: Bank-reconcile suggests a recurring series for a payee that repeats
 // at a steady interval with steady amounts and no covering series — and stays
 // quiet for irregular spend or payees an existing series already covers.
@@ -3480,13 +3352,13 @@ console.log("TEST 46: Maintenance Saves Don't Trip The Lifecycle Push; Queued Us
 
 // TEST 47: The tombstone record must carry every synced collection on ALL four
 // construction paths (constructor, loadData, importData, resetData). loadData
-// hand-maintained its own key list and omitted `savingsGoals`, so after any
+// hand-maintained its own key list and omitted one collection, so after any
 // reload — and saveData writes the `deletedItems` key on every save, so the
-// stored blob is always there — deleteSavingsGoal's unguarded push threw. The
-// UI's async _delete() swallowed it as an unhandled rejection: the Delete
-// button did nothing, and an untombstoned goal would resurrect on the next
-// merge. TEST 39 missed it by calling resetData() (which rebuilt the key)
-// before deleting, so the load path was never exercised.
+// stored blob is always there — that collection's unguarded tombstone push
+// threw. The UI swallowed it as an unhandled rejection: the Delete button did
+// nothing, and the untombstoned entry would resurrect on the next merge. The
+// test that covered the collection missed it by calling resetData() (which
+// rebuilt the key) before deleting, so the load path was never exercised.
 console.log("TEST 47: Tombstone Shape Survives Every Construction Path");
 {
   // Spelled out here rather than read off the store, so this test pins the
@@ -3494,7 +3366,7 @@ console.log("TEST 47: Tombstone Shape Survives Every Construction Path");
   // synced collection should mean updating this list too.
   const EXPECTED_TOMBSTONE_KEYS = [
     "transactions", "recurringTransactions", "debts",
-    "cashInfusions", "savingsGoals", "skips",
+    "cashInfusions", "skips",
   ];
   const assertShape = (store, path) => {
     EXPECTED_TOMBSTONE_KEYS.forEach((key) => {
@@ -3506,15 +3378,15 @@ console.log("TEST 47: Tombstone Shape Survives Every Construction Path");
 
   const s = new TransactionStore();
   s.resetData();
-  const goalId = s.addSavingsGoal({
-    name: "New Roof", targetAmount: 8000, targetDate: "2027-09-01", saved: 500,
+  const infusionId = s.addCashInfusion({
+    name: "Tax Refund", amount: 1200, date: "2027-03-01",
   });
   s.flushPendingSave(); // writes the "deletedItems" blob to storage
 
   // Simulate the pre-fix on-disk shape every existing install carries: a
-  // tombstone blob with the savingsGoals key absent.
+  // tombstone blob with one collection's key absent.
   const onDisk = JSON.parse(localStorage.getItem("deletedItems"));
-  delete onDisk.savingsGoals;
+  delete onDisk.cashInfusions;
   localStorage.setItem("deletedItems", JSON.stringify(onDisk));
 
   // Reload — the state every real session actually starts in.
@@ -3522,13 +3394,13 @@ console.log("TEST 47: Tombstone Shape Survives Every Construction Path");
   assertShape(reloaded, "loadData");
 
   // The delete must actually take effect and leave a tombstone behind.
-  if (!reloaded.deleteSavingsGoal(goalId)) {
-    throw new Error("deleteSavingsGoal failed on a store built by loadData");
+  if (!reloaded.deleteCashInfusion(infusionId)) {
+    throw new Error("deleteCashInfusion failed on a store built by loadData");
   }
-  if (reloaded.getSavingsGoals().length !== 0) {
-    throw new Error("Savings goal survived its own delete");
+  if (reloaded.getCashInfusions().length !== 0) {
+    throw new Error("Cash infusion survived its own delete");
   }
-  if (!reloaded._deletedItems.savingsGoals.some((d) => d.id === goalId)) {
+  if (!reloaded._deletedItems.cashInfusions.some((d) => d.id === infusionId)) {
     throw new Error("Delete recorded no tombstone — a merge would resurrect it");
   }
 
@@ -3554,84 +3426,7 @@ console.log("TEST 47: Tombstone Shape Survives Every Construction Path");
   console.log("✅ Every construction path yields a complete tombstone record; delete sticks after reload");
 }
 
-// TEST 48: Amount validation must reject ±Infinity, not just NaN.
-//
-// parseFloat("1e999") === Infinity, and isNaN(Infinity) is false — so every
-// `if (isNaN(amount))` guard let a non-finite amount straight through. It was
-// reachable wherever the amount comes from a *text* field (the number inputs
-// are protected by the browser, and the add form's cents formatter strips
-// non-digits), which meant two live paths:
-//   - what-if drafts (#whatIfAmount is type=text): the draft joins the shared
-//     balance walk, so calculateMinimum() went to -Infinity and the calendar's
-//     30-day Minimum and the what-if banner rendered garbage.
-//   - savings-goal "Add saved" (a text modal prompt): goal.saved became
-//     Infinity, which JSON.stringify writes as null — so the goal silently
-//     reloaded with saved = 0, erasing real recorded progress.
-// Guards are Number.isFinite now. This test pins both, and that ordinary
-// amounts still go through.
-console.log("TEST 48: Amount Guards Reject Non-Finite Input");
-{
-  const NON_FINITE = ["1e999", "-1e999", "Infinity", "-Infinity"];
-
-  // --- what-if drafts: must never reach the walk ---------------------------
-  NON_FINITE.concat(["abc", ""]).forEach((raw) => {
-    const s = new TransactionStore();
-    s.resetData();
-    const rm = new RecurringTransactionManager(s);
-    const calc = new CalculationService(s, rm);
-    s.addTransaction("2026-08-10", { amount: 1000, type: "income", description: "Pay" });
-
-    global.__domFields = {
-      whatIfDate: "2026-08-20",
-      whatIfAmount: raw,
-      whatIfType: "expense",
-      whatIfDescription: "draft",
-    };
-    const wi = new WhatIfUI(s, calc, () => {});
-    wi.hideForm = () => {};
-    wi.addDraft();
-    global.__domFields = {};
-
-    if (s.getWhatIfTransactions().length !== 0) {
-      throw new Error(`what-if accepted a non-finite/invalid amount ${JSON.stringify(raw)}`);
-    }
-    const min = calc.calculateMinimum();
-    if (!Number.isFinite(min)) {
-      throw new Error(`calculateMinimum() went non-finite (${min}) after amount ${JSON.stringify(raw)}`);
-    }
-    s.cancelPendingSave();
-  });
-
-  // A valid draft still lands and still moves the walk.
-  {
-    const s = new TransactionStore();
-    s.resetData();
-    const rm = new RecurringTransactionManager(s);
-    const calc = new CalculationService(s, rm);
-    s.addTransaction("2026-08-10", { amount: 1000, type: "income", description: "Pay" });
-    global.__domFields = {
-      whatIfDate: "2026-08-20",
-      whatIfAmount: "250.75",
-      whatIfType: "expense",
-      whatIfDescription: "draft",
-    };
-    const wi = new WhatIfUI(s, calc, () => {});
-    wi.hideForm = () => {};
-    wi.addDraft();
-    global.__domFields = {};
-    if (s.getWhatIfTransactions().length !== 1) {
-      throw new Error("a valid what-if draft was rejected");
-    }
-    if (!Number.isFinite(calc.calculateMinimum())) {
-      throw new Error("valid draft produced a non-finite minimum");
-    }
-    s.cancelPendingSave();
-  }
-
-  console.log("✅ What-if drafts reject non-finite amounts; the walk stays finite");
-}
-
-// TEST 49: the non-finite class again, at the two places TEST 48 did not reach.
+// TEST 49: the non-finite class again, at the two places dd93807 did not reach.
 //
 // dd93807 tightened the amount guards it could find, on the stated assumption
 // that "the browser blocks this on number inputs". Two holes were left:
@@ -3646,7 +3441,7 @@ console.log("TEST 48: Amount Guards Reject Non-Finite Input");
 //
 // Either way the value dies the same quiet death: JSON.stringify writes
 // Infinity as null, so the next load reads 0. A debt balance reads as PAID
-// OFF, and a savings goal loses recorded progress. Guards are Number.isFinite
+// OFF. Guards are Number.isFinite
 // now, and the normalizers coerce through _finiteNumber.
 console.log("TEST 49: Debt/Goal Money Guards Reject Non-Finite Input");
 {
@@ -3724,11 +3519,6 @@ console.log("TEST 49: Debt/Goal Money Guards Reject Non-Finite Input");
       throw new Error(`_normalizeDebt passed ${bad} through`);
     }
 
-    const goal = s._normalizeSavingsGoal({ name: "Imported", targetAmount: bad, saved: bad });
-    if (!Number.isFinite(goal.targetAmount) || !Number.isFinite(goal.saved)) {
-      throw new Error(`_normalizeSavingsGoal passed ${bad} through`);
-    }
-
     s.setDebtSnowballSettings({ dailyFloor: bad, autoGenerate: false });
     if (!Number.isFinite(s.getDebtSnowballSettings().dailyFloor)) {
       throw new Error(`setDebtSnowballSettings passed a ${bad} dailyFloor through`);
@@ -3762,7 +3552,8 @@ console.log("TEST 49: Debt/Goal Money Guards Reject Non-Finite Input");
 // TEST 50: the non-finite class, third pass — the collection TEST 49 missed.
 //
 // TEST 49's own comment names "the domain normalizers" as the choke point for
-// imports and cloud merges, but only debts and savings goals were converted.
+// imports and cloud merges, but only debts (and the since-removed savings
+// goals) were converted.
 // Cash infusions and debtSnowballSettings.dailyFloor kept `Number(x) || 0` at
 // four hand-written sites (loadData ×2, importData ×2), and cash infusions had
 // no normalizer at all — addCashInfusion/updateCashInfusion stored whatever the
@@ -3790,7 +3581,7 @@ console.log("TEST 50: Cash-Infusion / Daily-Floor Money Rejects Non-Finite Input
     s.cancelPendingSave();
   });
 
-  // --- add/update normalize on the way in, like addDebt/addSavingsGoal ------
+  // --- add/update normalize on the way in, like addDebt --------------------
   {
     const s = new TransactionStore();
     s.resetData();
@@ -3884,339 +3675,6 @@ console.log("TEST 50: Cash-Infusion / Daily-Floor Money Rejects Non-Finite Input
   }
 
   console.log("✅ Cash infusions and the daily floor reject non-finite input on add, import, and load");
-}
-
-// TEST 51: what-if drafts must not surface in search, and must never reach the
-// exported CSV.
-//
-// Drafts ride in the in-memory transactions map on purpose — that is how every
-// balance walk sees them with no second implementation — so every read surface
-// has to opt out or mark them. All of them did except search:
-// _filterPersistedTransactions keeps drafts out of localStorage/exports/sync,
-// Recent Transactions drops them for want of a _lastModified stamp, the agenda
-// flags them 🔮 and the day-detail modal labels them. performSearch listed a
-// draft as an ordinary expense with no marker, and because exportSearchResults
-// walks this.searchResults, "Export" then wrote the hypothetical into
-// search_results.csv indistinguishable from real spending — a record of money
-// that was never committed, surviving the Discard that removed the draft.
-//
-// The filter lives in performSearch (one choke point) rather than in both the
-// list renderer and the exporter, so the two can't drift apart.
-console.log("TEST 51: What-If Drafts Stay Out Of Search Results And The CSV Export");
-{
-  const T51_elements = new Map();
-  const T51_makeElement = (id) => ({
-    id,
-    value: "",
-    checked: false,
-    disabled: false,
-    innerHTML: "",
-    textContent: "",
-    style: {},
-    classList: { add: () => {}, remove: () => {}, toggle: () => {} },
-    addEventListener: () => {},
-    setAttribute: () => {},
-    removeAttribute: () => {},
-    appendChild: () => {},
-    removeChild: () => {},
-    remove: () => {},
-    click: () => {},
-    querySelector: () => null,
-    querySelectorAll: () => [],
-    contains: () => false,
-  });
-  const T51_getEl = (id) => {
-    if (!T51_elements.has(id)) T51_elements.set(id, T51_makeElement(id));
-    return T51_elements.get(id);
-  };
-  const prevDoc = global.document;
-  const prevBlob = global.Blob;
-  const prevURL = global.URL;
-  let exportedCsv = null;
-
-  global.document = {
-    addEventListener: () => {},
-    getElementById: T51_getEl,
-    querySelector: () => null,
-    querySelectorAll: () => [],
-    createElement: () => T51_makeElement(null),
-    body: T51_makeElement("body"),
-    activeElement: null,
-  };
-  // Capture what the export would hand the browser, instead of downloading it.
-  global.Blob = function (parts) { exportedCsv = parts.join(""); };
-  global.URL = {
-    createObjectURL: () => "blob:test",
-    revokeObjectURL: () => {},
-  };
-
-  try {
-    const s = new TransactionStore();
-    s.resetData();
-    const rm = new RecurringTransactionManager(s);
-    // SearchUI is already declared in this context by TEST 45; re-running the
-    // source would throw "Identifier 'SearchUI' has already been declared".
-    const sui = new SearchUI(s, rm, null);
-
-    s.addTransaction("2026-09-05", {
-      amount: 120,
-      type: "expense",
-      description: "Kitchen supplies",
-    });
-    s.addWhatIfTransaction("2026-09-05", {
-      amount: 2400,
-      type: "expense",
-      description: "Kitchen reno",
-      settled: true,
-    });
-
-    T51_getEl("searchInput").value = "kitchen";
-    sui.performSearch();
-
-    const drafts = sui.searchResults.filter((r) => r.transaction.whatIf === true);
-    if (drafts.length !== 0) {
-      throw new Error(
-        `a what-if draft surfaced in search results: ${JSON.stringify(
-          drafts.map((d) => d.transaction.description)
-        )}`
-      );
-    }
-    // The real transaction must still be found — the filter is targeted, not a
-    // blanket exclusion of the date.
-    if (sui.searchResults.length !== 1 ||
-        sui.searchResults[0].transaction.description !== "Kitchen supplies") {
-      throw new Error(
-        `the real transaction was lost: ${JSON.stringify(
-          sui.searchResults.map((r) => r.transaction.description)
-        )}`
-      );
-    }
-
-    sui.exportSearchResults();
-    if (exportedCsv === null) {
-      throw new Error("test setup is wrong: the CSV export produced nothing");
-    }
-    if (exportedCsv.includes("Kitchen reno") || exportedCsv.includes("2400")) {
-      throw new Error(`a what-if draft was written to the CSV export:\n${exportedCsv}`);
-    }
-    if (!exportedCsv.includes("Kitchen supplies")) {
-      throw new Error(`the real transaction is missing from the CSV export:\n${exportedCsv}`);
-    }
-
-    // Applying the drafts commits them as real transactions, which SHOULD then
-    // be searchable — the filter keys on the draft flag, not on the row.
-    s.applyWhatIfTransactions();
-    sui.performSearch();
-    const descriptions = sui.searchResults
-      .map((r) => r.transaction.description)
-      .sort();
-    if (JSON.stringify(descriptions) !== JSON.stringify(["Kitchen reno", "Kitchen supplies"])) {
-      throw new Error(
-        `applied drafts did not become searchable: ${JSON.stringify(descriptions)}`
-      );
-    }
-
-    s.cancelPendingSave();
-    console.log("✅ Drafts hidden from search and the CSV; real and applied transactions still found");
-  } finally {
-    global.document = prevDoc;
-    global.Blob = prevBlob;
-    global.URL = prevURL;
-  }
-}
-
-// The savings-goal half of TEST 48. _contribute is async, so this is awaited in
-// the runner chain at the bottom — returning promises into a forEach would let
-// a failure surface as an unhandled rejection *after* the ✅ line.
-async function runTest48Savings() {
-  console.log("TEST 48b: Savings-Goal Contribution Rejects Non-Finite Input");
-  const NON_FINITE = ["1e999", "-1e999", "Infinity", "-Infinity"];
-  const originalPrompt = Utils.showModalPrompt;
-
-  try {
-    for (const raw of NON_FINITE) {
-      const s = new TransactionStore();
-      s.resetData();
-      s.addSavingsGoal({
-        name: "Roof", targetAmount: 5000, saved: 100, targetDate: "2027-01-01",
-      });
-      const goalId = s.getSavingsGoals()[0].id;
-
-      Utils.showModalPrompt = async () => raw;
-      const ui = new SavingsGoalsUI(s, null, () => {});
-      ui._renderList = () => {};
-      await ui._contribute(goalId);
-
-      const after = s.getSavingsGoals()[0].saved;
-      if (after !== 100) {
-        throw new Error(
-          `savings goal accepted ${JSON.stringify(raw)}: saved became ${after}`
-        );
-      }
-      s.cancelPendingSave();
-    }
-
-    // A normal contribution still works, and survives a save/load round-trip.
-    const s = new TransactionStore();
-    s.resetData();
-    s.addSavingsGoal({
-      name: "Roof", targetAmount: 5000, saved: 100, targetDate: "2027-01-01",
-    });
-    const goalId = s.getSavingsGoals()[0].id;
-    Utils.showModalPrompt = async () => "250.50";
-    const ui = new SavingsGoalsUI(s, null, () => {});
-    ui._renderList = () => {};
-    await ui._contribute(goalId);
-    if (s.getSavingsGoals()[0].saved !== 350.5) {
-      throw new Error(
-        `a valid contribution was mishandled: saved = ${s.getSavingsGoals()[0].saved}`
-      );
-    }
-    s.saveData(true);
-    const reloaded = new TransactionStore();
-    reloaded.loadData();
-    if (reloaded.getSavingsGoals()[0].saved !== 350.5) {
-      throw new Error(
-        `goal progress did not survive a reload: ${reloaded.getSavingsGoals()[0].saved}`
-      );
-    }
-    s.cancelPendingSave();
-    reloaded.cancelPendingSave();
-  } finally {
-    Utils.showModalPrompt = originalPrompt;
-  }
-
-  console.log("✅ Non-finite contributions rejected; real progress persists across a reload");
-}
-
-// TEST 52: what-if drafts must be invisible to bank reconciliation.
-//
-// Same root as TEST 51 — drafts ride in the shared transactions map so the
-// balance walks see them, so every read surface must opt out or mark them — but
-// the bank reconciler's failure is destructive, not merely cosmetic.
-// _buildAppItems filtered hidden rows, balance anchors, allocations and
-// skipped recurring instances, but not drafts, so a hypothetical was a live
-// match candidate:
-//
-//   1. The real bank line matches the draft, is counted as reconciled, and is
-//      never reported "missing from app" — the transaction the user actually
-//      needs to log stays invisible, and the statement looks balanced.
-//   2. Worse, acting on that pair promotes the hypothetical into real money.
-//      _settle/_fixDate call _relocateEntry, which rebuilds the row field by
-//      field (amount/type/description/settled/debt*/allocated/drawsFrom*) and
-//      re-adds it with store.addTransaction. The rebuild never copies `whatIf`,
-//      so the row lands as an ordinary persisted transaction — written to
-//      localStorage, pushed to the Gist, and beyond the reach of Discard, which
-//      only removes rows still flagged whatIf.
-//
-// _appPayeeVocabulary is fixed for the same reason: it feeds the hard block in
-// _blockMatch, so a draft description could tip a real bank payee into "known
-// to the app" and block a match between two genuine entries.
-console.log("TEST 52: What-If Drafts Are Invisible To Bank Reconciliation");
-{
-  const csv =
-    "Posted Date,Transaction Date,Description,Deposit,Withdrawal,Balance\n" +
-    "7/6/2026,7/6/2026,Withdrawal ACH CAPITAL ONE,,($73.00),$1295.81\n" +
-    "6/29/2026,6/29/2026,Withdrawal Debit Card JASON'S DELI FORT MYERS FL,,($53.25),$2073.30\n";
-  const addAnchor = (s) =>
-    s.addTransaction("2026-06-29", {
-      amount: 53.25, type: "expense",
-      description: "Jasons Deli", settled: true,
-    });
-
-  // A draft standing exactly where a matching real entry would stand: same
-  // amount, same payee word, 3 days out (the window pass 1 stretches to on a
-  // shared name). Nothing about it may reach the reconciler.
-  {
-    const s = new TransactionStore();
-    s.resetData();
-    const rm = new RecurringTransactionManager(s);
-    const ui = new BankReconcileUI(s, rm, () => {}, () => {});
-    addAnchor(s);
-    s.addWhatIfTransaction("2026-07-03", {
-      amount: 73, type: "expense",
-      description: "Debt Payment: Capital One", settled: true,
-    });
-
-    const parsed = ui._parseSuncoastCsv(csv);
-    if (parsed.error) throw new Error("Parse error: " + parsed.error);
-    ui._run(parsed.rows);
-    const r = ui.result;
-
-    // The real bank line has no real counterpart, so it must be reported.
-    if (r.missingFromApp.length !== 1) {
-      throw new Error(
-        `A draft absorbed the real bank line: missingFromApp=${r.missingFromApp.length}`
-      );
-    }
-    // Only the anchor may match; the draft must not appear in any bucket.
-    if (r.matchedCount !== 1) {
-      throw new Error(`Draft was matched against a bank line: matched=${r.matchedCount}`);
-    }
-    if (r.dateDrifted.length !== 0) {
-      throw new Error(
-        `Draft surfaced as a date-drift pair (Settle/Fix would persist it): ${JSON.stringify(r.dateDrifted)}`
-      );
-    }
-    if (r.appOnlyUnmatched.length !== 0) {
-      throw new Error(
-        `Draft reported as an unmatched app entry: ${JSON.stringify(r.appOnlyUnmatched)}`
-      );
-    }
-
-    // The draft is still a draft: one whatIf row, and nothing persistable on
-    // either the draft's date or the bank's date.
-    if (s.getWhatIfTransactions().length !== 1) {
-      throw new Error("Reconciliation altered the draft set");
-    }
-    const persisted = s._filterPersistedTransactions(s.getTransactions());
-    if (persisted["2026-07-03"] || persisted["2026-07-06"]) {
-      throw new Error(
-        `A draft was promoted to a persisted transaction: ${JSON.stringify(persisted)}`
-      );
-    }
-
-    // The draft's payee words must not enter the matching vocabulary.
-    // _nameTokens upper-cases and strips the "Debt Payment:" label, so the
-    // draft's distinctive word would enter the vocabulary as "CAPITAL".
-    const vocab = ui._appPayeeVocabulary();
-    if (vocab.has("CAPITAL")) {
-      throw new Error("Draft description leaked into the payee vocabulary");
-    }
-    s.cancelPendingSave();
-  }
-
-  // Positive control: the identical entry as a REAL transaction still matches
-  // and still surfaces as date drift, so the guard filters drafts only.
-  {
-    const s = new TransactionStore();
-    s.resetData();
-    const rm = new RecurringTransactionManager(s);
-    const ui = new BankReconcileUI(s, rm, () => {}, () => {});
-    addAnchor(s);
-    s.addTransaction("2026-07-03", {
-      amount: 73, type: "expense",
-      description: "Debt Payment: Capital One", settled: true,
-    });
-
-    const parsed = ui._parseSuncoastCsv(csv);
-    if (parsed.error) throw new Error("Parse error: " + parsed.error);
-    ui._run(parsed.rows);
-    const r = ui.result;
-    if (r.matchedCount !== 2 || r.missingFromApp.length !== 0) {
-      throw new Error(
-        `Real entry must still match: matched=${r.matchedCount}, missing=${r.missingFromApp.length}`
-      );
-    }
-    if (r.dateDrifted.length !== 1) {
-      throw new Error("Real drifted entry must still surface as date drift");
-    }
-    if (!ui._appPayeeVocabulary().has("CAPITAL")) {
-      throw new Error("Real descriptions must still feed the payee vocabulary");
-    }
-    s.cancelPendingSave();
-  }
-  console.log("✅ Drafts never match, never report, and never get promoted; real entries unaffected");
 }
 
 // TEST 53: the non-finite class, fourth pass — the walk's own inputs.
@@ -4429,7 +3887,7 @@ console.log("TEST 55: Malformed Tombstones Can't Silence The Save Callbacks");
   // downstream (prune, merge) ever sees them again.
   const junk = {
     transactions: [null, 42, [], { deletedAt: 1 }, "legacy-id", { id: "ok", deletedAt: Date.now() }],
-    savingsGoals: "not-an-array",
+    cashInfusions: "not-an-array",
     skips: [null, { date: "2026-09-01", recurringId: "r1", skipped: true, at: Date.now() }],
   };
   const normalized = s._normalizeDeletedItems(junk);
@@ -4438,7 +3896,7 @@ console.log("TEST 55: Malformed Tombstones Can't Silence The Save Callbacks");
       `expected the legacy string + the valid record to survive, got ${JSON.stringify(normalized.transactions)}`
     );
   }
-  if (!Array.isArray(normalized.savingsGoals) || normalized.savingsGoals.length !== 0) {
+  if (!Array.isArray(normalized.cashInfusions) || normalized.cashInfusions.length !== 0) {
     throw new Error("a non-array collection was not reset to an empty array");
   }
   if (normalized.skips.length !== 1) {
@@ -5259,7 +4717,7 @@ console.log("TEST 66: Corrupt Stored / Remote Shapes Degrade Instead Of Bricking
 {
   const STORE_KEYS = [
     "transactions", "monthlyBalances", "recurringTransactions",
-    "skippedTransactions", "debts", "cashInfusions", "savingsGoals",
+    "skippedTransactions", "debts", "cashInfusions",
     "debtSnowballSettings", "monthlyNotes", "movedTransactions", "deletedItems",
   ];
   const RAW_JUNK = [
@@ -5323,10 +4781,10 @@ console.log("TEST 66: Corrupt Stored / Remote Shapes Degrade Instead Of Bricking
       monthlyBalances: {},
       recurringTransactions: [],
       skippedTransactions: {},
-      debts: [], cashInfusions: [], savingsGoals: [],
+      debts: [], cashInfusions: [],
       debtSnowballSettings: { dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false },
       monthlyNotes: {}, movedTransactions: {},
-      _deletedItems: { transactions: [], recurringTransactions: [], debts: [], cashInfusions: [], savingsGoals: [], skips: [] },
+      _deletedItems: { transactions: [], recurringTransactions: [], debts: [], cashInfusions: [], skips: [] },
       lastUpdated: "2026-08-10T00:00:00Z",
     });
     const MERGE_JUNK = [null, 123, true, "text", [], {}, [null], { "2026-08-01": "nope" }, { k: null }];
@@ -5352,7 +4810,7 @@ console.log("TEST 66: Corrupt Stored / Remote Shapes Degrade Instead Of Bricking
             }
             // The merge must still produce every declared collection in a
             // shape importData can consume.
-            ["debts", "cashInfusions", "savingsGoals", "recurringTransactions"].forEach((c) => {
+            ["debts", "cashInfusions", "recurringTransactions"].forEach((c) => {
               if (!Array.isArray(merged[c])) {
                 throw new Error(`merge produced a non-array ${c} from corrupt ${side} ${field}`);
               }
@@ -5397,10 +4855,10 @@ async function runPushRaceTest() {
       "2026-07-01": [{ id: "r1", amount: 5, type: "expense", description: "Remote only", _lastModified: "2026-07-01T00:00:00Z" }],
     },
     monthlyBalances: {}, recurringTransactions: [], skippedTransactions: {},
-    movedTransactions: {}, debts: [], cashInfusions: [], savingsGoals: [],
+    movedTransactions: {}, debts: [], cashInfusions: [],
     monthlyNotes: {},
     debtSnowballSettings: { dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false },
-    _deletedItems: { transactions: [], recurringTransactions: [], debts: [], cashInfusions: [], savingsGoals: [], skips: [] },
+    _deletedItems: { transactions: [], recurringTransactions: [], debts: [], cashInfusions: [], skips: [] },
     lastUpdated: "2026-07-01T00:00:00Z",
   };
 
@@ -6257,7 +5715,6 @@ console.log("TEST 77: A Malformed Collection Doesn't Reject The Whole Import");
     ],
     debts: [{ id: "d1", name: "Card", balance: 100, minPayment: 10 }],
     cashInfusions: [{ id: "c1", name: "Refund", amount: 50, date: "2026-09-01" }],
-    savingsGoals: [{ id: "g1", name: "Fund", targetAmount: 500, targetDate: "2027-01-01", saved: 10 }],
     skippedTransactions: {},
     movedTransactions: {},
     monthlyNotes: { "2026-08": { text: "note" } },
@@ -6267,7 +5724,7 @@ console.log("TEST 77: A Malformed Collection Doesn't Reject The Whole Import");
 
   const JUNK = [0, 1, "", "text", true, [], {}, null];
   const COLLECTIONS = [
-    "debts", "cashInfusions", "savingsGoals",
+    "debts", "cashInfusions",
     "skippedTransactions", "movedTransactions", "monthlyNotes",
   ];
 
@@ -6292,7 +5749,7 @@ console.log("TEST 77: A Malformed Collection Doesn't Reject The Whole Import");
       }
       // And the malformed one degraded to the empty default, not to junk.
       const landed = store[key];
-      const expectArray = ["debts", "cashInfusions", "savingsGoals"].includes(key);
+      const expectArray = ["debts", "cashInfusions"].includes(key);
       const usable = expectArray
         ? Array.isArray(landed)
         : landed && typeof landed === "object" && !Array.isArray(landed);
@@ -6684,8 +6141,8 @@ console.log("TEST 80: Every Cross-File Call Resolves");
 
   vmModule.runInContext(
     `globalThis.__c = { TransactionStore, RecurringTransactionManager, CalculationService,
-       TransactionUI, CalendarUI, SearchUI, BankReconcileUI, DebtSnowballUI, WhatIfUI,
-       SavingsGoalsUI, CloudSync, PinProtection, CashflowApp };
+       TransactionUI, CalendarUI, SearchUI, BankReconcileUI, DebtSnowballUI,
+       CloudSync, PinProtection, CashflowApp };
      globalThis.__u = Utils; globalThis.__m = ModalManager;`,
     sandbox
   );
@@ -6696,7 +6153,7 @@ console.log("TEST 80: Every Cross-File Call Resolves");
     calculationService: "CalculationService", transactionUI: "TransactionUI",
     calendarUI: "CalendarUI", searchUI: "SearchUI", bankReconcile: "BankReconcileUI",
     debtSnowball: "DebtSnowballUI", debtSnowballUI: "DebtSnowballUI",
-    whatIf: "WhatIfUI", savingsGoals: "SavingsGoalsUI", cloudSync: "CloudSync",
+    cloudSync: "CloudSync",
     pinProtection: "PinProtection", app: "CashflowApp",
   };
   const membersOf = (ctor) => {
@@ -6716,8 +6173,8 @@ console.log("TEST 80: Every Cross-File Call Resolves");
   const unresolved = [];
   let resolved = 0;
   order.forEach((rel) => {
-    // In the store companions `this.savingsGoals` / `.debts` / `.cashInfusions`
-    // are DATA arrays that happen to share a name with a UI component.
+    // In the store companions `this.debts` / `.cashInfusions` are DATA arrays;
+    // skip them should a UI component ever share one of those names.
     const isStore = /transaction-store/.test(rel);
     const lines = fs.readFileSync(path.join(__dirname, "..", rel), "utf8").split("\n");
     lines.forEach((line, i) => {
@@ -6726,7 +6183,7 @@ console.log("TEST 80: Every Cross-File Call Resolves");
         let m;
         while ((m = re.exec(line))) {
           const field = m[1], method = m[2];
-          if (isStore && ["savingsGoals", "debts", "cashInfusions"].includes(field)) continue;
+          if (isStore && ["debts", "cashInfusions"].includes(field)) continue;
           const cls = FIELD[field];
           if (!cls) continue;
           resolved++;
@@ -7418,7 +6875,7 @@ console.log("TEST 86: The Balance Chain Doesn't Depend On Where You Navigated");
           recurrence: "monthly", startDate: ds(Y, M - 4, 1),
           _lastModified: new Date().toISOString() },
       ],
-      debts: [], cashInfusions: [], savingsGoals: [],
+      debts: [], cashInfusions: [],
       skippedTransactions: {}, movedTransactions: {}, monthlyNotes: {},
       debtSnowballSettings: { dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false },
       lastUpdated: new Date().toISOString(),
@@ -7551,7 +7008,7 @@ console.log("TEST 87: A Superseded Allocation Bucket Stays Collapsed");
           allocated: true, settled: true,
           _lastModified: new Date().toISOString() },
       ],
-      debts: [], cashInfusions: [], savingsGoals: [],
+      debts: [], cashInfusions: [],
       skippedTransactions: {}, movedTransactions: {}, monthlyNotes: {},
       debtSnowballSettings: { dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false },
       lastUpdated: new Date().toISOString(),
@@ -7632,7 +7089,7 @@ console.log("TEST 87: A Superseded Allocation Bucket Stays Collapsed");
           allocated: true, settled: true,
           _lastModified: new Date().toISOString() },
       ],
-      debts: [], cashInfusions: [], savingsGoals: [],
+      debts: [], cashInfusions: [],
       skippedTransactions: {}, movedTransactions: {}, monthlyNotes: {},
       debtSnowballSettings: { dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false },
       lastUpdated: new Date().toISOString(),
@@ -7828,7 +7285,7 @@ console.log("TEST 89: A Deleted Monthly Note Stays Deleted Across A Merge");
   const base = {
     transactions: {}, monthlyBalances: {}, recurringTransactions: [],
     skippedTransactions: {}, movedTransactions: {}, debts: [],
-    cashInfusions: [], savingsGoals: [], monthlyNotes: {},
+    cashInfusions: [], monthlyNotes: {},
     debtSnowballSettings: { dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false },
     _deletedItems: {}, lastUpdated: "2026-08-01T00:00:00.000Z",
   };
@@ -7999,7 +7456,7 @@ console.log("TEST 90: A Non-String Description Doesn't Break Reconciliation");
           recurrence: "monthly", startDate: "2026-08-01",
           _lastModified: new Date().toISOString() },
       ],
-      debts: [], cashInfusions: [], savingsGoals: [],
+      debts: [], cashInfusions: [],
       skippedTransactions: {}, movedTransactions: {}, monthlyNotes: {},
       debtSnowballSettings: { dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false },
       lastUpdated: new Date().toISOString(),
@@ -8119,7 +7576,7 @@ console.log("TEST 91: Every Awkward 'Today' Renders Stably");
             recurrence: "monthly", dueStartDate: ds(year, month - 1, 12),
             interestRate: 18, _lastModified: stamp },
         ],
-        cashInfusions: [], savingsGoals: [], skippedTransactions: {},
+        cashInfusions: [], skippedTransactions: {},
         movedTransactions: {}, monthlyNotes: {},
         debtSnowballSettings: { dailyFloor: 50, extraPaymentStartMonth: "", autoGenerate: true },
         lastUpdated: stamp,
@@ -8203,7 +7660,7 @@ console.log("TEST 91: Every Awkward 'Today' Renders Stably");
 // snapshot's smallest-balance-first infusion distribution, and the plan list's
 // clearance ordering — and both fire whenever two debts sit at the SAME
 // remaining balance. _normalizeDebt coerced every other field but not `name`
-// (its siblings _normalizeSavingsGoal / _normalizeCashInfusion always have), so
+// (its sibling _normalizeCashInfusion always has), so
 // a number or object from an import or a cloud merge threw there. The snapshot
 // path runs inside the calendar render (generateCalendar →
 // ensureSnowballPaymentsForHorizon → the projection), so one bad name took the
@@ -8244,7 +7701,7 @@ console.log("TEST 92: A Non-String Debt Name Doesn't Break The Render");
       cashInfusions: [
         { id: "c0", name: "Bonus", amount: 500, date: ds(Y, M, 10), targetDebtId: null },
       ],
-      savingsGoals: [], skippedTransactions: {}, movedTransactions: {}, monthlyNotes: {},
+      skippedTransactions: {}, movedTransactions: {}, monthlyNotes: {},
       debtSnowballSettings: { dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: true },
       lastUpdated: stamp,
     });
@@ -8370,9 +7827,6 @@ console.log("TEST 93: Every Stored Field Survives Every Wrong Shape");
       cashInfusions: [
         { id: "c0", name: "Bonus", amount: 400, date: ds(Y, M, 12), targetDebtId: null, _lastModified: stamp },
       ],
-      savingsGoals: [
-        { id: "g0", name: "Trip", targetAmount: 1000, targetDate: ds(Y, M + 3, 1), saved: 200, _lastModified: stamp },
-      ],
       skippedTransactions: { [ds(Y, M - 1, 5)]: ["r1"] },
       movedTransactions: {
         ["r2-" + ds(Y, M, 1)]: { recurringId: "r2", fromDate: ds(Y, M, 1), toDate: ds(Y, M, 2), movedAt: stamp },
@@ -8401,7 +7855,6 @@ console.log("TEST 93: Every Stored Field Survives Every Wrong Shape");
     snowball.ensureSnowballPaymentsForHorizon(Y, M);
     calc.updateMonthlyBalances(new Date(Y, M, 1, 12, 0, 0));
     calc.calculateMinimum();
-    calc.getMinimumBalanceThrough(ds(Y, M + 3, 1));
     calc.getDayBalanceBreakdown(ds(Y, M, 5));
     calc.getCarriedUnsettledList(ds(Y, M, 20));
     store.getAllocations();
@@ -8445,8 +7898,6 @@ console.log("TEST 93: Every Stored Field Survives Every Wrong Shape");
       (p, f, v) => p.debts.forEach((d) => { d[f] = v; })],
     ["infusion", ["name", "amount", "date", "targetDebtId", "_lastModified", "id"],
       (p, f, v) => p.cashInfusions.forEach((i) => { i[f] = v; })],
-    ["goal", ["name", "targetAmount", "targetDate", "saved", "_lastModified", "id"],
-      (p, f, v) => p.savingsGoals.forEach((g) => { g[f] = v; })],
     ["move", ["recurringId", "fromDate", "toDate", "movedAt"],
       (p, f, v) => Object.values(p.movedTransactions).forEach((mv) => { mv[f] = v; })],
     ["note", ["text", "_lastModified"],
@@ -8523,7 +7974,7 @@ console.log("TEST 94: Reconcile Actions Leave Every Component Consistent");
         { id: "rs", amount: 15.75, type: "expense", description: "SPOTIFY",
           recurrence: "monthly", startDate: ds(Y, M, 18), _lastModified: stamp },
       ],
-      debts: [], cashInfusions: [], savingsGoals: [],
+      debts: [], cashInfusions: [],
       skippedTransactions: {}, movedTransactions: {}, monthlyNotes: {},
       debtSnowballSettings: { dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false },
       lastUpdated: stamp,
@@ -8744,9 +8195,9 @@ async function runAwaitBoundaryRaceTest() {
       ],
     },
     monthlyBalances: {}, recurringTransactions: [], skippedTransactions: {},
-    movedTransactions: {}, debts: [], cashInfusions: [], savingsGoals: [], monthlyNotes: {},
+    movedTransactions: {}, debts: [], cashInfusions: [], monthlyNotes: {},
     debtSnowballSettings: { dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false },
-    _deletedItems: { transactions: [], recurringTransactions: [], debts: [], cashInfusions: [], savingsGoals: [], skips: [] },
+    _deletedItems: { transactions: [], recurringTransactions: [], debts: [], cashInfusions: [], skips: [] },
     lastUpdated: "2026-07-01T00:00:00Z",
   });
 
@@ -8939,7 +8390,7 @@ console.log("TEST 96: A Skipped Occurrence Ends The Period Before It");
           recurrence: "weekly", startDate: ds(-30),
           allocated: true, settled: true, _lastModified: stamp },
       ],
-      debts: [], cashInfusions: [], savingsGoals: [],
+      debts: [], cashInfusions: [],
       skippedTransactions: {}, movedTransactions: {}, monthlyNotes: {},
       debtSnowballSettings: { dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false },
       lastUpdated: stamp,
@@ -9118,7 +8569,7 @@ console.log("TEST 97: The Daily Floor Is Normalized Everywhere It Arrives");
 
   const base = {
     transactions: {}, monthlyBalances: {}, recurringTransactions: [], debts: [],
-    cashInfusions: [], savingsGoals: [], skippedTransactions: {},
+    cashInfusions: [], skippedTransactions: {},
     movedTransactions: {}, monthlyNotes: {}, lastUpdated: new Date().toISOString(),
   };
 
@@ -9258,7 +8709,7 @@ console.log("TEST 98: No Null-Coerced Date Comparisons Or Two-Way Comparators");
         { id: "broken", amount: 50, type: "expense", description: "Gym",
           recurrence: "monthly", startDate: "not-a-date" },
       ],
-      debts: [], cashInfusions: [], savingsGoals: [], skippedTransactions: {},
+      debts: [], cashInfusions: [], skippedTransactions: {},
       movedTransactions: {}, monthlyNotes: {},
       debtSnowballSettings: { dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false },
       lastUpdated: new Date().toISOString(),
@@ -9604,7 +9055,7 @@ console.log("TEST 100: A Split Books Each Bucket's Own Share As Demand");
     transactions,
     monthlyBalances: {},
     recurringTransactions: [seriesDef("r1", "Groceries"), seriesDef("r2", "Household")],
-    debts: [], cashInfusions: [], savingsGoals: [], skippedTransactions: {},
+    debts: [], cashInfusions: [], skippedTransactions: {},
     movedTransactions: {}, monthlyNotes: {},
     debtSnowballSettings: { dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false },
     lastUpdated: stamp,
@@ -9654,7 +9105,7 @@ console.log("TEST 100: A Split Books Each Bucket's Own Share As Demand");
     transactions: legacy,
     monthlyBalances: {},
     recurringTransactions: [seriesDef("r1", "Groceries")],
-    debts: [], cashInfusions: [], savingsGoals: [], skippedTransactions: {},
+    debts: [], cashInfusions: [], skippedTransactions: {},
     movedTransactions: {}, monthlyNotes: {},
     debtSnowballSettings: { dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false },
     lastUpdated: stamp,
@@ -9695,7 +9146,7 @@ console.log("TEST 100: A Split Books Each Bucket's Own Share As Demand");
     transactions: capped,
     monthlyBalances: {},
     recurringTransactions: [seriesDef("r1", "Groceries")],
-    debts: [], cashInfusions: [], savingsGoals: [], skippedTransactions: {},
+    debts: [], cashInfusions: [], skippedTransactions: {},
     movedTransactions: {}, monthlyNotes: {},
     debtSnowballSettings: { dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false },
     lastUpdated: stamp,
@@ -10166,7 +9617,6 @@ console.log("TEST 112: The First Render After A Cold Start Retires A Turned-Over
     const renders = [];
     const app = {
       _operationLock: false, store: s, recurringManager: rm, calculationService: cs,
-      whatIf: { refreshBanner() {} },
       calendarUI: {
         // What generateCalendar does to the store: expand the viewed month,
         // then walk every month (which expands the rest of the range).
@@ -10356,31 +9806,6 @@ async function runUnreadableGistTest() {
 }
 async function runRuntimeTailTests() {
   const assert = require('assert');
-  console.log('TEST 110: Savings Contributions Use The Latest Goal State');
-  localStorage.clear();
-  const s = new TransactionStore();
-  const ui = new SavingsGoalsUI(s, null, () => {});
-  ui._renderList = () => {};
-  const prompt = Utils.showModalPrompt;
-  const id = s.addSavingsGoal({ name: 'Test', saved: 10, targetAmount: 100 });
-  try {
-    Utils.showModalPrompt = async () => {
-      s.updateSavingsGoal(id, { saved: 30 });
-      return '5';
-    };
-    await ui._contribute(id);
-    assert.strictEqual(s.getSavingsGoals()[0].saved, 35);
-    Utils.showModalPrompt = async () => {
-      s.deleteSavingsGoal(id);
-      return '5';
-    };
-    await ui._contribute(id);
-    assert.strictEqual(s.getSavingsGoals().length, 0);
-  } finally {
-    Utils.showModalPrompt = prompt;
-    s.cancelPendingSave();
-  }
-
   console.log('TEST 111: Service Worker Preserves Other Apps And Finishes Cache Writes');
   const listeners = {};
   const deleted = [];
@@ -10424,8 +9849,7 @@ async function runRuntimeTailTests() {
   assert.strictEqual(puts, 1);
 }
 
-runTest48Savings()
-  .then(runRuntimeTailTests)
+runRuntimeTailTests()
   .then(runUnreadableGistTest)
   .then(runReplaceRemoteTest)
   .then(runBackupAbortTest)

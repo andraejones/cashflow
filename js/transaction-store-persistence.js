@@ -1,6 +1,6 @@
 // TransactionStore — persistence: localStorage load (with migrations and
 // PIN decryption), save (with encryption), debounced-save orchestration,
-// tombstone pruning, the what-if persistence filter, reset, and whole-DB
+// tombstone pruning, the persisted-transaction filter, reset, and whole-DB
 // import/export. Prototype companion of TransactionStore (class declared in
 // transaction-store.js); no build step — loaded as a plain script after the
 // class file and before app.js (see index.html).
@@ -12,16 +12,15 @@ Object.assign(TransactionStore.prototype, {
   // Every construction site (constructor, loadData, importData, resetData)
   // derives its object from this one list, so adding a synced collection means
   // adding its key here and nowhere else. Sites used to hand-maintain their own
-  // copies and drifted: loadData omitted `savingsGoals`, so after any reload
+  // copies and drifted: loadData once omitted a key, so after any reload
   // (saveData writes the `deletedItems` key on every save, so the stored blob
-  // is always present) deleteSavingsGoal's unguarded push threw, the delete
-  // silently failed, and an untombstoned goal would resurrect on the next merge.
+  // is always present) that collection's unguarded tombstone push threw, the
+  // delete silently failed, and the entry would resurrect on the next merge.
   _TOMBSTONE_KEYS: [
     "transactions",
     "recurringTransactions",
     "debts",
     "cashInfusions",
-    "savingsGoals",
     "skips",
   ],
 
@@ -210,9 +209,6 @@ Object.assign(TransactionStore.prototype, {
       const storedCashInfusions = decrypt(
         this.storage.getItem("cashInfusions"), true
       );
-      const storedSavingsGoals = decrypt(
-        this.storage.getItem("savingsGoals"), true
-      );
       const storedSnowballSettings = decrypt(
         this.storage.getItem("debtSnowballSettings"), true
       );
@@ -362,14 +358,6 @@ Object.assign(TransactionStore.prototype, {
           .map((infusion) => this._normalizeCashInfusion(infusion));
       }
 
-      if (storedSavingsGoals) {
-        const parsedGoals =
-          this._storedArray(JSON.parse(storedSavingsGoals), "savingsGoals") || [];
-        this.savingsGoals = parsedGoals
-          .filter((goal) => goal && typeof goal === "object" && !Array.isArray(goal))
-          .map((goal) => this._normalizeSavingsGoal(goal));
-      }
-
       if (storedSnowballSettings) {
         const parsedSettings =
           this._storedMap(
@@ -469,7 +457,6 @@ Object.assign(TransactionStore.prototype, {
       this.skippedTransactions = {};
       this.debts = [];
       this.cashInfusions = [];
-      this.savingsGoals = [];
       this.lastUpdated = null;
       this.debtSnowballSettings = {
         dailyFloor: 0,
@@ -511,11 +498,8 @@ Object.assign(TransactionStore.prototype, {
   _filterPersistedTransactions(transactions) {
     const filtered = {};
     for (const date in transactions) {
-      // What-if drafts (whatIf: true) are preview-only overlays on the balance
-      // walk — never persisted to storage, exports, or cloud sync.
       const kept = transactions[date].filter(t =>
-        t.whatIf !== true &&
-        (!t.recurringId || t.modifiedInstance || t.movedFrom !== undefined)
+        !t.recurringId || t.modifiedInstance || t.movedFrom !== undefined
       );
       if (kept.length > 0) {
         filtered[date] = kept;
@@ -591,10 +575,9 @@ Object.assign(TransactionStore.prototype, {
         "cashInfusions",
         encrypt(JSON.stringify(this.cashInfusions))
       );
-      this.storage.setItem(
-        "savingsGoals",
-        encrypt(JSON.stringify(this.savingsGoals))
-      );
+      // Left behind by the removed savings-goals feature. Nothing reads it,
+      // so drop it rather than let it outlive a reset or a PIN re-key.
+      this.storage.removeItem("savingsGoals");
       this.storage.setItem(
         "debtSnowballSettings",
         encrypt(JSON.stringify(this.debtSnowballSettings))
@@ -661,7 +644,6 @@ Object.assign(TransactionStore.prototype, {
     this.skippedTransactions = {};
     this.debts = [];
     this.cashInfusions = [];
-    this.savingsGoals = [];
     this.monthlyNotes = {};
     this.movedTransactions = {};
     this.lastUpdated = null;
@@ -689,7 +671,6 @@ Object.assign(TransactionStore.prototype, {
       movedTransactions: this.movedTransactions,
       debts: this.debts,
       cashInfusions: this.cashInfusions,
-      savingsGoals: this.savingsGoals,
       monthlyNotes: this.monthlyNotes,
       debtSnowballSettings: this.debtSnowballSettings,
       _deletedItems: this._deletedItems,
@@ -723,7 +704,6 @@ Object.assign(TransactionStore.prototype, {
       movedTransactions: this.movedTransactions,
       debts: this.debts,
       cashInfusions: this.cashInfusions,
-      savingsGoals: this.savingsGoals,
       monthlyNotes: this.monthlyNotes,
       debtSnowballSettings: this.debtSnowballSettings,
       _deletedItems: this._deletedItems,
@@ -788,9 +768,6 @@ Object.assign(TransactionStore.prototype, {
       this.cashInfusions = importedList(
         data.cashInfusions, "imported cashInfusions"
       ).map((infusion) => this._normalizeCashInfusion(infusion));
-      this.savingsGoals = importedList(
-        data.savingsGoals, "imported savingsGoals"
-      ).map((goal) => this._normalizeSavingsGoal(goal));
       this.debtSnowballSettings = {
         dailyFloor: this._normalizeDailyFloor(data.debtSnowballSettings?.dailyFloor),
         extraPaymentStartMonth: this.normalizeExtraStartMonth(
@@ -946,7 +923,6 @@ Object.assign(TransactionStore.prototype, {
       this.movedTransactions = backup.movedTransactions;
       this.debts = backup.debts;
       this.cashInfusions = backup.cashInfusions;
-      this.savingsGoals = backup.savingsGoals;
       this.monthlyNotes = backup.monthlyNotes;
       this.debtSnowballSettings = backup.debtSnowballSettings;
       this._deletedItems = backup._deletedItems;

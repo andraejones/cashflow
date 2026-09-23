@@ -11,8 +11,9 @@ CashFlow Calendar is an offline-first, single-page personal finance application 
 **No build process required.** Open `index.html` directly in a browser or serve via any static server.
 
 **Tests:** `npm test` (or run the two scripts directly with Node) — it must pass before every commit:
-- `node scripts/verify-logic.js` — 112 numbered integration tests over vm-loaded sources
-  (numbered up to TEST 113; the numbering has gaps where tests were merged).
+- `node scripts/verify-logic.js` — 107 numbered integration tests over vm-loaded sources
+  (numbered up to TEST 113; the numbering has gaps where tests were merged or
+  removed along with the feature they covered).
   Four of them are SWEEPS rather than scenarios, and they are the ones worth
   extending when something new is added:
     - TEST 93 puts a wrong-typed value in every field the app reads, one field
@@ -87,11 +88,9 @@ Scripts must load in this order due to dependencies:
 7. `search-ui.js` - Search & CSV export
 8. `bank-reconcile.js` - Bank statement reconciliation
 9. `debt-snowball.js` - Debt snowball modeling (+ companions: `debt-snowball-engine.js`, `debt-snowball-payments.js`, `debt-snowball-render.js`)
-10. `what-if.js` - What-if draft preview
-11. `savings-goals.js` - Savings goals
-12. `cloud-sync.js` - GitHub Gist sync
-13. `pin-protection.js` - PIN lock & encryption
-14. `app.js` - Application orchestrator
+10. `cloud-sync.js` - GitHub Gist sync
+11. `pin-protection.js` - PIN lock & encryption
+12. `app.js` - Application orchestrator
 
 **Prototype-companion pattern:** the three largest classes are split across
 files with no build step. The class file declares the class; each companion
@@ -134,11 +133,11 @@ and it is what `Utils.formatAmount` and the snowball hero's `formatWhole` use,
 so both collapse `-0` explicitly. TEST 81 asserts the rule, not just that the
 two harness stubs agree with the real Utils.
 
-Money entering the store is normalized, never trusted: the domain collections go through `_normalizeDebt` / `_normalizeSavingsGoal` / `_normalizeCashInfusion` (all built on `_finiteNumber`), and the three inputs the balance walk steps through — the transactions map, the recurring definitions, and the monthly anchors — are swept by `_repairWalkAmounts()` in both `loadData` and `importData`. That sweep is the only guard covering data that never passed a form: `"1e999"` is valid JSON that parses to `Infinity`, so an imported backup can otherwise put a non-finite amount straight into the walk. It rewrites non-finite values only, so finite money is never re-rounded. Use `Number.isFinite`, never bare `isNaN`, on any amount that gets persisted. A value the FORM rejects has to be rejected on every other path too: the snowball's `dailyFloor` was coerced with `_finiteNumber` in `loadData`, `importData` and `setDebtSnowballSettings`, none of which refused a negative — and a negative floor makes the projection schedule payoffs that drive the projected balance below zero. `_normalizeDailyFloor` is the single choke point now (TEST 97).
+Money entering the store is normalized, never trusted: the domain collections go through `_normalizeDebt` / `_normalizeCashInfusion` (both built on `_finiteNumber`), and the three inputs the balance walk steps through — the transactions map, the recurring definitions, and the monthly anchors — are swept by `_repairWalkAmounts()` in both `loadData` and `importData`. That sweep is the only guard covering data that never passed a form: `"1e999"` is valid JSON that parses to `Infinity`, so an imported backup can otherwise put a non-finite amount straight into the walk. It rewrites non-finite values only, so finite money is never re-rounded. Use `Number.isFinite`, never bare `isNaN`, on any amount that gets persisted. A value the FORM rejects has to be rejected on every other path too: the snowball's `dailyFloor` was coerced with `_finiteNumber` in `loadData`, `importData` and `setDebtSnowballSettings`, none of which refused a negative — and a negative floor makes the projection schedule payoffs that drive the projected balance below zero. `_normalizeDailyFloor` is the single choke point now (TEST 97).
 
 Shape is guarded per FIELD too, and that is the reader's job. Only money
 (`_repairWalkAmounts`) and the domain collections (`_normalizeDebt` /
-`_normalizeSavingsGoal` / `_normalizeCashInfusion`) are coerced on the way in —
+`_normalizeCashInfusion`) are coerced on the way in —
 nothing else is, so **every surface that calls a string or number method on a
 stored field must guard it with `typeof` first**. Three crashes came from one
 that didn't: `_normalizeMerchant`'s `.replace` (bank reconciliation blamed a
@@ -297,10 +296,6 @@ and what `computeMinimumPaymentEndDate` writes. Using one date for both made
 expansion and cleanup fight forever over a business-day-adjusted final payment
 (TEST 83).
 
-**WhatIfUI** (`what-if.js`) - What-if preview: draft transactions flagged `whatIf: true` ride in the in-memory transactions map so every balance walk sees them, but `_filterPersistedTransactions` keeps them out of localStorage/exports/sync. Banner above the calendar shows the 30-day-minimum swing with Apply/Discard. **Because drafts sit in the shared map, every new read surface must opt out or mark them** — search excludes them in `performSearch` (which also covers the CSV export, built from `searchResults`), bank reconciliation excludes them in `_buildAppItems` and `_appPayeeVocabulary` (a draft matched to a bank line hides a genuinely missing transaction, and Settle/Fix-date would persist the draft via `_relocateEntry`), the description autocomplete excludes them in `populateDescriptionSuggestions`, the agenda flags them 🔮, and the day-detail modal labels them. Surfaces that key off a field a draft never carries (`_lastModified` for Recent Transactions, `debtId`, `recurringId`, `type: "balance"`) opt out structurally. `getUnsettledTransactions` and the reserve index check `whatIf` explicitly instead: their structural argument rested on `WhatIfUI.addDraft` forcing `settled: true` and never setting `allocated` — a guarantee living two files away from the code depending on it.
-
-**SavingsGoalsUI** (`savings-goals.js`) - Savings goals (`store.savingsGoals`, synced like cashInfusions). Feasibility line reuses the balance walk via `CalculationService.getMinimumBalanceThrough(targetDate)` minus the snowball daily floor.
-
 **CloudSync** (`cloud-sync.js`) - GitHub Gist integration with bi-directional sync and debounced saves. Also owns the GitHub token at rest: it encrypts/decrypts `github_token_encrypted` with an AES-GCM key derived from the plaintext `_device_id` (PinProtection is not involved in token storage).
 
 **PinProtection** (`pin-protection.js`) - PIN setup/verification, XOR encryption of the TransactionStore data (transactions, debts, etc.) keyed by the current PIN, and session inactivity monitoring (120s timeout). It does **not** read or write `github_token_encrypted` — that is CloudSync's, encrypted separately via `_device_id`.
@@ -340,7 +335,7 @@ automatically.
 
 ```
 transactions, monthlyBalances, recurringTransactions, skippedTransactions,
-debts, cashInfusions, savingsGoals, debtSnowballSettings, monthlyNotes,
+debts, cashInfusions, debtSnowballSettings, monthlyNotes,
 movedTransactions, deletedItems, pin_hash, github_token_encrypted, gist_id, auto_sync_enabled,
 webauthn_credential_id, biometric_pin, _device_id, gist_etag,
 local_last_sync, _backup_before_merge, calendar_view_mode
@@ -350,7 +345,7 @@ local_last_sync, _backup_before_merge, calendar_view_mode
 
 - `styles.css` - CSS variables for theming (primary, accent, error colors)
 - `README.md` - Project documentation and feature overview
-- `scripts/verify-logic.js` - Standalone logic verification utility (112 tests)
+- `scripts/verify-logic.js` - Standalone logic verification utility (107 tests)
 - `scripts/verify-walk-parity.js` - Randomized balance-walk parity harness + source guard
 - `scripts/verify-ui.js` - Optional headless-Chromium UI harness (`npm run test:ui`)
 - `scripts/verify-sync.js` - Optional two-device cloud-sync harness (`npm run test:sync`)

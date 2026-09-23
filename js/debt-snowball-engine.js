@@ -516,7 +516,7 @@ Object.assign(DebtSnowballUI.prototype, {
     // projection BEFORE that call, so on the render right after an edit the
     // starting checking balance would still be the pre-edit figure and a payoff
     // could be materialized on a day the money isn't actually there. Same
-    // reason calculateMinimum/getMinimumBalanceThrough invalidate on entry.
+    // reason calculateMinimum invalidates on entry.
     if (this.calculationService) {
       this.calculationService.invalidateCache();
     }
