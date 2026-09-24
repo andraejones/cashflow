@@ -11,8 +11,8 @@ CashFlow Calendar is an offline-first, single-page personal finance application 
 **No build process required.** Open `index.html` directly in a browser or serve via any static server.
 
 **Tests:** `npm test` (or run the two scripts directly with Node) — it must pass before every commit:
-- `node scripts/verify-logic.js` — 112 numbered integration tests over vm-loaded sources
-  (numbered up to TEST 118; the numbering has gaps where tests were merged or
+- `node scripts/verify-logic.js` — 116 numbered integration tests over vm-loaded sources
+  (numbered up to TEST 122; the numbering has gaps where tests were merged or
   removed along with the feature they covered).
   Four of them are SWEEPS rather than scenarios, and they are the ones worth
   extending when something new is added:
@@ -319,6 +319,18 @@ series' `endDate`, so the calendar then drops a real final payment or keeps
 phantom ones after the debt is cleared. `adjustMinimumPaymentTransactions`
 leaves skipped rows out of a month's total for the same reason (TEST 114).
 
+A debt's minimum series must stay on the DEBT's schedule, because the
+projection and the payoff `endDate` schedule minimums from
+`buildDebtRecurringTransaction(debt)` while the calendar expands the stored
+series. `reconcileMinimumSeriesSchedules` (run at the top of
+`ensureSnowballPaymentsForHorizon`) repairs drift left by older builds: a
+start-date-only difference is adopted INTO the debt (the series start never
+moves — that would push paid history out of the cleanup window), anything
+else is rewritten from the debt (TEST 122). "Last day of the month" is the
+debt's explicit `dueLastDay`, decided in `saveDebt` from the due day the user
+typed (31, or a day the first due month is too short for); `null` = saved
+before the flag, which keeps the old start-date inference (TEST 121).
+
 Payoff ORDER is one rule with one implementation: `makePayoffOrder()` (engine
 companion) — a debt's optional `payoffPriority` (whole 1–99, lower first;
 `null` = auto, ranked `UNRANKED_PAYOFF`), then smallest balance, then name,
@@ -390,7 +402,7 @@ local_last_sync, _backup_before_merge, calendar_view_mode
 
 - `styles.css` - CSS variables for theming (primary, accent, error colors)
 - `README.md` - Project documentation and feature overview
-- `scripts/verify-logic.js` - Standalone logic verification utility (112 tests)
+- `scripts/verify-logic.js` - Standalone logic verification utility (116 tests)
 - `scripts/verify-walk-parity.js` - Randomized balance-walk parity harness + source guard
 - `scripts/verify-ui.js` - Optional headless-Chromium UI harness (`npm run test:ui`)
 - `scripts/verify-sync.js` - Optional two-device cloud-sync harness (`npm run test:sync`)

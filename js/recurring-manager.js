@@ -1096,11 +1096,6 @@ class RecurringTransactionManager {
     if ((endDate && endDate < startOfMonth) || startDate > endOfMonth) {
       return;
     }
-    const monthsSinceStart =
-      (year - startDate.getFullYear()) * 12 + (month - startDate.getMonth());
-    if (maxOccurrences && monthsSinceStart >= maxOccurrences) {
-      return;
-    }
     const parsed = this.parseDaySpecificData(rt.daySpecificData);
     if (!parsed) {
       return;
@@ -1122,6 +1117,18 @@ class RecurringTransactionManager {
     // while parseDateString (startDate) returns noon. The sibling
     // countOccurrencesBefore gates the same way.
     if (Utils.formatDateString(targetDate) < Utils.formatDateString(startDate)) {
+      return;
+    }
+    // The cap counts real OCCURRENCES, not months. The form lets the start
+    // date be any day and the pattern any Nth weekday, so the start month
+    // often has no occurrence at all (start Jan 20, "1st Monday") — counting
+    // months since the start then spent one of the user's N payments on that
+    // empty month and the series stopped after N−1. countOccurrencesBefore is
+    // the same count the "this and future" split sizes its new cap with.
+    if (
+      maxOccurrences &&
+      this.countOccurrencesBefore(rt, targetDate) >= maxOccurrences
+    ) {
       return;
     }
     let adjustedDate = targetDate;
@@ -1730,6 +1737,13 @@ class RecurringTransactionManager {
         if (rt.daySpecific) {
           const parsed = this.parseDaySpecificData(rt.daySpecificData);
           if (parsed) {
+            // Compared as calendar dates: getNthDayOfMonth returns local
+            // MIDNIGHT while startDate/beforeDate are noon, so comparing the
+            // Date objects dropped an occurrence ON the start date and counted
+            // one ON beforeDate as already past — the split then sized the new
+            // series' cap one payment short (or long).
+            const startStr = Utils.formatDateString(startDate);
+            const beforeStr = Utils.formatDateString(beforeDate);
             let y = startDate.getFullYear();
             let m = startDate.getMonth();
             const endY = beforeDate.getFullYear();
@@ -1738,7 +1752,8 @@ class RecurringTransactionManager {
               const occDate = this.getNthDayOfMonth(
                 y, m, parsed.dayOfWeek, parsed.occurrence
               );
-              if (occDate && occDate >= startDate && occDate < beforeDate) {
+              const occStr = occDate ? Utils.formatDateString(occDate) : null;
+              if (occStr && occStr >= startStr && occStr < beforeStr) {
                 count++;
               }
               m++;

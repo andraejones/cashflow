@@ -221,6 +221,9 @@ Object.assign(DebtSnowballUI.prototype, {
         if (patternLabel) {
           return `Monthly (${patternLabel})`;
         }
+        if (debt?.dueLastDay === true) {
+          return "Monthly (Last day)";
+        }
         return `Monthly (Day ${dueDay})`;
     }
   },

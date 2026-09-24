@@ -30,6 +30,101 @@ Object.assign(DebtSnowballUI.prototype, {
     this.recurringManager.invalidateCache();
   },
 
+  // Bring each debt's minimum-payment series back onto one schedule with the
+  // debt record. The projection (and the payoff endDate) schedule minimums
+  // from buildDebtRecurringTransaction(debt), while the calendar expands the
+  // stored series — so any drift between the two made the snowball pay a
+  // minimum on a different day than the calendar does, and its floor check
+  // read checking on the wrong side of that payment. Every current writer
+  // keeps them identical (saveDebt rewrites the series from the debt), but
+  // data from older builds did not: bank reconcile's "Move series" used to
+  // shift a debt's series start (a debt due the 3rd kept paying on the 2nd on
+  // the calendar, the 3rd in the plan, by $262 every month).
+  //
+  // A series whose only difference is its start date adopts that start into
+  // the debt, keeping the day the calendar pays on (it is what the user
+  // reconciled against the bank) and never moving an existing series' start,
+  // which would push its paid history outside the window for
+  // cleanupOrphanedDebtMinimums. Any other schedule field is rewritten from
+  // the debt, the source of truth. Quiet maintenance: mutates in place and
+  // returns whether anything changed; the caller saves and drops the cache.
+  reconcileMinimumSeriesSchedules() {
+    const recurrings = this.store.getRecurringTransactions();
+    const scheduleKeys = (recurrence) => {
+      const keys = ["startDate", "recurrence", "businessDayAdjustment"];
+      if (recurrence === "monthly") {
+        keys.push("daySpecific", "daySpecificData", "lastDayOfMonth");
+      } else if (recurrence === "semi-monthly") {
+        keys.push("semiMonthlyDays", "semiMonthlyLastDay");
+      } else if (recurrence === "custom") {
+        keys.push("customInterval");
+      }
+      return keys;
+    };
+    // The value each key has for EXPANSION purposes, so an absent flag and a
+    // false one (or "none" and no adjustment) compare equal.
+    const scheduleValue = (rt, key) => {
+      const v = rt[key];
+      switch (key) {
+        case "daySpecific":
+        case "lastDayOfMonth":
+        case "semiMonthlyLastDay":
+          return v === true;
+        case "daySpecificData":
+          return rt.daySpecific === true && typeof v === "string" ? v : null;
+        case "businessDayAdjustment":
+          return typeof v === "string" && v && v !== "none" ? v : "none";
+        case "semiMonthlyDays":
+          return Array.isArray(v) ? v.map((d) => Number(d)).join(",") : null;
+        case "customInterval":
+          return v && typeof v === "object"
+            ? `${Number(v.value)}:${v.unit}`
+            : null;
+        default:
+          return typeof v === "string" ? v : null;
+      }
+    };
+    const diffKeys = (rt, template) =>
+      scheduleKeys(template.recurrence).filter(
+        (key) => scheduleValue(rt, key) !== scheduleValue(template, key)
+      );
+
+    let changed = false;
+    const now = new Date().toISOString();
+    this.store.getDebts().forEach((debt) => {
+      if (!debt || !debt.minRecurringId) return;
+      const rt = recurrings.find((r) => r && r.id === debt.minRecurringId);
+      if (!rt) return;
+      let template = this.buildDebtRecurringTransaction(debt);
+      let diff = diffKeys(rt, template);
+      if (!diff.length) return;
+      if (diff.includes("startDate") && this.isValidDateString(rt.startDate)) {
+        debt.dueStartDate = rt.startDate;
+        if (template.recurrence === "monthly" && !template.daySpecific) {
+          // Take the series' own last-day flag with its start, or a legacy
+          // debt would re-infer it from the new start date and move the
+          // payment the calendar already makes.
+          debt.dueLastDay = rt.lastDayOfMonth === true;
+          const day = this.getDayFromDateString(rt.startDate);
+          if (!debt.dueLastDay && typeof day === "number" && day >= 1) {
+            debt.dueDay = day;
+          }
+        }
+        debt._lastModified = now;
+        changed = true;
+        template = this.buildDebtRecurringTransaction(debt);
+        diff = diffKeys(rt, template);
+      }
+      if (!diff.length) return;
+      diff.forEach((key) => {
+        rt[key] = template[key];
+      });
+      rt._lastModified = now;
+      changed = true;
+    });
+    return changed;
+  },
+
   buildDebtRecurringTransaction(debt) {
     const recurrence = debt.recurrence || "monthly";
     const startDate = this.getDebtStartDateValue(debt);
@@ -45,14 +140,20 @@ Object.assign(DebtSnowballUI.prototype, {
       recurrence,
       daySpecific: Boolean(dueDayPattern),
       daySpecificData: dueDayPattern || null,
-      // Preserve the legacy "due on the last day" behavior for monthly debts
-      // whose start date lands on its month's last day (e.g. a day-31 due date).
-      // Set explicitly — not inferred at expansion time — so a later due-day edit
-      // can never leave a stale last-day flag behind.
+      // "Due on the last day" comes from the debt's explicit dueLastDay, which
+      // saveDebt records from the due day the user typed. Inferring it from
+      // the start date (still the fallback for debts saved before the flag)
+      // cannot tell a due day of 31 from one of 30 whose first due month
+      // happens to have 30 days — or a Feb 28 start due the 28th — so those
+      // paid on the 31st of every long month instead. Set explicitly on the
+      // series, never inferred at expansion time, so a later due-day edit can
+      // never leave a stale last-day flag behind.
       lastDayOfMonth:
         recurrence === "monthly" &&
         !dueDayPattern &&
-        Utils.isLastCalendarDayOfMonth(startDate),
+        (typeof debt.dueLastDay === "boolean"
+          ? debt.dueLastDay
+          : Utils.isLastCalendarDayOfMonth(startDate)),
       semiMonthlyDays:
         recurrence === "semi-monthly" && Array.isArray(debt.semiMonthlyDays)
           ? [...debt.semiMonthlyDays]
@@ -520,13 +621,30 @@ Object.assign(DebtSnowballUI.prototype, {
         // what's truly needed. Without this a zeroed minimum (currentTotal 0)
         // is trapped here forever and a real payment goes silently missing.
         if (currentTotal < targetTotal - epsilon) {
+          let released = false;
           occurrences.forEach(({ transaction }) => {
             if (transaction.modifiedInstance === true) {
               transaction.hidden = false;
               transaction.modifiedInstance = false;
               changed = true;
+              released = true;
             }
           });
+          // The released row is now a plain expansion, so the next expansion
+          // clears it — and a cached month replays only what it captured,
+          // which never includes a row that was a modified instance at
+          // capture time (every cold start, since the hidden row is
+          // persisted). Replaying that cache dropped the occurrence
+          // outright: a real minimum payment gone from the calendar and
+          // every balance for the rest of the session. Force a full
+          // re-expansion so it comes back at its definition amount.
+          if (
+            released &&
+            this.recurringManager &&
+            typeof this.recurringManager.invalidateCache === "function"
+          ) {
+            this.recurringManager.invalidateCache();
+          }
         }
         return;
       }

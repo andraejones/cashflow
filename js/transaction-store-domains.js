@@ -104,6 +104,10 @@ Object.assign(TransactionStore.prototype, {
       dueDay: this._finiteNumber(debt.dueDay) || 1,
       dueDayPattern:
         typeof debt.dueDayPattern === "string" ? debt.dueDayPattern : "",
+      // Explicit "due on the last day of the month" (monthly only). null =
+      // saved before the flag existed; buildDebtRecurringTransaction then
+      // falls back to inferring it from the start date, as it always did.
+      dueLastDay: typeof debt.dueLastDay === "boolean" ? debt.dueLastDay : null,
       recurrence:
         typeof debt.recurrence === "string" ? debt.recurrence : "monthly",
       dueStartDate:

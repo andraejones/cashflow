@@ -273,6 +273,7 @@ class DebtSnowballUI {
       dueDay: this.extractDayFromDate(recurringTransaction.startDate) || 1,
       dueStartDate: recurringTransaction.startDate || "",
       dueDayPattern: recurringTransaction.daySpecific ? recurringTransaction.daySpecificData : "",
+      dueLastDay: recurringTransaction.lastDayOfMonth === true,
       interestRate: "", // User must fill this in
       businessDayAdjustment: recurringTransaction.businessDayAdjustment || "none",
       semiMonthlyDays: recurringTransaction.semiMonthlyDays || null,
@@ -685,6 +686,17 @@ class DebtSnowballUI {
     if (!debt || debt.dueStartDate) {
       this.syncDueDayFromStartDate();
     }
+    // The start date only carries the clamped day (a last-day debt starting
+    // in June reads 30), so a re-save from it would quietly turn "last day"
+    // into "the 30th". Show 31, which saveDebt reads back as last day.
+    if (
+      debt &&
+      debt.dueLastDay === true &&
+      (debt.recurrence || "monthly") === "monthly" &&
+      this.debtDueDayInput
+    ) {
+      this.debtDueDayInput.value = 31;
+    }
     this.updateDebtRecurrenceOptions();
     this.populateDebtAdvancedOptions(debt);
   }
@@ -753,6 +765,15 @@ class DebtSnowballUI {
     }
     const startDay = this.getDayFromDateString(normalizedStartDate);
     const dueDay = !isNaN(startDay) ? startDay : 1;
+    // "Last day of the month" is decided HERE, from the due day the user
+    // typed, because it cannot be recovered from the start date afterwards: a
+    // due day of 30 with a first due date in June and one of 31 both start on
+    // Jun 30. A 31, or a day the first due month is too short for (a 30 in
+    // February), means the last day; anything else is that day every month.
+    const dueLastDay =
+      recurrence === "monthly" &&
+      !dueDayPattern &&
+      (dueDayInput >= 31 || dueDayInput > dueDay);
 
     if (!name) {
       Utils.showNotification("Please enter a debt name", "error");
@@ -792,6 +813,7 @@ class DebtSnowballUI {
         minPayment,
         dueDay,
         dueDayPattern,
+        dueLastDay,
         recurrence,
         dueStartDate: normalizedStartDate,
         ...advancedOptions,
@@ -805,6 +827,7 @@ class DebtSnowballUI {
         minPayment,
         dueDay,
         dueDayPattern,
+        dueLastDay,
         recurrence,
         dueStartDate: normalizedStartDate,
         ...advancedOptions,
@@ -820,6 +843,7 @@ class DebtSnowballUI {
         minPayment,
         dueDay,
         dueDayPattern,
+        dueLastDay,
         recurrence,
         dueStartDate: normalizedStartDate,
         ...advancedOptions,
@@ -1069,6 +1093,12 @@ class DebtSnowballUI {
     const endIndex = Math.max(viewIndex, currentIndex) + monthsAhead;
 
     this.setCurrentViewMonth(viewYear, viewMonth);
+    // Put every minimum series back on its debt's schedule first, so the
+    // projection below pays each minimum on the day the calendar does.
+    if (this.reconcileMinimumSeriesSchedules()) {
+      this.recurringManager.invalidateCache();
+      this.store.saveData(false);
+    }
     // Self-heal stranded/duplicate minimum-payment instances before the
     // projection reads "paid so far" or materializes anything, so balances and
     // payoff dates are computed from a clean set.

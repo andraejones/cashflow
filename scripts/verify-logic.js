@@ -7893,7 +7893,7 @@ console.log("TEST 93: Every Stored Field Survives Every Wrong Shape");
       (p, f, v) => p.recurringTransactions.forEach((r) => { r[f] = v; })],
     ["debt", ["name", "balance", "minPayment", "dueDay", "dueDayPattern", "recurrence",
       "dueStartDate", "businessDayAdjustment", "semiMonthlyDays", "semiMonthlyLastDay",
-      "customInterval", "endDate", "maxOccurrences", "interestRate", "payoffPriority", "minRecurringId",
+      "customInterval", "endDate", "maxOccurrences", "interestRate", "payoffPriority", "dueLastDay", "minRecurringId",
       "_lastModified", "id"],
       (p, f, v) => p.debts.forEach((d) => { d[f] = v; })],
     ["infusion", ["name", "amount", "date", "targetDebtId", "_lastModified", "id"],
@@ -10285,6 +10285,246 @@ console.log("TEST 118: Payoff Priority Orders The Snowball");
     console.log("✅ Payoff priority orders the snowball; all five sort sites agree");
   } finally {
     global.Date = T118_RealDate;
+  }
+}
+
+console.log("TEST 119: An Nth-Weekday Series Caps Occurrences, Not Months");
+{
+  // The form lets the start date be any day and the pattern any Nth weekday,
+  // so the start month often has no occurrence (start Jan 20, "1st Monday").
+  // The cap counted MONTHS since the start, so that empty month spent one of
+  // the user's N payments and the series stopped after N−1. The sibling
+  // countOccurrencesBefore (which sizes a "this and future" split's new cap)
+  // compared getNthDayOfMonth's local MIDNIGHT against noon dates, so an
+  // occurrence ON the start date was missed and one ON the boundary counted.
+  const assert = require("assert");
+  const occurrences = (s, ids) => Object.keys(s.getTransactions()).sort().flatMap((d) =>
+    s.getTransactions()[d].filter((t) => ids.includes(t.recurringId)).map(() => d));
+  // (a) Expansion honors the cap exactly.
+  {
+    localStorage.clear();
+    const s = new TransactionStore();
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    s.addRecurringTransaction({ id: "nth", startDate: "2027-01-20", amount: 10, type: "expense",
+      description: "Club", recurrence: "monthly", daySpecific: true, daySpecificData: "1-1",
+      maxOccurrences: 3 });
+    for (let m = 0; m < 8; m++) rm.applyRecurringTransactions(2027, m);
+    assert.deepStrictEqual(occurrences(s, ["nth"]), ["2027-02-01", "2027-03-01", "2027-04-05"],
+      "three payments, the first in the month after the start");
+    s.cancelPendingSave();
+  }
+  // (b) countOccurrencesBefore compares calendar dates.
+  {
+    const rm = new RecurringTransactionManager(new TransactionStore());
+    const onStart = { startDate: "2027-02-01", recurrence: "monthly", daySpecific: true, daySpecificData: "1-1" };
+    const offStart = { ...onStart, startDate: "2027-01-20" };
+    const at = (str) => Utils.parseDateString(str);
+    assert.strictEqual(rm.countOccurrencesBefore(onStart, at("2027-03-01")), 1, "Feb 1 only; Mar 1 is not before itself");
+    assert.strictEqual(rm.countOccurrencesBefore(onStart, at("2027-03-02")), 2, "the start date's own occurrence counts");
+    assert.strictEqual(rm.countOccurrencesBefore(offStart, at("2027-03-01")), 1);
+  }
+  // (c) A "this and future" split keeps the total at the cap.
+  {
+    localStorage.clear();
+    const s = new TransactionStore();
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    s.addRecurringTransaction({ id: "nth", startDate: "2027-01-20", amount: 10, type: "expense",
+      description: "Club", recurrence: "monthly", daySpecific: true, daySpecificData: "1-1",
+      maxOccurrences: 4 });
+    for (let m = 0; m < 5; m++) rm.applyRecurringTransactions(2027, m);
+    const idx = s.getTransactions()["2027-04-05"].findIndex((t) => t.recurringId === "nth");
+    rm.editTransaction("2027-04-05", idx, { amount: 20, type: "expense", description: "Club" }, "future");
+    for (let m = 0; m < 10; m++) rm.applyRecurringTransactions(2027, m);
+    const ids = s.getRecurringTransactions().map((r) => r.id);
+    assert.deepStrictEqual(occurrences(s, ids), ["2027-02-01", "2027-03-01", "2027-04-05", "2027-05-03"],
+      "four payments in all across the split");
+    s.cancelPendingSave();
+  }
+  console.log("✅ Nth-weekday caps count real occurrences on both paths");
+}
+
+console.log("TEST 120: A Released Debt Minimum Survives The Expansion Cache");
+{
+  // adjustMinimumPaymentTransactions hides a minimum the projection no longer
+  // needs (modifiedInstance, amount 0) and releases it when the target rises
+  // again. The released row is a plain expansion, so the next expansion clears
+  // it — and on a cold start the month's cache never captured it (it was a
+  // modified instance at capture time), so replaying the cache dropped the
+  // payment outright: a real minimum missing for the rest of the session.
+  const assert = require("assert");
+  const RealDate = Date;
+  const FIXED = new RealDate(2026, 8, 23, 12, 0, 0);
+  class FrozenDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(FIXED.getTime()); else super(...a); }
+    static now() { return FIXED.getTime(); }
+  }
+  global.Date = FrozenDate;
+  try {
+    localStorage.clear();
+    const s1 = new TransactionStore();
+    s1.resetData();
+    const rm1 = new RecurringTransactionManager(s1);
+    const ui1 = new DebtSnowballUI(s1, rm1, () => {}, new CalculationService(s1, rm1));
+    s1.addRecurringTransaction({ id: "min", startDate: "2026-11-10", amount: 50, type: "expense",
+      description: "Debt Payment: Card", recurrence: "monthly", debtId: "d1", debtRole: "minimum" });
+    rm1.applyRecurringTransactions(2026, 10);
+    ui1.adjustMinimumPaymentTransactions(2026, 10, { d1: 0 });
+    s1.saveData(false);
+    s1.cancelPendingSave();
+
+    // Cold start: the hidden row is persisted, so the cache is built without it.
+    const s = new TransactionStore();
+    const rm = new RecurringTransactionManager(s);
+    const ui = new DebtSnowballUI(s, rm, () => {}, new CalculationService(s, rm));
+    rm.applyRecurringTransactions(2026, 10);
+    assert.strictEqual(s.getTransactions()["2026-11-10"][0].hidden, true, "setup: hidden after reload");
+    ui.adjustMinimumPaymentTransactions(2026, 10, { d1: 50 });
+    rm.applyRecurringTransactions(2026, 10);
+    const rows = (s.getTransactions()["2026-11-10"] || []).filter((t) => t.recurringId === "min");
+    assert.strictEqual(rows.length, 1, "the released minimum is still on the calendar");
+    assert.strictEqual(rows[0].amount, 50, "at its definition amount");
+    assert.notStrictEqual(rows[0].hidden, true);
+    s.cancelPendingSave();
+    console.log("✅ Releasing a hidden minimum brings it back instead of dropping it");
+  } finally {
+    global.Date = RealDate;
+  }
+}
+
+console.log("TEST 121: A Debt Due On The 30th Is Not A Last-Day Debt");
+{
+  // buildDebtRecurringTransaction inferred "last day of every month" from the
+  // start date, which cannot tell a due day of 31 from a due day of 30 whose
+  // first due month has 30 days (or the 28th with a February start) — those
+  // paid on the 31st of every long month. saveDebt now records the typed due
+  // day's intent as dueLastDay; debts saved before the flag keep the old
+  // inference.
+  const assert = require("assert");
+  const save = (dueDay, startDate) => {
+    localStorage.clear();
+    const s = new TransactionStore();
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    const ui = Object.create(DebtSnowballUI.prototype);
+    ui.store = s;
+    ui.recurringManager = rm;
+    ui.editingDebtId = null;
+    ui.convertingFromRecurringId = null;
+    ui.debtNameInput = { value: "Card" };
+    ui.debtBalanceInput = { value: "1000" };
+    ui.debtMinPaymentInput = { value: "50" };
+    ui.debtRecurrenceInput = { value: "monthly" };
+    ui.debtStartDateInput = { value: startDate };
+    ui.debtDueDayInput = { value: String(dueDay) };
+    ui.debtDueDayPatternInput = { value: "" };
+    ui.debtInterestInput = { value: "0" };
+    ui.hideDebtForm = () => {};
+    ui.refresh = () => {};
+    ui.onUpdate = () => {};
+    ui.saveDebt();
+    const debt = s.getDebts()[0];
+    const julyDay = (year, month) => {
+      rm.applyRecurringTransactions(year, month);
+      const prefix = `${year}-${String(month + 1).padStart(2, "0")}-`;
+      return Object.keys(s.getTransactions()).find((d) => d.startsWith(prefix) &&
+        s.getTransactions()[d].some((t) => t.recurringId === debt.minRecurringId));
+    };
+    const out = { debt, day: julyDay };
+    return out;
+  };
+  {
+    const { debt, day } = save(30, "2026-06-10");
+    assert.strictEqual(debt.dueLastDay, false);
+    assert.strictEqual(day(2026, 6), "2026-07-30", "due the 30th pays on the 30th of July");
+    assert.strictEqual(day(2027, 1), "2027-02-28", "clamped in February");
+  }
+  {
+    const { debt, day } = save(31, "2026-06-10");
+    assert.strictEqual(debt.dueLastDay, true);
+    assert.strictEqual(day(2026, 6), "2026-07-31", "due the 31st pays on the last day");
+  }
+  {
+    const { debt, day } = save(28, "2026-02-05");
+    assert.strictEqual(debt.dueLastDay, false);
+    assert.strictEqual(day(2026, 2), "2026-03-28", "a Feb 28 start due the 28th stays on the 28th");
+  }
+  {
+    // Clamped in the first month: the last day is the closest the recurrence
+    // can come to "the 30th" (February has none).
+    const { debt } = save(30, "2026-02-05");
+    assert.strictEqual(debt.dueLastDay, true);
+  }
+  {
+    // Debts saved before the flag keep inferring it from the start date.
+    const s = new TransactionStore();
+    const ui = Object.create(DebtSnowballUI.prototype);
+    const legacy = s._normalizeDebt({ name: "Old", balance: 1, minPayment: 1, dueDay: 30,
+      recurrence: "monthly", dueStartDate: "2026-06-30" });
+    assert.strictEqual(legacy.dueLastDay, null);
+    assert.strictEqual(ui.buildDebtRecurringTransaction(legacy).lastDayOfMonth, true);
+    assert.strictEqual(s._normalizeDebt({ ...legacy, dueLastDay: "yes" }).dueLastDay, null);
+  }
+  console.log("✅ A debt's last-day schedule follows the due day the user typed");
+}
+
+console.log("TEST 122: A Drifted Minimum Series Is Put Back On Its Debt's Schedule");
+{
+  // The projection schedules minimums from the DEBT, the calendar from the
+  // stored series. Older builds' bank-reconcile "Move series" shifted a debt's
+  // series start without touching the debt, so the calendar paid on the 2nd
+  // and the plan on the 3rd — every month, for the life of the debt, and the
+  // floor check read checking on the wrong side of the payment. The render
+  // now adopts a drifted start into the debt (keeping the day the calendar
+  // pays on) and rewrites any other drifted schedule field from the debt.
+  const assert = require("assert");
+  const RealDate = Date;
+  const FIXED = new RealDate(2026, 8, 23, 12, 0, 0);
+  class FrozenDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(FIXED.getTime()); else super(...a); }
+    static now() { return FIXED.getTime(); }
+  }
+  global.Date = FrozenDate;
+  try {
+    localStorage.clear();
+    const s = new TransactionStore();
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    const cs = new CalculationService(s, rm);
+    const ui = new DebtSnowballUI(s, rm, () => {}, cs);
+    ui.renderPlan = () => {};
+    s.addRecurringTransaction({ startDate: "2026-09-01", amount: 3000, type: "income",
+      description: "Pay", recurrence: "monthly" });
+    const id = s.addDebt({ name: "Loan", balance: 5000, minPayment: 262.21, dueDay: 3,
+      recurrence: "monthly", interestRate: 0, dueStartDate: "2026-07-03" });
+    ui.ensureMinimumPaymentRecurring(s.getDebts()[0]);
+    s.setDebtSnowballSettings({ dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false });
+    // The legacy drift: the series moved a day earlier, the debt did not.
+    const series = s.getRecurringTransactions().find((r) => r.debtId === id);
+    series.startDate = "2026-07-02";
+    // A second drift in a field the debt owns outright.
+    series.businessDayAdjustment = "next";
+
+    ui.ensureSnowballPaymentsForHorizon(2026, 8);
+    const debt = s.getDebts().find((d) => d.id === id);
+    assert.strictEqual(debt.dueStartDate, "2026-07-02", "the debt adopts the day the calendar pays on");
+    assert.strictEqual(debt.dueDay, 2);
+    assert.strictEqual(series.startDate, "2026-07-02", "the series start never moves");
+    assert.strictEqual(series.businessDayAdjustment, "none", "other drift is rewritten from the debt");
+
+    // And the projection now pays on the same day: the Oct 2 minimum is in
+    // checking by the end of Oct 2 on both paths.
+    const proj = ui.calculateSnowballProjection(2026, 9, false);
+    const template = ui.buildDebtRecurringTransaction(debt);
+    const occ = ui.getRecurringOccurrencesForMonth({ ...template, id: series.id }, 2026, 9);
+    assert.deepStrictEqual(occ.map((o) => o.dateString), ["2026-10-02"]);
+    assert.strictEqual(proj.monthTargets["2026-10"].minPaidByDebtId[id], 262.21);
+    assert.strictEqual(ui.reconcileMinimumSeriesSchedules(), false, "idempotent");
+    s.cancelPendingSave();
+    console.log("✅ A drifted minimum series and its debt agree on the payment day");
+  } finally {
+    global.Date = RealDate;
   }
 }
 
