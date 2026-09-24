@@ -131,18 +131,16 @@ class DebtSnowballUI {
         }
       });
     }
-    // CAPTURE phase, like every other Escape handler in the app. In the bubble
-    // phase the stacked dialog's own handler runs first and has already popped
-    // itself off ModalManager by the time this one looks — so the guard below
-    // would see an empty stack and tear the panel down anyway.
+    // CAPTURE phase, like every other Escape handler in the app: in the bubble
+    // phase a stacked dialog's own handler would already have popped itself off
+    // ModalManager, so the guard below would see an empty stack.
     document.addEventListener("keydown", (event) => {
       if (event.key !== "Escape") return;
       if (this.view?.style.display !== "block") return;
       // Anything stacked over the panel owns Escape first. The panel is an
       // .app-view rather than a .modal, so ModalManager never lists it — any
-      // tracked modal being open means something is layered above us. Without
-      // this, cancelling the "Delete debt?" / "Delete cash infusion?"
-      // confirmation with Escape also tore the whole panel down.
+      // tracked modal being open means something is layered above us (e.g. the
+      // "Delete debt?" confirmation).
       if (typeof ModalManager !== "undefined" && ModalManager.topModal()) return;
       this.hideView();
     }, true);
@@ -485,10 +483,9 @@ class DebtSnowballUI {
     const now = new Date();
     const today = Utils.formatDateString(now);
     // Anchor the day-of-month to the CURRENT month (not January) when a debt
-    // has no explicit start date. A January anchor back-dates the minimum-
-    // payment recurrence and fabricates months of "paid" history for legacy or
-    // imported debts; the current month gives the same day-of-month without
-    // back-dating before today.
+    // has no explicit start date. A January anchor would back-date the
+    // minimum-payment recurrence and fabricate months of "paid" history for
+    // legacy or imported debts.
     const monthStart = Utils.formatDateString(
       new Date(now.getFullYear(), now.getMonth(), 1)
     );
@@ -1074,9 +1071,8 @@ class DebtSnowballUI {
   // month AND the forward window that the balance walk spans, anchored at the
   // current real month. Forward day balances (CalculationService projects +6
   // months) and the today-anchored 30-day Minimum read materialized
-  // transactions, so without this the planned snowball spend stayed invisible
-  // until the user opened each month — the displayed Minimum could change just
-  // by navigating. One projection drives every month in the window.
+  // transactions, so without this the displayed Minimum would change just by
+  // navigating. One projection drives every month in the window.
   ensureSnowballPaymentsForHorizon(viewYear, viewMonth, monthsAhead = SNOWBALL_FORWARD_HORIZON) {
     const settings = this.store.getDebtSnowballSettings() || {};
     const includeExtra = settings.autoGenerate === true;
@@ -1121,12 +1117,9 @@ class DebtSnowballUI {
       // Sweep AGAIN, because that sync just moved the goalposts. The cleanup
       // above ran against the PREVIOUS endDates; tightening a series to its
       // projected payoff puts every already-materialized instance beyond the
-      // new payoff out of window, and nothing else removes them until the next
-      // render's cleanup. Editing a debt's due date therefore left phantom
-      // minimum payments on the calendar for one whole render — six rows of
-      // $60 in the case that surfaced this, i.e. $360 of spending that is not
-      // real, depressing every balance after them. One extra idempotent pass
-      // closes the window instead of waiting for the user to navigate.
+      // new payoff out of window, and nothing else would remove them until the
+      // next render. One extra idempotent pass keeps phantom minimums off the
+      // calendar.
       if (this.cleanupOrphanedDebtMinimums()) {
         this.recurringManager.invalidateCache();
       }

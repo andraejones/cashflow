@@ -1,15 +1,10 @@
 const ModalManager = {
   _baseZIndex: 1000,
-  // While the inactivity lock is up, dialogs stack from ABOVE the lock overlay
-  // instead. PinProtection.showLockOverlay pins that overlay at 9999 so nothing
-  // left over from the session can be reached behind it — but the lock flow
+  // While the inactivity lock is up, dialogs stack from ABOVE the lock overlay.
+  // PinProtection.showLockOverlay pins that overlay at 9999, but the lock flow
   // itself talks to the user through Utils.showModalDialog ("Incorrect PIN",
-  // the "type DELETE" reset confirmation). Those went out at the ordinary
-  // 1010 and rendered UNDER the overlay: invisible, unclickable, with
-  // promptUnlock awaiting a dialog the user could not answer. One wrong PIN
-  // after an idle lock wedged the app until a reload. 10000 clears the overlay
-  // and the unlock dialog's own inline 10000, so the newest dialog is always
-  // the reachable one.
+  // the "type DELETE" reset confirmation), so those dialogs must clear both
+  // the overlay and the unlock dialog's own inline 10000 to stay reachable.
   _lockedBaseZIndex: 10000,
   _openModals: [],
   _zIndexCounter: 0,
@@ -46,9 +41,8 @@ const ModalManager = {
     modalElement.style.zIndex = '';
 
     // Nothing is stacked any more, so the next modal can start from the base
-    // again. Without this the counter only ever climbs: after ~900 opens in one
-    // session the assigned z-index passes the 9999 lock overlay and a modal
-    // would paint on top of it.
+    // again; otherwise the counter only climbs and eventually passes the 9999
+    // lock overlay.
     if (this._openModals.length === 0) {
       this._zIndexCounter = 0;
     }
@@ -61,7 +55,7 @@ const ModalManager = {
   },
 };
 
-// Expose ModalManager globally for tests
+// Exposed globally so other scripts (and the test harnesses) can reach it.
 window.ModalManager = ModalManager;
 
 const Utils = {
@@ -105,13 +99,10 @@ const Utils = {
   // an input value or arithmetic; parseFloat stops at the first comma.
   formatAmount: function (amount) {
     const raw = typeof amount === "number" && isFinite(amount) ? amount : 0;
-    // Normalize NEGATIVE ZERO. The balance walk rounds with
-    // Math.round(x * 100) / 100, and a day that lands exactly on zero by
-    // subtraction often gets there through a tiny negative float — 0.01 + 0.06
-    // - 0.07 is one — which rounds to -0. toLocaleString is the one formatter
-    // that renders that as "-0.00" (toFixed and String both normalize), so a
-    // zero balance showed a minus sign on the calendar, in the day modal and in
-    // the "Minimum" figure. `-0 === 0` is true, so this substitutes a plain 0.
+    // Normalize negative zero. The balance walk's cent rounding turns a tiny
+    // negative float (0.01 + 0.06 - 0.07) into -0, and toLocaleString is the
+    // one formatter that renders that as "-0.00". `-0 === 0`, so this
+    // substitutes a plain 0.
     const n = raw === 0 ? 0 : raw;
     return n.toLocaleString("en-US", {
       minimumFractionDigits: 2,
@@ -140,14 +131,10 @@ const Utils = {
     // throwing in callers that deref it (e.g. CSV-derived dates).
     const datePart = dateString.split("T")[0];
     const [year, month, day] = datePart.split("-").map(Number);
-    // Number.isFinite, not !isNaN: isNaN(Infinity) is FALSE, so "1e999-01-01"
-    // (and "Infinity-1-1", and a huge year like "1e309-01-01") sailed past this
-    // guard and produced an *Invalid Date* — which is truthy, so every
-    // `if (!date) return` in the app waved it through, and
-    // formatDateString turned it into the literal string "NaN-NaN-NaN". That
-    // string then became a key in the transactions map. Dates arrive
-    // unvalidated from imports and cloud merges, which is the whole reason this
-    // function documents a null return.
+    // Number.isFinite, not !isNaN: isNaN(Infinity) is false, so "1e999-01-01"
+    // would produce an Invalid Date — truthy, so `if (!date)` guards wave it
+    // through and formatDateString turns it into "NaN-NaN-NaN". Dates arrive
+    // unvalidated from imports and cloud merges, hence the null return.
     if (
       !Number.isFinite(year) ||
       !Number.isFinite(month) ||
@@ -309,10 +296,10 @@ const Utils = {
 
     // Preempt any dialog still pending on the shared #appModal. Opening a second
     // dialog before the first resolves would otherwise stack a duplicate set of
-    // listeners on the same buttons — a later click fires both and the abandoned
-    // promise resolves with the new dialog's input (the pin-protection
-    // lock/unlock PIN leak). Resolving the prior dialog's cancel path first
-    // removes its listeners and unblocks its awaiter.
+    // listeners on the same buttons, so a later click fires both and the
+    // abandoned promise resolves with the new dialog's input. Resolving the
+    // prior dialog's cancel path first removes its listeners and unblocks its
+    // awaiter.
     if (this._activeModalClose) {
       this._activeModalClose();
     }

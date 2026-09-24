@@ -732,8 +732,7 @@ class BankReconcileUI {
     });
 
     // Soonest next-occurrence first; suggestions sharing a date keep the order
-    // they were detected in (a comparator that never returns 0 is
-    // inconsistent — see TEST 98).
+    // they were detected in (the comparator must return 0 for equal keys).
     suggestions.sort((a, b) =>
       a.nextDate < b.nextDate ? -1 : a.nextDate > b.nextDate ? 1 : 0
     );
@@ -1845,12 +1844,8 @@ class BankReconcileUI {
     // Coerce like its sibling _nameTokens already does. Bank descriptions come
     // from the CSV parser and are always strings, but app-side ones are read
     // straight off stored transactions, and nothing coerces `description` on
-    // the way in from an import or a cloud merge — every other read surface in
-    // the app guards with `typeof === "string"`. A number or object here threw
-    // "s.replace is not a function" out of _appPayeeVocabulary, i.e. out of
-    // _run: uploading a perfectly good statement reported "Could not read that
-    // CSV file", and reconciliation stayed broken until the offending row was
-    // found by hand.
+    // the way in from an import or a cloud merge — a non-string here would
+    // make a good statement fail as "Could not read that CSV file".
     desc = typeof desc === "string" ? desc : String(desc);
     const map = [
       [/CHICK-?FIL-?A/i, "Chick-fil-A"],

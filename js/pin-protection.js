@@ -481,8 +481,8 @@ class PinProtection {
     await this.ensureWebAuthnInit();
 
     // After an inactivity lock, require the same method used at the original sign-in.
-    // First-time unlock (lastUnlockMethod === null) keeps the legacy
-    // "biometric first, fall through to PIN" behavior.
+    // First-time unlock (lastUnlockMethod === null) tries biometrics first and
+    // falls through to PIN.
     const requireBiometric = this.lastUnlockMethod === "biometric" && this.isWebAuthnEnabled();
     const tryBiometric = requireBiometric ||
       (this.lastUnlockMethod === null && this.isWebAuthnEnabled());
@@ -649,15 +649,13 @@ class PinProtection {
       // This dialog drives the SHARED #appModal directly rather than through
       // Utils.showModalDialog, so it has to join that modal's hand-off protocol
       // or it is invisible to it. Anything that raises an ordinary dialog while
-      // the unlock prompt is up — a cloud push that was still in flight when
-      // the inactivity lock fired and comes back 404, say — reconfigures the
-      // same element and stacks its own listeners on the same buttons. Our
-      // handlers stayed attached, so one click on THAT dialog also fired
-      // handleConfirm here and resolved the unlock with the (empty) shared
-      // input: a spurious "Incorrect PIN" on top of the dialog the user was
-      // actually answering. Publishing our teardown lets the newer dialog
-      // preempt us cleanly; PREEMPTED tells promptUnlock to re-prompt once the
-      // modal is free again rather than treating it as a failed entry.
+      // the unlock prompt is up (e.g. a cloud push that was still in flight
+      // when the inactivity lock fired and comes back 404) reconfigures the
+      // same element; if our handlers stayed attached, one click on THAT dialog
+      // would also resolve the unlock with the (empty) shared input. Publishing
+      // our teardown lets the newer dialog preempt us cleanly; PREEMPTED tells
+      // promptUnlock to re-prompt once the modal is free again rather than
+      // treating it as a failed entry.
       const PREEMPTED = PinProtection.UNLOCK_PREEMPTED;
       const cleanup = () => {
         confirmButton.removeEventListener("click", handleConfirm);
@@ -900,9 +898,9 @@ class PinProtection {
       }
     }
 
-    // The app menu is not a .modal, so the sweep below never reached it — it
-    // stayed open (blurred) behind the lock overlay for the whole lock, and its
-    // Escape handler then competed with the unlock dialog for the key.
+    // The app menu is not a .modal, so the sweep below never reaches it; left
+    // open behind the lock overlay, its Escape handler would compete with the
+    // unlock dialog for the key.
     if (window.app && window.app.calendarUI &&
         typeof window.app.calendarUI.closeAppMenu === "function") {
       window.app.calendarUI.closeAppMenu();
@@ -918,11 +916,10 @@ class PinProtection {
     }
 
     // Close the debt snowball view if it's open. Route through its own teardown
-    // when we can: hiding the element directly leaves _viewHistoryActive set
-    // and its pushed history entry orphaned, so every lock-while-open leaked
-    // another entry and cost the user a wasted Back press. _hideViewDom is the
-    // no-history half of hideView, which is what we want here — the panel is
-    // being torn down, not navigated away from.
+    // when we can: hiding the element directly would leave _viewHistoryActive
+    // set and orphan its pushed history entry. _hideViewDom is the no-history
+    // half of hideView, which is what we want here — the panel is being torn
+    // down, not navigated away from.
     const debtView = document.getElementById("debtSnowballView");
     if (debtView && debtView.style.display === "block") {
       const snowball = window.app && window.app.debtSnowball;

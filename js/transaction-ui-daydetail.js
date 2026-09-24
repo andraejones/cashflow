@@ -21,9 +21,7 @@ Object.assign(TransactionUI.prototype, {
     // monthlyBalances map are only refreshed by updateMonthlyBalances, which
     // runs during a calendar render — and every in-modal mutation (delete,
     // edit, settle, skip, close out, undo-restore) re-renders this modal
-    // BEFORE _notifyChange() triggers that render. Without this refresh the
-    // Income/Expenses/Balance lines keep showing the pre-mutation figures while
-    // the transaction list below already shows the new state.
+    // BEFORE _notifyChange() triggers that render.
     const dateObj = Utils.parseDateString(date);
     if (dateObj) {
       this.calculationService.updateMonthlyBalances(dateObj);
@@ -360,8 +358,6 @@ Object.assign(TransactionUI.prototype, {
           amountInput.step = "0.01";
           // An Ending Balance may legitimately be negative (overdrawn account),
           // which saveEdit accepts — only income/expense are floored above zero.
-          // A blanket min="0" marked those rows :invalid and told the user the
-          // opposite of what the app actually allows.
           if (normalizedType !== "balance") {
             amountInput.min = "0";
           }
@@ -773,13 +769,11 @@ Object.assign(TransactionUI.prototype, {
                 };
                 // Carry the debt link. A minimum payment can be sitting in
                 // this list because the user marked it unsettled while waiting
-                // for it to clear; settling it must not un-credit the debt.
-                // Without this the money still leaves the balance walk but the
-                // debt's "paid so far" drops by the payment, so its remaining
-                // reads high and the snowball plans a payoff that is already
-                // further along than it thinks. BankReconcile._relocateEntry
-                // preserves these for exactly this reason — the copy carries no
-                // recurringId, so cleanupOrphanedDebtMinimums leaves it be.
+                // for it to clear; settling it must not un-credit the debt, or
+                // its remaining reads high and the snowball plan drifts.
+                // BankReconcile._relocateEntry preserves these for the same
+                // reason — the copy carries no recurringId, so
+                // cleanupOrphanedDebtMinimums leaves it be.
                 if (u.transaction.debtId) {
                   movedCopy.debtId = u.transaction.debtId;
                   if (u.transaction.debtRole) movedCopy.debtRole = u.transaction.debtRole;

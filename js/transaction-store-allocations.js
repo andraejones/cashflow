@@ -57,16 +57,13 @@ Object.assign(TransactionStore.prototype, {
         // drawn before its own date. So for both flavors the active instance is
         // the latest one dated on/before refStr.
         if (date > refStr) return;
-        // SKIPPED occurrences still take part in this election, and that is the
-        // whole point. Being current and holding money are different questions:
-        // the period turns over when a newer occurrence arrives (skipped or
-        // not), while a skipped period sets nothing aside. Conflating them —
-        // electing "the latest UNSKIPPED occurrence" — meant skipping this week
-        // handed the role back to LAST week's bucket, so a skip quietly
-        // extended the previous period's money instead of releasing it, and
-        // skipping that one in turn walked back another period, forever.
-        // A skipped winner therefore ends the previous bucket and offers
-        // nothing in its place; it is dropped from the result below.
+        // SKIPPED occurrences still take part in this election: the period
+        // turns over when a newer occurrence arrives (skipped or not), while a
+        // skipped period sets nothing aside. Electing "the latest UNSKIPPED
+        // occurrence" instead would hand the role back to the previous bucket,
+        // extending its money into a period the user declined. A skipped
+        // winner therefore ends the previous bucket and offers nothing in its
+        // place; it is dropped from the result below.
         const existing = recurringBySeries.get(t.recurringId);
         const candidate = {
           // Un-materialized instances have no id yet — use a synthetic key the
@@ -304,11 +301,9 @@ Object.assign(TransactionStore.prototype, {
           // Attribute the WHOLE expense across its split: each row contributes
           // what it was assigned, and whatever the split left uncovered lands
           // on the LAST row — the bucket the user was still filling when the
-          // money ran out. With a single row (every expense predating splits)
-          // that is exactly the old rule, the full amount as demand, which is
-          // the point: a bucket too small to cover its own spending has to
-          // still record the demand that would right-size it. `drawn` is capped
-          // at the bucket and would hide it.
+          // money ran out. A bucket too small to cover its own spending has to
+          // still record the demand that would right-size it; `drawn` is
+          // capped at the bucket and would hide it.
           const rows = this._normalizeAllocationDraws(t);
           if (rows.length > 0) {
             const shares = this._resolveAllocationDrawShares(t, rows);
@@ -372,12 +367,11 @@ Object.assign(TransactionStore.prototype, {
   //   { allocationId, amount, drawn, recurringId?, periodDate? }
   //
   //   amount — what the user assigned to that bucket, or NULL for "whatever of
-  //            the expense is still uncovered". A null row is the pre-split
-  //            shape — one bucket covering the whole expense — and it is why
-  //            editing the expense's amount still flows straight through to
-  //            its bucket, the way it always has. The editor writes null when
-  //            a single row covers the entire expense and an explicit figure
-  //            for every row of a real split, where the shares are the point.
+  //            the expense is still uncovered". A null row is one bucket
+  //            covering the whole expense, which is why editing the expense's
+  //            amount flows straight through to its bucket. The editor writes
+  //            null when a single row covers the entire expense and an explicit
+  //            figure for every row of a real split.
   //   drawn  — what was actually debited, kept for exact reversal. The editor
   //            caps a row at its bucket's remaining, so a row's share and its
   //            `drawn` normally match; they diverge only when the bucket shrank
@@ -519,8 +513,7 @@ Object.assign(TransactionStore.prototype, {
     }
     transaction.allocationDraws = rows;
     // Mirror the first row that still has a live bucket; a split whose only
-    // rows are history-only mirrors just the provenance, like the legacy
-    // dangling-link case did.
+    // rows are history-only mirrors just the provenance.
     const primary = rows.find((r) => r.allocationId);
     if (primary) {
       transaction.drawsFromAllocationId = primary.allocationId;
@@ -542,7 +535,7 @@ Object.assign(TransactionStore.prototype, {
   // record what was drawn for exact reversal later. Overflow (a row larger than
   // its bucket's remaining, which the form rejects but a shrinking bucket can
   // still produce) drains that bucket to 0 and leaves the excess as normal
-  // spending, same as the single-draw model always did.
+  // spending.
   _applyAllocationDraws(transaction) {
     if (!transaction || transaction.type !== "expense") return;
     // An allocation bucket cannot draw from another allocation; the type select
@@ -651,13 +644,11 @@ Object.assign(TransactionStore.prototype, {
   //
   // Relocating a bucket to another date goes through delete + re-add (the
   // tombstone on the old id rules out reusing it), so the bucket comes back
-  // under a fresh id while its drawers still name the old one. The links then
-  // dangle: the "Drawn from" label disappears, and the next edit of a drawing
-  // expense finds no bucket to refund — _applyAllocationDraws drops the row
-  // instead, so the reserve stops absorbing the change and the projected
-  // balance drifts by the difference. rollForwardAllocations avoids all this by
-  // keeping the id when it moves a bucket; a user-initiated move can't, so it
-  // repairs the references instead. Returns the number of drawers updated.
+  // under a fresh id while its drawers still name the old one. Dangling links
+  // lose the "Drawn from" label and, on the next edit, have no bucket to
+  // refund, so the projected balance drifts. rollForwardAllocations keeps the
+  // id when it moves a bucket; a user-initiated move can't, so it repairs the
+  // references instead. Returns the number of drawers updated.
   repointAllocationDraws(oldId, newId) {
     if (!oldId || !newId || oldId === newId) return 0;
     let updated = 0;
@@ -782,14 +773,10 @@ Object.assign(TransactionStore.prototype, {
     // A series whose endDate is already past has no live period left: every
     // occurrence it still owns is in the past, and no later one will ever
     // arrive to supersede the newest — so without this it would hold its
-    // reserve forever. This is exactly what "delete all future occurrences"
-    // used to leave behind. That action ends the series the day before the
-    // deleted occurrence, which un-supersedes the PREVIOUS period, and
-    // expansion then re-materializes that period AT ITS FULL DEFINITION
-    // AMOUNT — a bucket the user had already spent from and watched close out
-    // weeks earlier came back at full price, drawable, in the Allocated
-    // Transactions modal, reserving money against every projected balance.
-    // Deleting that one just walked the resurrection back another period.
+    // reserve forever. "Delete all future occurrences" produces exactly this:
+    // it ends the series the day before the deleted occurrence, which
+    // un-supersedes the PREVIOUS period, and expansion would re-materialize
+    // that period at its full definition amount.
     // RecurringTransactionManager.addRecurringTransactionToDate refuses to
     // re-create these; this sweep retires the ones already in the map.
     const endedSeries = new Set();
@@ -817,13 +804,12 @@ Object.assign(TransactionStore.prototype, {
           // Superseding is about the period turning over; holding money is a
           // separate question that getAllocations and the reserve index answer
           // by excluding skips. So a skipped winner forfeits the period before
-          // it and offers nothing in its place — which is what skipping means:
-          // no money set aside for this period, and last period's money
-          // released rather than quietly extended into this one. Whatever was
-          // already drawn from the forfeited bucket stays a real expense, the
-          // same as on any ordinary turnover. All six readers of "which period
-          // is current" must agree on this, or a bucket gets deleted here while
-          // another reader still offers it for draws.
+          // it and offers nothing in its place: no money set aside for this
+          // period, and last period's money released rather than extended.
+          // Whatever was already drawn from the forfeited bucket stays a real
+          // expense. All six readers of "which period is current" must agree
+          // on this, or a bucket gets deleted here while another reader still
+          // offers it for draws.
           if (endedSeries.has(t.recurringId)) {
             return;
           }
@@ -846,7 +832,7 @@ Object.assign(TransactionStore.prototype, {
           // The bucket lives through its close-out date — drawable on that
           // day, forfeited the day after. Legacy entries (and recurring
           // instances, which never carry closeoutDate) fall back to the
-          // bucket's own date, preserving the original behavior.
+          // bucket's own date.
           forfeit = (t.closeoutDate || date) < todayStr;
         } else if (t.recurringId) {
           const live = liveRollingDate.get(t.recurringId);

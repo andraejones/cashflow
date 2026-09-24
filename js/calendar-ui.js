@@ -158,15 +158,10 @@ class CalendarUI {
     });
 
     // CAPTURE phase with an ownership guard, like every other document-level
-    // Escape handler in the app. In the bubble phase, with no guard, this
-    // handler fired for Escapes that were not meant for the menu:
-    //   - a confirm dialog opened over the menu was dismissed AND the menu
-    //     closed on a single Escape, instead of the topmost layer owning it;
-    //   - worse, at the inactivity lock screen (which leaves the menu open —
-    //     it is not a .modal, so closeAllModals' sweep never reached it) this
-    //     ran button.focus() and pulled focus off the PIN field onto the menu
-    //     button sitting behind the lock overlay, so the next keystrokes went
-    //     nowhere.
+    // Escape handler in the app, so the topmost layer owns Escape: a confirm
+    // dialog over the menu must not also close the menu, and at the inactivity
+    // lock screen (which leaves the menu open) this must not pull focus off the
+    // PIN field onto the menu button behind the overlay.
     document.addEventListener("keydown", (e) => {
       if (e.key !== "Escape") return;
       if (!menu.classList.contains("is-open")) return;
@@ -322,7 +317,7 @@ class CalendarUI {
     let currentDayRow = null;
     // Seed for the display walk: the month's starting balance plus the
     // unsettled-expense carry from prior months (anchor-aware). The seeding
-    // rules live in CalculationService.getMonthSeed — see [[balance-walk-paths]].
+    // rules live in CalculationService.getMonthSeed.
     const monthStartStr = Utils.formatDateString(new Date(year, month, 1));
     const monthSeed = this.calculationService.getMonthSeed(year, month, {
       trackUnsettled: true,
@@ -335,15 +330,10 @@ class CalendarUI {
     // visible.
     // The mode is keyed on a LIVE BUCKET, not on the designation flag. The flag
     // lives on the recurring definition and outlives the series' periods: once
-    // the designated series ends (delete-all-future sets endDate, and an ended
-    // series has no live bucket — see closeOutExpiredAllocations), or before
-    // its first period arrives, the flag still says "free funds" while there is
-    // nothing to display. Keying on the flag rendered the current day's balance
-    // as an EMPTY cell in that state — no free-funds figure, and the real
-    // balance suppressed. Falling back to normal balances is the honest answer.
-    // getFreeFundsAllocation resolves the id first and returns null without
-    // scanning when nothing is designated, so this costs undesignated users
-    // nothing.
+    // the designated series ends, or before its first period arrives, there is
+    // nothing to display, and falling back to normal balances is the honest
+    // answer. getFreeFundsAllocation returns null without scanning when
+    // nothing is designated, so this costs undesignated users nothing.
     const freeFundsBucket = this.store.getFreeFundsAllocation();
     const freeFundsMode = freeFundsBucket !== null;
 
@@ -365,8 +355,6 @@ class CalendarUI {
     // First, calculate balance at end of today via the shared walk, seeded
     // from the same monthly summary calculateMinimum() uses — so the
     // highlighted lowest day and the displayed Minimum agree structurally.
-    // (Replaces a raw monthlyBalances-map read whose `|| 0` fallback could
-    // disagree with the Minimum when today's month key was absent.)
     const todayStr = Utils.formatDateString(today);
     const todaySummary = this.calculationService.calculateMonthlySummary(
       today.getFullYear(),
@@ -394,7 +382,7 @@ class CalendarUI {
     // Walk the next 30 days to find the lowest / crisis / negative days.
     // Recurring expansion for this window already happened above via
     // updateMonthlyBalances (and ensureSnowballPaymentsForHorizon), so the
-    // walk deliberately does not re-expand — matching the previous behavior.
+    // walk deliberately does not re-expand.
     this.calculationService.walkDays(
       Utils.formatDateString(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1)),
       Utils.formatDateString(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 30)),

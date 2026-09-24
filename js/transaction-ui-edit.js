@@ -135,7 +135,7 @@ Object.assign(TransactionUI.prototype, {
 
     try {
       if (newDate === date) {
-        // No date change — existing edit-in-place behavior
+        // No date change — edit in place
         let editScope = "this";
         if (isRecurring && transaction.type !== "balance") {
           const editRecurrenceElement = document.getElementById(`edit-recurrence-${date}-${index}`);
@@ -251,11 +251,9 @@ Object.assign(TransactionUI.prototype, {
               }
             }
             // Carry the allocation split across the re-move, honoring any
-            // change made in the edit form. Without this, deleting the old row
-            // refunds the buckets via _reverseAllocationDraws and the re-add
-            // never re-debits them — the spend stands while the buckets are
-            // silently credited back (mirrors the regular one-time branch
-            // below).
+            // change made in the edit form. Deleting the old row refunds the
+            // buckets, so without this the spend would stand while the buckets
+            // are credited back (mirrors the regular one-time branch below).
             if (type === "expense") {
               if (editedDraws !== null) {
                 this._carryEditedDraws(

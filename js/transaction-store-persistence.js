@@ -11,11 +11,7 @@ Object.assign(TransactionStore.prototype, {
   // per synced collection, plus `skips` for timestamped skip-toggle events.
   // Every construction site (constructor, loadData, importData, resetData)
   // derives its object from this one list, so adding a synced collection means
-  // adding its key here and nowhere else. Sites used to hand-maintain their own
-  // copies and drifted: loadData once omitted a key, so after any reload
-  // (saveData writes the `deletedItems` key on every save, so the stored blob
-  // is always present) that collection's unguarded tombstone push threw, the
-  // delete silently failed, and the entry would resurrect on the next merge.
+  // adding its key here and nowhere else.
   _TOMBSTONE_KEYS: [
     "transactions",
     "recurringTransactions",
@@ -36,9 +32,8 @@ Object.assign(TransactionStore.prototype, {
   // True for a tombstone entry the rest of the code can actually read: either
   // the legacy bare-id string or an object carrying an id. `skips` events are a
   // different shape ({date, recurringId, skipped, at}) and are kept as long as
-  // they are objects. Everything else (null, numbers, nested arrays) is dropped.
-  // `typeof null === "object"`, so a null entry passed every `typeof d ===
-  // "object"` guard and then threw on `.id` — see _normalizeDeletedItems.
+  // they are objects. Everything else (null, numbers, nested arrays) is dropped
+  // — note `typeof null === "object"`.
   _isUsableTombstone(entry, key) {
     if (key === "skips") {
       return !!entry && typeof entry === "object" && !Array.isArray(entry);
@@ -55,12 +50,10 @@ Object.assign(TransactionStore.prototype, {
   // Coerce a persisted or imported tombstone record into the canonical shape.
   // Anything missing or malformed becomes an empty array, so every later
   // trackDeleted* push lands on a real array — and unusable ENTRIES are dropped
-  // too, not just unusable collections. A single null in the list used to throw
-  // inside _pruneDeletedItems, which runs inside saveData's try: the throw
-  // skipped triggerSaveCallbacks, so CloudSync stopped scheduling pushes for the
-  // rest of the session with nothing shown to the user. Only external data can
-  // carry such an entry (a hand-edited export, a truncated gist) — every
-  // in-app writer pushes a complete record.
+  // too, not just unusable collections: a single null in a list would throw
+  // inside _pruneDeletedItems, i.e. inside saveData, and silently stop cloud
+  // pushes for the session. Only external data (a hand-edited export, a
+  // truncated gist) can carry such an entry.
   _normalizeDeletedItems(raw) {
     const source = raw && typeof raw === "object" ? raw : {};
     const normalized = {};
@@ -76,12 +69,9 @@ Object.assign(TransactionStore.prototype, {
   // JSON.parse accepting a value is not the same as the app being able to use
   // it. A truncated write, another tool touching the key, or a hand-edited
   // backup can leave `123`, `true`, `null` or `"text"` under a key the rest of
-  // the code reads as a map or a list. loadData used to assign those straight
-  // through, and the failure surfaced far away and uncaught — updateMonthlyBalances
-  // writing a property onto a number, hasMoveAnomaly reading .fromDate off
-  // null — leaving a blank app with no way back. Treat an unusable shape as
-  // missing data instead: keep the empty default, warn, and let the user
-  // restore from cloud or a backup.
+  // the code reads as a map or a list, and the failure would surface far away
+  // and uncaught. Treat an unusable shape as missing data instead: keep the
+  // empty default, warn, and let the user restore from cloud or a backup.
   _storedMap(parsed, label) {
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       return parsed;
@@ -297,11 +287,10 @@ Object.assign(TransactionStore.prototype, {
           } else if (rt.recurrence === "semiannual") {
             rt.recurrence = "semi-annual";
           }
-          // Migration: "last day of every month" used to be inferred from a
-          // start date that landed on its month's last day. It is now an
-          // explicit flag, so stamp it on any legacy monthly recurrence that
-          // relied on the old inference — preserving its dates exactly (the
-          // user can turn it off if the start date was a coincidence).
+          // Migration: stamp the explicit "last day of every month" flag on
+          // legacy monthly recurrences that relied on inferring it from the
+          // start date — preserving their dates exactly (the user can turn it
+          // off if the start date was a coincidence).
           if (this._migrateLegacyLastDayOfMonth(rt)) {
             // Persist the stamped flag (encrypt() is only available in
             // saveData(), so defer like the other load-time migrations).
@@ -312,10 +301,9 @@ Object.assign(TransactionStore.prototype, {
 
       // Transactions, recurring definitions and monthly anchors are all parsed
       // straight from storage above. Repair any non-finite money before the
-      // first walk reads it — a stored `null` (how JSON.stringify renders an
-      // Infinity that got in before this guard existed) lands here too. No
-      // migration save is forced: the repair is idempotent, so it rides the
-      // next ordinary save instead of pushing on load.
+      // first walk reads it (a stored `null` is how JSON.stringify renders an
+      // Infinity). No migration save is forced: the repair is idempotent, so it
+      // rides the next ordinary save instead of pushing on load.
       this._repairWalkAmounts();
 
       if (storedSkippedTransactions) {
@@ -470,8 +458,7 @@ Object.assign(TransactionStore.prototype, {
       if (Array.isArray(this._deletedItems[key])) {
         this._deletedItems[key] = this._deletedItems[key].filter(item => {
           // New format: object with id and deletedAt. `item &&` matters —
-          // typeof null is "object", and reading .deletedAt off it threw here,
-          // inside saveData's try, before triggerSaveCallbacks could run.
+          // typeof null is "object", and this runs inside saveData.
           if (item && typeof item === 'object' && item.deletedAt) {
             return item.deletedAt > thirtyDaysAgo;
           }
@@ -489,13 +476,12 @@ Object.assign(TransactionStore.prototype, {
     }
   },
 
-  // "Last day of every month" used to be inferred from a start date that
-  // landed on its month's last day. It is an explicit flag now, and every
-  // writer sets it (see TransactionStore._pinLastDayOfMonth), so an ABSENT
-  // flag means a series from before the flag existed: stamp it on the ones
-  // that relied on the old inference, preserving their dates exactly (the
-  // user can turn it off if the start date was a coincidence). Returns true
-  // when it stamped.
+  // "Last day of every month" is an explicit flag, and every writer sets it
+  // (see TransactionStore._pinLastDayOfMonth), so an ABSENT flag means a
+  // series from before the flag existed, when it was inferred from a start
+  // date on its month's last day: stamp it on those, preserving their dates
+  // exactly (the user can turn it off if the start date was a coincidence).
+  // Returns true when it stamped.
   _migrateLegacyLastDayOfMonth(rt) {
     if (
       rt.recurrence === "monthly" &&
@@ -589,8 +575,8 @@ Object.assign(TransactionStore.prototype, {
         "cashInfusions",
         encrypt(JSON.stringify(this.cashInfusions))
       );
-      // Left behind by the removed savings-goals feature. Nothing reads it,
-      // so drop it rather than let it outlive a reset or a PIN re-key.
+      // Stale key from a removed feature; drop it rather than let it outlive
+      // a reset or a PIN re-key.
       this.storage.removeItem("savingsGoals");
       this.storage.setItem(
         "debtSnowballSettings",
@@ -618,12 +604,10 @@ Object.assign(TransactionStore.prototype, {
     } catch (error) {
       // A write that throws part-way through (localStorage over quota is the
       // realistic case — the dataset plus its PIN-encrypted base64 plus
-      // cloud-sync's _backup_before_merge copy add up) used to be swallowed
-      // here: some keys were written and some weren't, the save callbacks
-      // below never ran so CloudSync stopped scheduling a push, and the user
-      // was told nothing. The in-memory data is still correct, so let the
-      // callbacks run anyway — the change can still reach the cloud — and say
-      // out loud that this device's storage is failing.
+      // cloud-sync's _backup_before_merge copy add up) leaves some keys
+      // written and some not. The in-memory data is still correct, so let the
+      // save callbacks run anyway — the change can still reach the cloud — and
+      // tell the user this device's storage is failing.
       console.error("Error saving data to storage:", error);
       if (!this._storageWriteFailed) {
         this._storageWriteFailed = true;
@@ -739,13 +723,9 @@ Object.assign(TransactionStore.prototype, {
       }
 
       // Coerce shapes exactly as loadData does. `x || []` only catches
-      // null/undefined, so one malformed collection in an otherwise good
-      // backup — `"debts": 0` from a truncated write or a hand edit — threw
-      // inside .map, hit the catch below, restored the backup and reported
-      // "Invalid file format". The user lost the WHOLE restore over one bad
-      // key, when loadData's rule for the same data is "treat an unusable
-      // shape as missing, keep the empty default, and warn". Same rule here:
-      // salvage everything that is usable.
+      // null/undefined, and one malformed collection (`"debts": 0`) must not
+      // fail the whole restore: treat an unusable shape as missing, keep the
+      // empty default, and salvage everything that is usable.
       this.transactions = this._prunedEntries(
         this._storedMap(data.transactions, "imported transactions") || {},
         (day) => Array.isArray(day) && day.length > 0
@@ -764,10 +744,8 @@ Object.assign(TransactionStore.prototype, {
           data.recurringTransactions, "imported recurringTransactions"
         ) || []
       ).filter((rt) => rt && typeof rt === "object" && !Array.isArray(rt));
-      // Same legacy last-day migration loadData applies. Without it an
-      // imported (or cloud-merged) legacy series expanded on its start day for
-      // the rest of the session and on the month's last day after the next
-      // reload — the same data, two schedules.
+      // Same legacy last-day migration loadData applies, so an imported (or
+      // cloud-merged) legacy series has one schedule before and after a reload.
       this.recurringTransactions.forEach((rt) => {
         this._migrateLegacyLastDayOfMonth(rt);
       });
@@ -901,13 +879,9 @@ Object.assign(TransactionStore.prototype, {
               ) {
                 return false;
               }
-              // Both dates must be READABLE before comparing them. This was
-              // `parseDateString(rt.startDate) <= parseDateString(date)`, and
-              // `null <= aDate` coerces null to 0 and the date to its
-              // timestamp — so a series with an unparseable startDate matched
-              // every legacy row, binding it to the wrong series. The same
-              // coercion blanked the calendar once already (see the startDate
-              // gate in applyRecurringTransactions).
+              // Both dates must be READABLE before comparing them:
+              // `null <= aDate` coerces null to 0, so a series with an
+              // unparseable startDate would match every legacy row.
               const seriesStart = Utils.parseDateString(rt.startDate);
               return !!seriesStart && !!rowDate && seriesStart <= rowDate;
             });

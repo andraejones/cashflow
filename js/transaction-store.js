@@ -67,10 +67,8 @@ class TransactionStore {
 
   // Cent rounding for the allocation engine. Non-finite input collapses to 0
   // rather than propagating: every value this touches (a bucket's remaining, a
-  // draw amount) is persisted, and the house rule for persisted money is
-  // Number.isFinite (see _finiteNumber / _repairWalkAmounts). Before this,
-  // Number(undefined) + EPSILON produced NaN, and one NaN reaching
-  // _applyAllocationDraws turned the bucket's amount into NaN for good.
+  // draw amount) is persisted, and persisted money must be Number.isFinite
+  // (see _finiteNumber / _repairWalkAmounts).
   _roundCents(value) {
     const num = Number(value);
     return Math.round(((Number.isFinite(num) ? num : 0) + Number.EPSILON) * 100) / 100;
@@ -132,7 +130,7 @@ class TransactionStore {
       // legacy mirrors with them, so an explicit unlink drops the period
       // provenance too (unlike the dangling-bucket case, where the row keeps it
       // as history). A caller that passes no draw fields at all inherits the
-      // existing split from the spread above, as it always has.
+      // existing split from the spread above.
       this._reverseAllocationDraws(existing);
       if (merged.type === "expense") {
         this._applyAllocationDraws(merged);
@@ -226,15 +224,10 @@ class TransactionStore {
   //
   // loadData's migration reads an ABSENT flag as a pre-flag legacy series and
   // stamps `true` on any whose start date is its month's last day. The writers
-  // only ever set the flag when it is true — the add form when the box is
-  // checked, the "this and future" split when the old series had it — so a
-  // bill entered on Sep 30 with the box UNCHECKED expanded on the 30th for the
-  // rest of the session and then, on the next reload, became "last day of
-  // every month": Oct 31, Dec 31, every balance after them a day off. The
-  // same happened to a split landing on a 30th and to a series created from a
-  // bank-statement suggestion. Pinning `false` here records what the series
-  // actually does today (the expansion treats absent as false), so the
-  // migration only ever sees genuine legacy data.
+  // only set the flag when it is true, so without pinning `false` here a
+  // series started on a 30th would flip to "last day of every month" on the
+  // next reload. The expansion treats absent as false, so this records what
+  // the series actually does and the migration only ever sees legacy data.
   _pinLastDayOfMonth(recurringTransaction) {
     if (
       recurringTransaction &&

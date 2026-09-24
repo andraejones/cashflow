@@ -66,9 +66,8 @@ Object.assign(TransactionUI.prototype, {
       // The advanced-recurrence number fields are free-form inputs; reject
       // values the expansion engine can't honor before persisting them. An
       // interval below 1 makes applyCustomRecurrence skip the series entirely,
-      // so the entry vanishes from the calendar on the next render while its
-      // definition lingers invisibly; a non-numeric variable percentage
-      // expands every occurrence — and the running balances — to NaN.
+      // so the entry would vanish from the calendar while its definition
+      // lingers invisibly.
       if (recurrence === "custom") {
         const intervalEl = document.getElementById("customIntervalValue");
         if (intervalEl) {
@@ -84,9 +83,8 @@ Object.assign(TransactionUI.prototype, {
       }
       // Same rule, the other free-form recurrence number. An empty or
       // zero/negative occurrence count is not "no cap" — the user explicitly
-      // chose "End after N occurrences", and persisting NaN there quietly gave
-      // them a series that never ends (the expansion reads
-      // `rt.maxOccurrences || null`).
+      // chose "End after N occurrences", and NaN there would give them a
+      // series that never ends (the expansion reads `rt.maxOccurrences || null`).
       if (recurrence !== "once") {
         const occurrenceRadio = document.getElementById("endConditionOccurrence");
         const maxOccurrencesEl = document.getElementById("maxOccurrences");

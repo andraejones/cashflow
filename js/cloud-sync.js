@@ -403,11 +403,10 @@ class CloudSync {
 
       // Torn down from outside — the inactivity lock hides every visible
       // .modal, and an import closes them all. This dialog is not one of the
-      // declared modals, so hiding it left this promise pending forever: the
-      // saveToCloud/loadFromCloud awaiting it never reached its finally, so
-      // _isSyncing stayed true and every later sync short-circuited with
-      // "Sync already in progress" for the rest of the session. Settle it the
-      // same way the close button does.
+      // declared modals, so a hidden-but-pending promise would keep the
+      // awaiting saveToCloud/loadFromCloud from reaching its finally, leaving
+      // _isSyncing stuck true for the session. Settle it the same way the
+      // close button does.
       this._cancelCredentialsPrompt = () => {
         if (teardown()) {
           reject(new Error("Credentials entry cancelled"));
@@ -500,12 +499,11 @@ class CloudSync {
   // is bumped exactly when saveData runs with isDataModified=true (every user
   // mutation), while maintenance writes (snowball materialization, minimum-
   // payment adjustments, orphan cleanup) save with false and stamp per-item
-  // _lastModified only. Counting those machine stamps here made every
-  // backgrounding/resume push to the gist with zero user edits. Machine
-  // changes are derived data — they ride the next real sync. loadFromCloud
-  // still uses the full per-item scan to decide merge-vs-replace, where
-  // machine writes MUST count (a straight replace would clobber local
-  // tombstones and materialized rows).
+  // _lastModified only — counting those would push on every background/resume
+  // with zero user edits. Machine changes are derived data and ride the next
+  // real sync. loadFromCloud still uses the full per-item scan to decide
+  // merge-vs-replace, where machine writes MUST count (a straight replace
+  // would clobber local tombstones and materialized rows).
   hasPendingCloudSave() {
     if (this._pendingCloudSave || this._pendingSaveAfterSync) {
       return true;
@@ -545,8 +543,7 @@ class CloudSync {
       pendingSpan.setAttribute("tabindex", "0");
       // The indicator lives inside #currentMonth, which carries its own
       // "return to the current month" click handler while an off-month is
-      // viewed — without stopping propagation, tapping the hourglass to save
-      // also yanked the calendar back to today.
+      // viewed — stop propagation so tapping the hourglass only saves.
       pendingSpan.addEventListener("click", (e) => {
         e.stopPropagation();
         this.saveNowFromPending();
@@ -716,11 +713,8 @@ class CloudSync {
   //
   // A bucket's `amount` IS its remaining balance, debited in place by each
   // draw, and the per-row merge keeps whichever copy of the bucket is newer.
-  // So two devices drawing from the same bucket between syncs lost one of the
-  // debits: $20 drawn on one phone and $30 on the other left a $200 bucket at
-  // $170 beside both expenses — $20 of spending counted twice, once as spent
-  // and once as still reserved, and the free-funds figure the family spends
-  // against overstated by the same $20.
+  // So two devices drawing from the same bucket between syncs would lose one
+  // of the debits, counting that spending both as spent and as still reserved.
   //
   // Each side's own data is internally consistent (every draw debits its
   // bucket in the same step), so the winning copy's ORIGINAL amount is its
@@ -731,15 +725,13 @@ class CloudSync {
   //
   // The same race has a second shape for RECURRING buckets. A period's bucket
   // is a pure expansion until its first draw materializes it under a fresh id,
-  // so two devices making that first draw each minted their own id — and the
-  // merge, keyed on id, kept both. That reserved the period twice ($350 held
-  // back against a $200 bucket), and since only one of the two is ever offered
-  // for draws, the other was an invisible reserve until the period turned
-  // over. Duplicates of one (series, date) collapse onto the smallest id — the
-  // same keeper on every device, so they converge — and every draw whose
-  // bucket id is gone is re-pointed through the series/period provenance it
-  // was stamped with, which also catches a device that keeps drawing from the
-  // loser until it next pulls.
+  // so two devices making that first draw each mint their own id and the
+  // merge, keyed on id, keeps both — reserving the period twice. Duplicates of
+  // one (series, date) collapse onto the smallest id — the same keeper on
+  // every device, so they converge — and every draw whose bucket id is gone is
+  // re-pointed through the series/period provenance it was stamped with,
+  // which also catches a device that keeps drawing from the loser until it
+  // next pulls.
   //
   // Mutates `mergedTxns` by replacing corrected rows with copies — the inputs
   // are never touched. Returns the ids of collapsed duplicates, which the
@@ -783,7 +775,7 @@ class CloudSync {
 
     // 2. Re-point draws at a bucket that no longer exists to the live bucket
     // of the same series and period, when there is one. A draw on a bucket
-    // that was forfeited finds none and is left as history, as before.
+    // that was forfeited finds none and is left as history.
     const liveBucketIds = new Set();
     Object.keys(mergedTxns).forEach((date) => {
       mergedTxns[date].forEach((t) => {
@@ -980,12 +972,8 @@ class CloudSync {
       // Exactly one side is empty. An empty record that is STRICTLY NEWER is a
       // deletion the user made after the other side's text was written, so it
       // wins — that is the whole point of keeping a timestamped empty record
-      // (see TransactionStore.setMonthlyNotes). Preferring the non-empty side
-      // unconditionally, as this did, meant a cleared note was restored from the
-      // other device on the very next sync and could never be deleted at all.
-      // A side that simply never had the note reads as time 0, so it can never
-      // out-rank a real note — which keeps the ordinary "the other device just
-      // hasn't seen it yet" case behaving exactly as before.
+      // (see TransactionStore.setMonthlyNotes). A side that simply never had
+      // the note reads as time 0, so it can never out-rank a real note.
       if (!remoteData.text || !localData.text) {
         const emptyIsLocal = !localData.text;
         const emptyTime = emptyIsLocal ? localData.time : remoteData.time;
@@ -1024,14 +1012,10 @@ class CloudSync {
   // "now" before merging (the push path) must pass the pre-stamp value, else
   // local always wins and a newer remote settings edit is silently discarded.
   _mergeData(localData, remoteData, localLastUpdated = localData.lastUpdated) {
-    // The tombstone reader below is careful about shapes because remote data is
-    // raw gist JSON. The COLLECTIONS need exactly the same care and did not get
-    // it: `x || []` only catches null/undefined, so a truncated or hand-edited
-    // gist carrying `"cashInfusions": 0` (or a string, or an object) sailed
-    // through and then threw "remoteItems.forEach is not a function" in the
-    // middle of _mergeById. That aborts saveToCloud before its PATCH — the
-    // cloud copy survives, but the device can never push again, and every sync
-    // reports a JS type error the user can do nothing with. Coerce first.
+    // Remote data is raw gist JSON, so the collections need the same shape
+    // care as the tombstones below: `x || []` only catches null/undefined, and
+    // a truncated or hand-edited gist carrying `"cashInfusions": 0` would throw
+    // inside _mergeById, aborting every future push. Coerce first.
     const asItems = (value) =>
       Array.isArray(value)
         ? value.filter(
@@ -1047,9 +1031,8 @@ class CloudSync {
     // Extract plain IDs from deleted item objects ({ id, deletedAt } or plain
     // strings). Remote tombstones arrive as raw gist JSON, so the shape is not
     // guaranteed: a null entry passes `typeof d === 'object'` and then throws on
-    // `.id`, and a non-array collection has no .map at all. Either would abort
-    // the merge (and, before the fallback was narrowed above, silently overwrite
-    // the remote copy). Read defensively and drop what can't be used.
+    // `.id`, and a non-array collection has no .map at all. Read defensively
+    // and drop what can't be used.
     const asList = (items) => (Array.isArray(items) ? items : []);
     const idOf = (d) => (typeof d === 'string' ? d : (d && d.id) || null);
     const extractIds = (items) => asList(items).map(idOf).filter(Boolean);
@@ -1323,12 +1306,8 @@ class CloudSync {
     const skipMergeThisSave = this._replaceRemoteOnce;
     this._replaceRemoteOnce = false;
 
-    // In quiet mode (background/resume syncs) suppress the loading overlay so
-    // routine syncs don't flash a spinner; merge/conflict and error
-    // notifications still fire.
-    // Full-screen loading overlay during save temporarily disabled — the
-    // cloud-sync-indicator + notifications still convey sync state.
-    // To restore: const showLoading = (msg) => { if (!quiet) Utils.showLoading(msg); };
+    // The full-screen loading overlay is intentionally not shown for saves;
+    // the cloud-sync indicator and notifications convey sync state.
     const showLoading = (msg) => {};
 
     const syncIndicator = document.querySelector(".cloud-sync-indicator");
@@ -1380,20 +1359,14 @@ class CloudSync {
 
       // Snapshot local state AFTER the remote round trip below, never before.
       // The GET takes real time, and anything the user enters during it is part
-      // of "local" by the time we merge. Taking the snapshot first meant the
-      // merge could not see that edit, and then importing the merged result
-      // replaced the live map — destroying the entry in memory AND on disk,
-      // silently. Auto-sync pushes 10s after every change, so that window is
-      // open constantly. The snapshot is nothing but a read, so deferring it
-      // costs nothing.
+      // of "local" by the time we merge; a snapshot taken first could not see
+      // that edit, and importing the merged result would then destroy it in
+      // memory and on disk. The snapshot is only a read, so deferring it costs
+      // nothing.
       const snapshotLocal = () => {
         // Flush any pending debounced save so the snapshot is complete.
         // Suppressed: whatever the flush writes is exported and pushed by THIS
-        // call, so its save callback must not queue another push. Unsuppressed
-        // it hit the _isSyncing branch of scheduleCloudSave, set
-        // _pendingSaveAfterSync, and the finally below scheduled a second,
-        // identical round trip — re-raising the ⌛ indicator right after
-        // "saved successfully".
+        // call, so its save callback must not queue a second, identical push.
         this._suppressAutoSyncSchedule = true;
         try {
           this.store.flushPendingSave();
@@ -1408,9 +1381,7 @@ class CloudSync {
       // ETag means this device has never synced this gist (e.g. a fresh device
       // pointed at an existing gist, credentials just entered above): the GET
       // simply carries no If-None-Match and returns 200 with the remote data, so
-      // we MERGE instead of blind-overwriting a populated remote gist. Gating
-      // this on _lastKnownETag was a data-loss hole — the first push clobbered
-      // another device's data.
+      // we MERGE instead of blind-overwriting a populated remote gist.
       //
       // The ONE exception is an explicit replaceRemote push (import restore):
       // there the user's intent is that local data REPLACE the cloud copy, so
@@ -1435,13 +1406,9 @@ class CloudSync {
 
           if (gist.files && gist.files["cashflow_data.json"]) {
             // Scope the "proceed with local data" fallback to a remote payload
-            // that genuinely cannot be merged — i.e. one that does not parse.
-            // A wider catch here silently defeated every guard below it: the
-            // failed shadow backup threw "Aborting to prevent data loss" and was
-            // swallowed, after which the PATCH overwrote the remote copy with
-            // unmerged local data. The backup is a full copy of the dataset, so
-            // an over-quota localStorage is exactly when that fires — the case
-            // the guard exists for.
+            // that genuinely cannot be merged — i.e. one that does not parse. A
+            // wider catch would swallow the shadow-backup failure below and let
+            // the PATCH overwrite the remote copy with unmerged local data.
             //
             // A file we could not READ is likewise not a file we may overwrite:
             // _getGistFileContent stays outside the catch, so a failed raw_url

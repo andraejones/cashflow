@@ -1,62 +1,50 @@
 // TransactionStore — domain collections: debts + snowball settings, cash
-// infusions, monthly notes, and moved-transaction tracking. Each delete pushes a tombstone into _deletedItems so cloud
-// merges don't resurrect removed entries (see [[deletion-tombstones]]).
-// Prototype companion of TransactionStore (class declared in
+// infusions, monthly notes, and moved-transaction tracking. Each delete pushes
+// a tombstone into _deletedItems so cloud merges don't resurrect removed
+// entries. Prototype companion of TransactionStore (class declared in
 // transaction-store.js); no build step — loaded as a plain script after the
 // class file and before app.js (see index.html).
 
 Object.assign(TransactionStore.prototype, {
 
   // Numeric coercion choke point for the domain collections. `Number(x) || 0`
-  // was the intent at every site below, but it passes ±Infinity straight
-  // through — and JSON.stringify writes Infinity as null, so the value comes
-  // back as 0 on the next load: a debt balance silently reads as paid off, an
-  // infusion vanishes from the plan. "1e999" is valid JSON, so this
-  // arrives from imports and cloud merges, not only from a form (see
-  // [[finite-amount-guards]]; dd93807 fixed the form paths it could reach).
-  // Rounding stays at the call sites so finite values behave exactly as before.
+  // passes ±Infinity straight through — and JSON.stringify writes Infinity as
+  // null, so the value comes back as 0 on the next load (a debt balance reads
+  // as paid off). "1e999" is valid JSON, so this arrives from imports and cloud
+  // merges, not only from a form. Rounding stays at the call sites.
   _finiteNumber(value, fallback = 0) {
     const num = Number(value);
     return Number.isFinite(num) ? num : fallback;
   },
 
   // The snowball's minimum daily cashflow, normalized the same way wherever it
-  // arrives from — the settings form, a restored backup, or a cloud merge. The
-  // form has always rejected a negative floor; nothing else did, and a negative
-  // one is not merely cosmetic: the projection asks whether
-  // `forwardMinChecking - dailyFloor` covers a payoff, so a negative floor lets
-  // it schedule payoffs that drive the projected balance BELOW zero and reports
-  // a payoff date that cannot happen.
+  // arrives from — the settings form, a restored backup, or a cloud merge. A
+  // negative floor is refused: the projection asks whether
+  // `forwardMinChecking - dailyFloor` covers a payoff, so a negative floor
+  // would schedule payoffs that drive the projected balance BELOW zero.
   _normalizeDailyFloor(value) {
     const num = this._finiteNumber(value);
     return num > 0 ? num : 0;
   },
 
-  // The domain collections (debts, infusions, goals, dailyFloor) normalize
-  // their money on the way in. The three inputs the balance walk actually
-  // steps through — the transactions map, the recurring definitions, and the
-  // monthly anchors — never did: loadData and importData assign them straight
-  // from JSON.parse. The form guards can't cover that, because the value never
-  // passes through a form: "1e999" is valid JSON that parses to Infinity, so
-  // restoring a backup puts a non-finite amount directly into the walk. The
-  // 30-day Minimum then reads -Infinity and every balance after that day is
-  // garbage; saving writes the amount back as null (JSON.stringify's rendering
-  // of Infinity), so the next load quietly shows a third set of numbers.
+  // The domain collections (debts, infusions, dailyFloor) normalize their
+  // money on the way in. The three inputs the balance walk steps through — the
+  // transactions map, the recurring definitions, and the monthly anchors — are
+  // assigned straight from JSON.parse by loadData and importData, so no form
+  // guard covers them: "1e999" is valid JSON that parses to Infinity, and a
+  // restored backup would put a non-finite amount directly into the walk.
   //
   // Only non-finite values are rewritten. A finite amount is left exactly as
   // it was, so sweeping an existing dataset can never move a balance — this
   // repairs corruption, it does not re-round anyone's data.
-  // See [[finite-amount-guards]].
   _repairWalkAmounts() {
     let repaired = 0;
     // `optional` keys are left alone when absent — a monthlyBalances entry that
     // carries no endingBalance is just an incomplete derived record, and the
     // next render rebuilds it. A row's `amount` is NOT optional: an absent one
-    // is corruption, and it used to slip through this sweep untouched because
-    // `undefined` short-circuited here. It then reached the walk as
-    // `subtotal + undefined` → NaN → 0, wiping every earlier row in that day's
-    // subtotal (see CalculationService._rowAmount, which contains the blast
-    // radius at read time; this repairs the stored value so it stops recurring).
+    // is corruption that would reach the walk as NaN (see
+    // CalculationService._rowAmount, which contains it at read time; this
+    // repairs the stored value).
     const fix = (obj, key, { optional = false } = {}) => {
       if (!obj) return;
       if (optional && obj[key] === undefined) return;
@@ -89,15 +77,9 @@ Object.assign(TransactionStore.prototype, {
       ...debt,
       id: debt.id || Utils.generateUniqueId(),
       _lastModified: debt._lastModified || new Date().toISOString(),
-      // A debt's name is compared with localeCompare in two tiebreaks — the
-      // snapshot's smallest-balance-first distribution and the plan list's
-      // clearance order — both of which fire whenever two debts sit at the same
-      // remaining balance. A non-string name threw there, and the snapshot path
-      // runs inside the CALENDAR RENDER (generateCalendar →
-      // ensureSnowballPaymentsForHorizon → the projection), so one bad name in
-      // an imported or merged dataset took the whole app down to a blank page.
-      // _normalizeCashInfusion has always coerced its `name` this way; this one
-      // was the odd one out.
+      // A debt's name is compared with localeCompare in the payoff-order
+      // tiebreaks, which run inside the calendar render, so a non-string name
+      // from an import or merge must be coerced here.
       name: typeof debt.name === "string" ? debt.name : "",
       balance: Math.round(this._finiteNumber(debt.balance) * 100) / 100,
       minPayment: Math.round(this._finiteNumber(debt.minPayment) * 100) / 100,
@@ -106,7 +88,7 @@ Object.assign(TransactionStore.prototype, {
         typeof debt.dueDayPattern === "string" ? debt.dueDayPattern : "",
       // Explicit "due on the last day of the month" (monthly only). null =
       // saved before the flag existed; buildDebtRecurringTransaction then
-      // falls back to inferring it from the start date, as it always did.
+      // falls back to inferring it from the start date (legacy debts).
       dueLastDay: typeof debt.dueLastDay === "boolean" ? debt.dueLastDay : null,
       recurrence:
         typeof debt.recurrence === "string" ? debt.recurrence : "monthly",
@@ -150,14 +132,9 @@ Object.assign(TransactionStore.prototype, {
     return Number.isInteger(n) && n >= 1 && n <= 99 ? n : null;
   },
 
-  // Cash infusions were the last domain collection still coercing with
-  // `Number(x) || 0` — the exact pattern _finiteNumber exists to replace, and
-  // the one loadData/importData applied by hand at two sites that drifted from
-  // their siblings. An infinite infusion clears every debt in the snowball
-  // projection (Math.min(balance, Infinity) pays each one in full), then
-  // JSON.stringify writes it as null so the next load reads 0 and the plan
-  // changes again. Normalizing on the way in matches _normalizeDebt, so
-  // add/update, load, and import all agree.
+  // Normalizing on the way in keeps add/update, load, and import in
+  // agreement. An infinite infusion would clear every debt in the projection
+  // and then come back as 0 after JSON.stringify.
   _normalizeCashInfusion(infusion) {
     return {
       ...infusion,
@@ -224,9 +201,7 @@ Object.assign(TransactionStore.prototype, {
   // The stored text for a month, as a STRING, whatever shape the record is in:
   // the legacy bare string, the current { text, _lastModified } object, or
   // anything an import or a cloud merge left there. Both readers below go
-  // through this — hasMonthlyNotes used to do `(note.text || "").trim()` on its
-  // own, which threw on a numeric `text` and took the CALENDAR RENDER down with
-  // it (generateCalendar asks it for the ★ indicator on every render).
+  // through this; hasMonthlyNotes runs on every calendar render.
   _monthlyNoteText(monthKey) {
     const note = this.monthlyNotes[monthKey];
     if (!note) return "";
@@ -265,13 +240,10 @@ Object.assign(TransactionStore.prototype, {
         return true;
       }
       // Clearing a REAL note keeps a TIMESTAMPED EMPTY record rather than
-      // deleting the key. Deleting it made the clear invisible to the cloud
-      // merge, which sees only "local has no note, remote has one" and restores
-      // the remote copy — so a note the user deleted came back on the very next
-      // sync, every time, in both directions. The empty record is the
-      // deletion's tombstone: _mergeMonthlyNotes lets the newer side win, and
-      // drops the key entirely once BOTH sides are empty, so it self-prunes
-      // once the devices converge. getMonthlyNotes / hasMonthlyNotes already
+      // deleting the key: a deleted key is invisible to the cloud merge, which
+      // would restore the remote copy. The empty record is the deletion's
+      // tombstone: _mergeMonthlyNotes lets the newer side win, and drops the key
+      // entirely once BOTH sides are empty. getMonthlyNotes / hasMonthlyNotes
       // read an empty text as "none".
       this.monthlyNotes[monthKey] = {
         text: "",
@@ -352,10 +324,7 @@ Object.assign(TransactionStore.prototype, {
       debt.id = Utils.generateUniqueId();
     }
     debt._lastModified = new Date().toISOString();
-    // Normalize on the way in, as addCashInfusion does. Debts used to be
-    // normalized only on load, so an in-session debt kept whatever the caller
-    // passed — and a non-finite balance was "normalized" only after
-    // JSON.stringify had already turned it into null, i.e. into 0.
+    // Normalize on the way in, as addCashInfusion does.
     this.debts.push(this._normalizeDebt(debt));
     this.debouncedSave();
     return debt.id;

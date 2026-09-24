@@ -110,12 +110,8 @@ Object.assign(DebtSnowballUI.prototype, {
     // touching (or being coloured by) the real data.
     //
     // This has to cover everything applyRecurringTransactions can call on a
-    // store, not just what it happens to call today. trackDeletedTransaction is
-    // reached from _clearRecurringExpansions for any instance carrying an id —
-    // rows built here never have one, so it is unreachable at the moment, but a
-    // change that stamped ids on expansions would turn the whole snowball
-    // projection into a TypeError. Keep this list in step with the
-    // `this.store.*` calls in recurring-manager.js.
+    // store. Keep this list in step with the `this.store.*` calls in
+    // recurring-manager.js.
     const readOnly = (name) => () => {
       throw new Error(
         `getRecurringOccurrencesForMonth's throwaway store is read-only; ` +
@@ -127,9 +123,9 @@ Object.assign(DebtSnowballUI.prototype, {
       getRecurringTransactions: () => [recurringTransaction],
       getSkippedTransactions: () => ({}),
       isTransactionSkipped: () => false,
-      // Legitimately reachable: _clearRecurringExpansions tombstones any
-      // instance carrying an id. Rows built here have none today, but dropping
-      // a tombstone for a throwaway map is the right no-op if that changes.
+      // Reachable: _clearRecurringExpansions tombstones any instance carrying
+      // an id. Rows built here have none, and dropping a tombstone for a
+      // throwaway map is the right no-op either way.
       trackDeletedTransaction: () => { },
       saveData: () => { },
       debouncedSave: () => { },
@@ -267,11 +263,11 @@ Object.assign(DebtSnowballUI.prototype, {
 
   // Ensure every past debt-payment occurrence is materialized before the
   // snapshot reads "paid so far" from the transaction store. Debt minimum
-  // payments are recurring and expanded lazily as months are viewed; without
-  // this a debt whose schedule began before any rendered month reports too
-  // little paid (and an inflated remaining balance) until the user happens to
-  // navigate back. Expansion is cached, so repeat calls on a stable state are
-  // cheap. Bounded by a guard for safety against far-past start dates.
+  // payments are recurring and expanded lazily as months are viewed, so
+  // otherwise a debt whose schedule began before any rendered month would
+  // report too little paid until the user navigated back. Expansion is cached,
+  // so repeat calls on a stable state are cheap. Bounded by a guard for safety
+  // against far-past start dates.
   ensureDebtHistoryExpanded(cutoffDate = null) {
     if (!this.recurringManager) return;
     const recurrings = this.store
@@ -385,13 +381,13 @@ Object.assign(DebtSnowballUI.prototype, {
     });
 
     // Forward interest accrual — keeps this snapshot consistent with the
-    // daily-floor projection (calculateSnowballProjection), which accrues each debt's
-    // monthly interest from the projection start. Interest is never materialized
-    // as a transaction, so without this the inline "Remaining" (principal only)
-    // would understate the balance and never reconcile with the
-    // interest-inclusive snowball payoff amounts. Accrual only begins at the
-    // projection start (tomorrow) and only when a cutoff beyond it is requested,
-    // so past/today figures and null-cutoff callers are unchanged.
+    // daily-floor projection (calculateSnowballProjection), which accrues each
+    // debt's monthly interest from the projection start. Interest is never
+    // materialized as a transaction, so without this the inline "Remaining"
+    // (principal only) would not reconcile with the interest-inclusive
+    // snowball payoff amounts. Accrual only begins at the projection start
+    // (tomorrow) and only when a cutoff beyond it is requested, so past/today
+    // figures and null-cutoff callers are unchanged.
     const todayNow = new Date();
     const projectionStart = new Date(
       todayNow.getFullYear(),
@@ -428,10 +424,10 @@ Object.assign(DebtSnowballUI.prototype, {
       }
     };
 
-    // Auto-distribution in snowball payoff order (makePayoffOrder). Also used for a targeted infusion whose target is already paid off by its
-    // date — the projection's daily walk redistributes that windfall to the
-    // surviving debts, so this snapshot must do the same or payoff dates jump
-    // back once the infusion date passes into history.
+    // Auto-distribution in snowball payoff order (makePayoffOrder). Also used
+    // for a targeted infusion whose target is already paid off by its date —
+    // the projection's daily walk redistributes that windfall to the surviving
+    // debts, so this snapshot must do the same.
     const distributeAuto = (amount) => {
       let remainingInfusion = roundToCents(Number(amount) || 0);
       if (remainingInfusion <= 0) {
@@ -546,10 +542,9 @@ Object.assign(DebtSnowballUI.prototype, {
     // (getRunningBalanceForDate) and consults getReservedTotalOnOrBefore at
     // every anchor. Both read CalculationService's caches, which are otherwise
     // only refreshed by updateMonthlyBalances — and CalendarUI runs this
-    // projection BEFORE that call, so on the render right after an edit the
-    // starting checking balance would still be the pre-edit figure and a payoff
-    // could be materialized on a day the money isn't actually there. Same
-    // reason calculateMinimum invalidates on entry.
+    // projection BEFORE that call, so right after an edit the starting
+    // checking balance would still be the pre-edit figure. Same reason
+    // calculateMinimum invalidates on entry.
     if (this.calculationService) {
       this.calculationService.invalidateCache();
     }
@@ -637,8 +632,8 @@ Object.assign(DebtSnowballUI.prototype, {
     // present debts in true clearance order. The daily-floor walk clears debts
     // in payoff order (priority, then smallest *running* balance), and minimum
     // payments can clear a debt ahead of that, so the snowball's real sequence
-    // is when each debt clears — not which is smallest today. Pure display metadata; the projection never reads
-    // it back.
+    // is when each debt clears — not which is smallest today. Pure display
+    // metadata; the projection never reads it back.
     let payoffSeq = 0;
     Object.keys(balances).forEach((debtId) => {
       if (balances[debtId] <= 0) {
@@ -656,11 +651,10 @@ Object.assign(DebtSnowballUI.prototype, {
     // When the current month is viewed on the last day of the month, the
     // projection starts next month (projectionStartDate = tomorrow), so the
     // daily walk below never visits the view month and its end-of-view-month
-    // capture never fires — leaving viewBalances to fall through to post-walk
-    // (next-month) balances, which understates every figure by next month's
-    // payments. Nothing in the view month remains to project in that case, so
-    // its end-of-month balances are exactly the starting balances. (Past months
-    // are handled by historicalViewBalances; future months are always walked.)
+    // capture never fires. Nothing in the view month remains to project in
+    // that case, so its end-of-month balances are exactly the starting
+    // balances. (Past months are handled by historicalViewBalances; future
+    // months are always walked.)
     const projectionStartMonthIndex = this.getMonthIndex(
       projectionStartDate.getFullYear(),
       projectionStartDate.getMonth()
@@ -671,11 +665,9 @@ Object.assign(DebtSnowballUI.prototype, {
     const baseIndex = this.getMonthIndex(baseYear, baseMonth);
     // 600 months is the payoff horizon for a debt that clears very slowly. With
     // nothing left to pay off there is nothing to project past the view/capture
-    // window — the walk below breaks the moment it reaches it — so the 50-year
-    // day timeline was ~18k throwaway objects built on every calendar render
-    // (~24ms even before the walk, for a user with no debts at all). The
-    // shortened horizon still covers every month the walk can reach, so the
-    // result is identical.
+    // window — the walk below breaks the moment it reaches it — so the horizon
+    // shrinks to that window rather than building a 50-year day timeline on
+    // every calendar render. The result is identical.
     const hasActiveDebt = Object.keys(balances).some(
       (debtId) => (Number(balances[debtId]) || 0) > 0
     );
@@ -686,12 +678,12 @@ Object.assign(DebtSnowballUI.prototype, {
     );
 
     // --- Daily floor model ---------------------------------------------------
-    // The snowball no longer sets aside a fixed monthly amount. The user declares
-    // a minimum daily cashflow floor; whatever the projected checking balance
-    // carries above that floor — durably, across the look-ahead window — is swept
-    // into a full debt payoff on the exact day the cash is there (not the debt's
-    // due date). Freed-up minimums of paid-off debts raise that surplus naturally,
-    // so there is no separate "fund". Walk the timeline day by day.
+    // The user declares a minimum daily cashflow floor; whatever the projected
+    // checking balance carries above that floor — durably, across the
+    // look-ahead window — is swept into a full debt payoff on the exact day the
+    // cash is there (not the debt's due date). Freed-up minimums of paid-off
+    // debts raise that surplus naturally, so there is no separate "fund". Walk
+    // the timeline day by day.
     // How far forward a payoff must keep checking above the floor. Bounded (~1yr)
     // so a single payoff decision doesn't force expanding/scanning the entire
     // multi-decade horizon, while still covering a full seasonal cycle of bills.
@@ -755,13 +747,11 @@ Object.assign(DebtSnowballUI.prototype, {
         // This walk expands months lazily as it reaches them, and it reads
         // getReservedTotalOnOrBefore on every anchor day — so the reserve index
         // must not carry across an expansion that may have materialized new
-        // allocation buckets. Skipping this made the projected checking balance
-        // read HIGH at every anchor past the first (the reserve it should have
-        // subtracted was invisible), which is the exact input the floor check
-        // uses to decide a payoff is affordable. Same contract walkDays honors.
-        // typeof-guarded like the other cross-file calls in this app: sw.js
-        // caches each script separately and serves network-first, so a mixed
-        // version load is possible and must not throw here.
+        // allocation buckets, or the projected checking balance would read HIGH
+        // at later anchors (the exact input the floor check uses). Same
+        // contract walkDays honors. typeof-guarded like the other cross-file
+        // calls in this app: sw.js caches each script separately and serves
+        // network-first, so a mixed version load is possible.
         if (
           this.calculationService &&
           typeof this.calculationService.invalidateReservedIndex === "function"
@@ -793,14 +783,11 @@ Object.assign(DebtSnowballUI.prototype, {
         // (snowballForced); any other one is about to be swept, so it stays
         // excluded too.
         //
-        // Everything ELSE carrying a debtId used to be excluded as well — and
-        // was then never paid by anyone: the copy a MOVED or carried-forward
-        // SETTLED minimum leaves behind (no recurringId, debtRole kept), and a
-        // force-generated payoff while auto-generate is off. The calendar
-        // spends all of those, the debt snapshot credits all of those, and the
-        // projection saw none of them — so a debt cleared by a forced payoff
-        // kept "needing" its minimums for months, and the maintenance passes
-        // materialized them as real phantom spending after the payoff.
+        // Everything ELSE carrying a debtId is a real payment the calendar
+        // spends and the debt snapshot credits — the copy a MOVED or
+        // carried-forward SETTLED minimum leaves behind (no recurringId,
+        // debtRole kept), and a force-generated payoff while auto-generate is
+        // off — so the projection must pay it too.
         if (
           (t.debtRole === "minimum" && t.recurringId) ||
           (t.snowballGenerated === true &&
@@ -851,11 +838,9 @@ Object.assign(DebtSnowballUI.prototype, {
           if (occ.dateString < projectionStartDateString) return;
           // The throwaway expansion knows nothing of the real skip list, so
           // honor it here. A skipped minimum is not paid on the calendar or in
-          // the debt snapshot; injecting it anyway paid the debt down faster
-          // than reality, and the payoff-driven endDate then cut the series
-          // short, dropping the real final payment. (A skip that is really a
-          // MOVE leaves a non-recurring copy on the new date, which getDayFlow
-          // books as a real payment.)
+          // the debt snapshot, so injecting it would pay the debt down faster
+          // than reality. (A skip that is really a MOVE leaves a non-recurring
+          // copy on the new date, which getDayFlow books as a real payment.)
           if (
             this.recurringManager &&
             this.recurringManager.isTransactionSkipped(occ.dateString, template.id)
@@ -1007,7 +992,7 @@ Object.assign(DebtSnowballUI.prototype, {
       }
 
       // Interest accrues once per calendar month (including the first, partial
-      // month — matching the prior monthly model).
+      // month).
       if (!monthAccrued.has(monthKey)) {
         Object.keys(balances).forEach((debtId) =>
           accrueInterest(balances, debtId)
@@ -1218,10 +1203,9 @@ Object.assign(DebtSnowballUI.prototype, {
 
     // Find the earliest infusion date to start projection from. Only dated
     // infusions count: an undated one (possible from an import or a cloud
-    // merge — _normalizeCashInfusion defaults `date` to "") sorts first, and
-    // reading the window off it made getDateFromString return null and this
-    // method bail with an empty result — dropping the allocation breakdown for
-    // every OTHER infusion too. The grouping pass above already ignores them.
+    // merge — _normalizeCashInfusion defaults `date` to "") would sort first
+    // and empty the whole breakdown. The grouping pass above already ignores
+    // them.
     const sortedInfusions = infusions
       .filter((inf) => this.isValidDateString(inf.date))
       .sort((a, b) => a.date.localeCompare(b.date));
@@ -1233,11 +1217,8 @@ Object.assign(DebtSnowballUI.prototype, {
 
     const today = new Date();
     // Start the projection at the earlier of the first infusion's month and the
-    // current month, compared as absolute year-month indices. Component-wise
-    // min(year)/min(month) is wrong when the two dates fall in different years
-    // (e.g. earliest 2025-11, today 2026-06 would yield 2025-06): it can start
-    // the projection before the first infusion and over-compound simulated
-    // interest, skewing each infusion's allocation breakdown.
+    // current month, compared as absolute year-month indices (component-wise
+    // min(year)/min(month) is wrong across a year boundary).
     const startIndex = Math.min(
       this.getMonthIndex(earliestDate.getFullYear(), earliestDate.getMonth()),
       this.getMonthIndex(today.getFullYear(), today.getMonth())

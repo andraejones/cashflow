@@ -20,13 +20,10 @@ Object.assign(TransactionUI.prototype, {
         // Allocations are set-aside buckets, not everyday expenses — keep them
         // out of the quick-input suggestion list.
         if (t.allocated === true) return;
-        // `typeof`, not `|| ""`: a non-string description (nothing coerces the
-        // field on the way in from an import or a cloud merge) made this
-        // `.trim()` throw. This scans the WHOLE transactions map and runs at
-        // the top of showTransactionDetails, so one bad row anywhere dropped
-        // EVERY day modal into the read-only fallback — no Edit, Delete,
-        // Settle, Skip or working add form, on any day. Same guard the other
-        // read surfaces use.
+        // `typeof`, not `|| ""`: nothing coerces the description on the way in
+        // from an import or a cloud merge, and this scans the whole
+        // transactions map at the top of showTransactionDetails, so one bad row
+        // would drop every day modal into the read-only fallback.
         const description =
           typeof t.description === "string" ? t.description.trim() : "";
         if (!description || description === "Ending Balance") return;
@@ -174,11 +171,9 @@ Object.assign(TransactionUI.prototype, {
         break;
       case "Escape":
         // Fallback only. The document-level capture handler in
-        // TransactionUI.initEventListeners runs before this one (this listener
-        // is on the input, a descendant of document) and already dismisses the
-        // list while keeping the modal open — stopPropagation here can never
-        // beat it. Kept so the list still closes if that guard is ever
-        // bypassed; by then the list is normally hidden and we return above.
+        // TransactionUI.initEventListeners runs before this one and already
+        // dismisses the list while keeping the modal open. Kept so the list
+        // still closes if that guard is ever bypassed.
         event.stopPropagation();
         this.closeDescriptionSuggestions();
         break;
@@ -212,10 +207,9 @@ Object.assign(TransactionUI.prototype, {
 
   // Shows the close-out date picker for one-time auto-close-out allocations.
   // The bucket stays drawable through this date and is forfeited the day
-  // after. Defaults to the transaction's own date (which reproduces the
-  // pre-picker "closes when its date passes" behavior) and can't be earlier
-  // than it. Recurring allocations never get the picker — each period's
-  // bucket keeps closing when its own date passes.
+  // after. Defaults to the transaction's own date and can't be earlier than
+  // it. Recurring allocations never get the picker — each period's bucket
+  // keeps closing when its own date passes.
   updateCloseoutDateVisibility() {
     const field = document.getElementById("closeoutDateField");
     const input = document.getElementById("transactionCloseoutDate");
@@ -257,8 +251,7 @@ Object.assign(TransactionUI.prototype, {
   //     remaining plus whatever this same expense already draws from it, since
   //     saving refunds the old draw before re-applying;
   //   - the rows can't add up to more than the expense. Adding up to LESS is
-  //     fine: the remainder is ordinary spending, exactly how an over-large
-  //     single draw has always behaved.
+  //     fine: the remainder is ordinary spending.
   // ---------------------------------------------------------------------
 
   _drawCents(value) {
@@ -484,9 +477,9 @@ Object.assign(TransactionUI.prototype, {
   },
 
   // What a freshly-chosen bucket should cover: whatever the expense still has
-  // uncovered, capped at what that bucket can actually pay. The cap is why a
-  // single row against a too-small bucket still behaves like it always did —
-  // it covers what it can and the rest is ordinary spending.
+  // uncovered, capped at what that bucket can actually pay. A single row
+  // against a too-small bucket covers what it can and the rest is ordinary
+  // spending.
   _defaultDrawAmount(container, allocationId, index, cap) {
     const config = container._drawEditorConfig || {};
     const amountEl = config.amountElementId
@@ -576,10 +569,10 @@ Object.assign(TransactionUI.prototype, {
       error = `Allocation draws add up to $${Utils.formatAmount(total)}, more than the $${Utils.formatAmount(expense)} expense.`;
     }
     // A lone bucket covering the whole expense is stored WITHOUT a figure of
-    // its own — the pre-split shape, where the draw simply is the expense. That
-    // is what keeps a later amount edit (here, in bank reconciliation's "fix
-    // amount", anywhere) flowing straight through to the bucket instead of
-    // freezing at the figure that happened to be in this box.
+    // its own (amount: null), where the draw simply is the expense. That keeps
+    // a later amount edit (here, in bank reconciliation's "fix amount",
+    // anywhere) flowing straight through to the bucket instead of freezing at
+    // the figure that happened to be in this box.
     if (!error && rows.length === 1 && total >= expense - 0.005) {
       rows[0].amount = null;
     }
@@ -721,10 +714,8 @@ Object.assign(TransactionUI.prototype, {
   formatShortDisplayDate(dateString) {
     // Callers pass map keys (always well-formed) but also stored FIELDS —
     // `originalDate`, `closeoutDate` — which nothing coerces on the way in from
-    // an import or a cloud merge. A non-string threw on .split, and this runs
-    // inside showTransactionDetails' loop, so that day's modal fell back to the
-    // read-only version. Anything that isn't a Y-M-D string formats as empty
-    // rather than as "undefined-undefined-…".
+    // an import or a cloud merge. Anything that isn't a Y-M-D string formats as
+    // empty rather than throwing (or rendering "undefined-undefined-…").
     if (typeof dateString !== "string" || !dateString) return "";
     const [year, month, day] = dateString.split("-");
     if (!year || !month || !day) return "";
@@ -881,12 +872,9 @@ Object.assign(TransactionUI.prototype, {
           if (maxOccurrences) {
             // Only a usable cap is written. parseInt("") is NaN, which
             // JSON.stringify persists as null and the expansion engine reads
-            // through `rt.maxOccurrences || null` as "no end" — so clearing the
-            // field turned "end after N occurrences" into a series that never
-            // ends, silently, and every projected balance carried it forever.
-            // addTransaction rejects that input before we get here (as it does
-            // for the custom interval); this is the belt to that brace, and it
-            // matches collectDebtAdvancedOptions, which has always guarded.
+            // through `rt.maxOccurrences || null` as "no end". addTransaction
+            // rejects that input before we get here; this is the belt to that
+            // brace, matching collectDebtAdvancedOptions.
             const parsed = parseInt(maxOccurrences.value, 10);
             if (Number.isFinite(parsed) && parsed > 0) {
               recurringTransaction.maxOccurrences = parsed;

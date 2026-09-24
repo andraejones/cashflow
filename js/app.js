@@ -69,12 +69,10 @@ class CashflowApp {
 
 
   async init() {
-    // Wired before the cloud round trip below, not after. index.html's Add
-    // Transaction button is an inline onclick="addTransaction()", so until this
-    // is assigned the button throws ReferenceError and does nothing visible.
-    // The startup sync can sit for a long time — a slow network, or a
-    // credentials dialog waiting on the user — and the calendar is interactive
-    // behind it the whole time.
+    // Wired before the cloud round trip below, not after: index.html's Add
+    // Transaction button is an inline onclick="addTransaction()", and the
+    // startup sync can sit for a long time (a slow network, or a credentials
+    // dialog waiting on the user) while the calendar is interactive behind it.
     window.addTransaction = () => this.transactionUI.addTransaction();
     try {
       Utils.cleanUpHtmlArtifacts();
@@ -205,13 +203,11 @@ class CashflowApp {
     // Both sweeps above decide on "a later occurrence dated on/before today",
     // and on a cold start (or right after a sync imports a merged copy) that
     // later occurrence is usually a pure expansion — never persisted, so it
-    // does not exist until generateCalendar expands its month. A drawn rolling
-    // bucket whose period turned over while the app was closed therefore
-    // survived the first render and was reserved ALONGSIDE its supersedor,
-    // pulling every balance and the 30-day Minimum down by its remainder until
-    // something happened to re-render. Re-running them against the expanded
-    // map settles it on the render the user actually sees; they change nothing
-    // (and cost one scan each) on every render that isn't a turnover.
+    // does not exist until generateCalendar expands its month. Re-running them
+    // against the expanded map retires a drawn rolling bucket whose period
+    // turned over while the app was closed on the render the user actually
+    // sees; they change nothing (and cost one scan each) on every render that
+    // isn't a turnover.
     const settledLate = this.store.autoSettleExpiredRecurring();
     const closedOutLate = this.store.closeOutExpiredAllocations();
     if (closedOutLate) {
@@ -244,15 +240,14 @@ class CashflowApp {
     });
 
     // An unreadable _lastModified (nothing coerces it on the way in from an
-    // import or a cloud merge) parses to an Invalid Date, whose getTime() is
-    // NaN — and `tb - ta` is then NaN, which is not a valid comparator result:
-    // the list comes back in an arbitrary order, so the "recent" entries are
-    // not the recent ones. Sort unreadable stamps to the end instead.
+    // import or a cloud merge) parses to an Invalid Date, and `tb - ta` is then
+    // NaN, which is not a valid comparator result. Sort unreadable stamps to
+    // the end instead.
     const modifiedAt = (entry) => {
       const time = new Date(entry.transaction._lastModified || 0).getTime();
       // A finite sentinel, not -Infinity: two unreadable stamps would make
-      // `b - a` NaN again, which is the very thing this replaced. Real stamps
-      // are >= 0 (a missing one reads as the epoch), so -1 sorts them last.
+      // `b - a` NaN. Real stamps are >= 0 (a missing one reads as the epoch),
+      // so -1 sorts them last.
       return Number.isFinite(time) ? time : -1;
     };
     items.sort((a, b) => modifiedAt(b) - modifiedAt(a));
@@ -732,8 +727,7 @@ class CashflowApp {
               // merged into it (a merge lets newer remote items win and leaves
               // the restore partial, or resurrects items deleted after the
               // backup). replaceRemote makes saveToCloud skip its GET-merge and
-              // PATCH local data straight up. (Nulling _lastKnownETag no longer
-              // does this — saveToCloud merges even without a stored ETag.)
+              // PATCH local data straight up.
               if (this.cloudSync && this.cloudSync.autoSyncEnabled) {
                 this.cloudSync.cancelPendingCloudSave();
                 this.cloudSync
@@ -865,10 +859,8 @@ function resumeAppSync() {
   }
   // Not ready to reposition (still initializing, or backgrounded before the
   // app was ever built). Drop the hide timestamp anyway: startup already
-  // renders the current month, so nothing is lost — but leaving it set means
-  // the next resume-ish event, including an "online" blip fired while the user
-  // is browsing some other month, reads it as a fresh absence and yanks the
-  // calendar back to today.
+  // renders the current month, and a stale stamp would make the next
+  // resume-ish event (even an "online" blip) yank the calendar back to today.
   appHiddenAt = null;
 }
 

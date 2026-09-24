@@ -17,14 +17,12 @@ class CalculationService {
   // A single row's money, as a finite number. Anything unusable (a missing
   // `amount` key, null, a string, ±Infinity) contributes 0.
   //
-  // This has to happen PER ROW, before the row joins a subtotal. roundToCents
-  // maps NaN to 0 — a deliberate safety net — but `subtotal + undefined` is
-  // NaN, so feeding an unusable row straight into the running sum discarded
-  // every earlier row on that day too: three income rows of 1000 / (none) / 250
-  // reported 250, not 1250. No error, no warning, just a wrong number on the
-  // calendar. TransactionStore._repairWalkAmounts normalizes stored data on
-  // load and import; this covers the same shape arriving any other way (a
-  // cloud merge, a row built at runtime) and keeps the damage to the one row.
+  // This has to happen PER ROW, before the row joins a subtotal:
+  // `subtotal + undefined` is NaN, and roundToCents maps NaN to 0, so one bad
+  // row would discard every earlier row on that day too.
+  // TransactionStore._repairWalkAmounts normalizes stored data on load and
+  // import; this covers the same shape arriving any other way (a cloud merge,
+  // a row built at runtime) and keeps the damage to the one row.
   _rowAmount(value) {
     const num = Number(value);
     return Number.isFinite(num) ? num : 0;
@@ -48,33 +46,20 @@ class CalculationService {
   // snowball projection's getDayFlow. (updateMonthlyBalances does not need it:
   // it expands every month up front, before it walks anything.)
   //
-  // The per-date cache is deliberately NOT cleared. Leaving it is the
-  // pre-index behavior — an already-answered date kept its answer, an unseen
-  // one was rescanned — and matching that exactly is what keeps these walks'
-  // results unchanged. See TEST 78.
+  // The per-date cache is deliberately NOT cleared: an already-answered date
+  // keeps its answer and an unseen one is recomputed.
   invalidateReservedIndex() {
     this._reservedIndex = null;
     this._cachedReservedTotals = {};
   }
 
-  // Prefix-summed reserve totals, built once per cache generation.
+  // Prefix-summed reserve totals, built once per cache generation, so each
+  // lookup is a binary search rather than a scan of the whole transactions
+  // map (walkDays asks once per Ending Balance anchor, which would otherwise
+  // be quadratic in history length).
   //
-  // getReservedTotalOnOrBefore used to re-scan the ENTIRE transactions map on
-  // every call. walkDays calls it once per Ending Balance anchor, and
-  // updateMonthlyBalances walks every month from the earliest transaction
-  // forward — so the cost was (number of anchors) x (size of the whole
-  // dataset), i.e. quadratic in history length for anyone who reconciles
-  // regularly. On a six-year dataset it was the single largest cost of a
-  // render, and it only ever gets worse, because the history only ever grows.
-  // Building the index is one pass; each lookup is then a binary search.
-  //
-  // The fold is in SORTED date order with a round after every transaction,
-  // matching the old per-transaction rounding. The old scan folded in the
-  // transactions map's own key-insertion order, which is not deterministic
-  // across a load/merge/runtime-add — for cent-valued money the two agree
-  // exactly, and where they could differ (sub-cent amounts) sorted order is
-  // the defensible one. TEST 74 pins the equivalence against a brute-force
-  // reference over randomized data, sub-cent amounts included.
+  // The fold is in SORTED date order with a round after every transaction, so
+  // the result does not depend on the map's key-insertion order.
   _reservedTotalIndex() {
     if (this._reservedIndex) {
       return this._reservedIndex;
@@ -121,8 +106,7 @@ class CalculationService {
       return this._cachedReservedTotals[dateString];
     }
     // Binary search for the last indexed date on/before dateString; its prefix
-    // sum IS the answer. See _reservedTotalIndex for why this is an index
-    // rather than a scan.
+    // sum IS the answer.
     const { dates, prefix } = this._reservedTotalIndex();
     let lo = 0;
     let hi = dates.length - 1;
@@ -180,10 +164,8 @@ class CalculationService {
       // Only rows that exist in their own right define the range — never a
       // pure recurring expansion (the rows _filterPersistedTransactions drops).
       // Those are this method's own OUTPUT: it expands one month past the
-      // latest date, so counting them made every call reach a month further
-      // than the last — one more month expanded, walked and persisted into
-      // monthlyBalances on every render, for as long as the session lasted.
-      // Months a series actually covers are still reached through its
+      // latest date, so counting them would grow the range by a month on every
+      // call. Months a series actually covers are still reached through its
       // startDate below and the viewed-month floor.
       const list = transactions[dateString];
       if (
@@ -196,15 +178,9 @@ class CalculationService {
         continue;
       }
       // Parse through the shared guard, and skip anything it can't read. These
-      // are raw MAP KEYS: nothing validates them on the way in from an import
-      // or a cloud merge, so one junk key ("garbage", a truncated "2026-08")
-      // used to become an Invalid Date here. Every later `<` / `>` against NaN
-      // is false, so once earliestDate/latestDate held that Invalid Date they
-      // never recovered — and only when the junk key happened to come FIRST in
-      // key-insertion order, which makes it intermittent. The month list then
-      // collapsed to the single key "NaN-NaN": every real month lost its entry,
-      // so each month restarted from 0 instead of carrying the prior month's
-      // close. Silent, and wrong by the whole balance.
+      // are raw MAP KEYS that nothing validates on the way in from an import or
+      // a cloud merge, and an Invalid Date here would poison earliestDate /
+      // latestDate (every `<` / `>` against NaN is false).
       const transactionDate = Utils.parseDateString(dateString);
       if (!transactionDate) {
         continue;
@@ -219,19 +195,10 @@ class CalculationService {
     // A recurring series can begin BEFORE the oldest row in the map, and its
     // early occurrences only exist once the month is expanded — which happens
     // here, for the months in this range. Deriving the range from map keys
-    // alone therefore left those months unexpanded and their income/expense out
-    // of the chain, until the user happened to page back to one: expanding it
-    // then was permanent, so every balance from that month forward — including
-    // today's and the 30-day Minimum — jumped. A monthly $1000 paycheck started
-    // four months before the oldest entry moved the Minimum from 700 to 3700
-    // just by paging back and returning. (Anchored users never saw it: an
-    // Ending Balance resets the walk, so pre-anchor months can't reach today.)
-    //
-    // Including every series' startDate makes the range depend only on the data
-    // itself, so the chain is the same however the user navigated to get here.
-    // Symmetric with the map-key scan above, including its unbounded reach: a
-    // 1990 startDate costs the same extra months a 1990 transaction already
-    // does (~0.5 ms per empty month).
+    // alone would leave those months out of the chain until the user paged
+    // back to one, which would then permanently move every later balance.
+    // Including every series' startDate makes the range depend only on the
+    // data itself, so the chain is the same however the user navigated here.
     this.store.getRecurringTransactions().forEach((rt) => {
       const start = rt && Utils.parseDateString(rt.startDate);
       if (!start) {
@@ -460,7 +427,6 @@ class CalculationService {
   // zero iterations and returns the seeds unchanged. Never invalidates caches;
   // callers own invalidation. `ensureRecurringExpansion` expands each month
   // once, immediately before computing that month's first day.
-  // See [[balance-walk-paths]].
   walkDays(startDateString, endDateString, {
     seedBalance,
     seedUnsettled = 0,
@@ -495,11 +461,8 @@ class CalculationService {
           if (!expandedMonths.has(monthKey)) {
             this.recurringManager.applyRecurringTransactions(year, month - 1);
             expandedMonths.add(monthKey);
-            // The map just grew; anything the index already summed is stale.
-            // Without this, an anchor in a later month read a reserve total
-            // computed before that month existed — a walk over three months
-            // with a monthly reserve reported the anchor's balance $600 too
-            // high, silently.
+            // The map just grew; anything the index already summed is stale,
+            // and a later anchor would reset the balance too high.
             this.invalidateReservedIndex();
           }
         }
@@ -616,7 +579,7 @@ class CalculationService {
   // labels it "Balance before holdbacks" for that reason; the field name is
   // historical. `balanceExcludingAllocations` releases only the reserves.
   // Kept here so the day-detail modal reuses the same walk instead of
-  // re-deriving it. See [[balance-walk-paths]].
+  // re-deriving it.
   getDayBalanceBreakdown(dateString) {
     const [year, month] = dateString.split("-").map(Number);
     const monthStartStr = `${year}-${String(month).padStart(2, "0")}-01`;

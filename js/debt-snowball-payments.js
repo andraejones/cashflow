@@ -33,13 +33,11 @@ Object.assign(DebtSnowballUI.prototype, {
   // Bring each debt's minimum-payment series back onto one schedule with the
   // debt record. The projection (and the payoff endDate) schedule minimums
   // from buildDebtRecurringTransaction(debt), while the calendar expands the
-  // stored series — so any drift between the two made the snowball pay a
+  // stored series — so any drift between the two makes the snowball pay a
   // minimum on a different day than the calendar does, and its floor check
-  // read checking on the wrong side of that payment. Every current writer
+  // reads checking on the wrong side of that payment. Every current writer
   // keeps them identical (saveDebt rewrites the series from the debt), but
-  // data from older builds did not: bank reconcile's "Move series" used to
-  // shift a debt's series start (a debt due the 3rd kept paying on the 2nd on
-  // the calendar, the 3rd in the plan, by $262 every month).
+  // data from older builds may not.
   //
   // A series whose only difference is its start date adopts that start into
   // the debt, keeping the day the calendar pays on (it is what the user
@@ -144,10 +142,9 @@ Object.assign(DebtSnowballUI.prototype, {
       // saveDebt records from the due day the user typed. Inferring it from
       // the start date (still the fallback for debts saved before the flag)
       // cannot tell a due day of 31 from one of 30 whose first due month
-      // happens to have 30 days — or a Feb 28 start due the 28th — so those
-      // paid on the 31st of every long month instead. Set explicitly on the
-      // series, never inferred at expansion time, so a later due-day edit can
-      // never leave a stale last-day flag behind.
+      // happens to have 30 days. Set explicitly on the series, never inferred
+      // at expansion time, so a later due-day edit can never leave a stale
+      // last-day flag behind.
       lastDayOfMonth:
         recurrence === "monthly" &&
         !dueDayPattern &&
@@ -268,11 +265,9 @@ Object.assign(DebtSnowballUI.prototype, {
         payoffEnd = Utils.formatDateString(lastDay);
         // ...but never before a real payment already made this month. The
         // payment that cleared the debt is often days old (minimum due the
-        // 3rd, today the 5th); an earlier endDate puts that historical row
-        // outside the recurrence window, so cleanupOrphanedDebtMinimums
-        // deletes it — erasing real spending from the balance walk and
-        // flipping the debt back to unpaid, with endDate oscillating between
-        // the two states on every render.
+        // 3rd, today the 5th); an earlier endDate would put that historical
+        // row outside the recurrence window, so cleanupOrphanedDebtMinimums
+        // would delete it and flip the debt back to unpaid.
         const lastPaid = this.getLatestPaidMinimumOccurrence(debt);
         if (lastPaid && lastPaid > payoffEnd) {
           payoffEnd = lastPaid;
@@ -341,9 +336,8 @@ Object.assign(DebtSnowballUI.prototype, {
     // Rows dated before the projection start are historical facts — payments
     // already reflected in the real running balance — and must never be pruned
     // even when the debt is already at zero (same boundary rule as
-    // adjustMinimumPaymentTransactions). Without this, a debt cleared by a
-    // minimum payment earlier in the current month gets that very payment
-    // deleted here the moment its balance reads zero.
+    // adjustMinimumPaymentTransactions); otherwise the very payment that
+    // cleared a debt earlier this month would be deleted.
     const now = new Date();
     const projectionStartString = Utils.formatDateString(
       new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
@@ -387,25 +381,6 @@ Object.assign(DebtSnowballUI.prototype, {
     return changed;
   },
 
-  // Remove debt minimum-payment instances that the recurrence would no longer
-  // generate: occurrences that fall outside the recurring's [startDate,endDate]
-  // window, or duplicate occurrences on the same date. These strand when a
-  // debt's recurrence window changes — Convert-to-Debt deriving a new start
-  // date, a due-date edit, or the payoff-driven endDate sync. Because the
-  // snowball engine flags every minimum it adjusts (zeroed/partial/hidden) with
-  // modifiedInstance, the recurring manager treats them as hand-edits and never
-  // deletes or regenerates them, so they persist with stale amounts before the
-  // start date or past payoff, corrupting "paid so far" and the balance walk.
-  // Scans all dates (strandings can sit far outside the materialized horizon)
-  // and runs once per render via ensureSnowballPaymentsForHorizon, which then
-  // re-expands and re-adjusts a clean set within the current window.
-  //
-  // Also sweeps snowball payoff rows whose debt no longer exists.
-  // syncSnowballTransactionsForMonth only reconciles rows stamped with a month
-  // it is actually materializing (the current month + the forward horizon), so
-  // a payoff the user had already materialized further out survives deleting
-  // its debt and keeps showing as a real expense on those far-future days until
-  // they happen to navigate back to that month.
   // Is this materialized instance outside the window its recurrence would
   // actually generate? The two bounds are judged on DIFFERENT dates, and that
   // asymmetry is the whole point:
@@ -421,12 +396,8 @@ Object.assign(DebtSnowballUI.prototype, {
   //     date computeMinimumPaymentEndDate writes there (it anchors the payoff
   //     to the payment's "real (possibly adjusted) date").
   //
-  // Using the scheduled date for BOTH is what broke: a final payment scheduled
-  // on a Sunday and adjusted back to the Friday endDate was re-created by every
-  // expansion (landing 27th ≤ end 27th) and deleted again by every cleanup
-  // (scheduled 29th > end 27th). Two components disagreeing forever, once per
-  // render — the debt's last payment flickered in and out and the running
-  // balance moved by its amount each time.
+  // Using one date for both would make expansion and cleanup disagree forever
+  // about a business-day-adjusted final payment.
   _outsideRecurrenceWindow(rt, scheduledDate, landingDate) {
     if (!rt) return false;
     if (rt.startDate && scheduledDate < rt.startDate) return true;
@@ -434,6 +405,22 @@ Object.assign(DebtSnowballUI.prototype, {
     return false;
   },
 
+  // Remove debt minimum-payment instances that the recurrence would no longer
+  // generate: occurrences that fall outside the recurring's [startDate,endDate]
+  // window, or duplicate occurrences on the same date. These strand when a
+  // debt's recurrence window changes — Convert-to-Debt deriving a new start
+  // date, a due-date edit, or the payoff-driven endDate sync. Because the
+  // snowball engine flags every minimum it adjusts (zeroed/partial/hidden) with
+  // modifiedInstance, the recurring manager treats them as hand-edits and never
+  // deletes or regenerates them, so they would persist with stale amounts.
+  // Scans all dates (strandings can sit far outside the materialized horizon)
+  // and runs once per render via ensureSnowballPaymentsForHorizon, which then
+  // re-expands and re-adjusts a clean set within the current window.
+  //
+  // Also sweeps snowball payoff rows whose debt no longer exists:
+  // syncSnowballTransactionsForMonth only reconciles the months it is
+  // materializing, so a payoff materialized further out would otherwise
+  // survive deleting its debt.
   cleanupOrphanedDebtMinimums() {
     const transactions = this.store.getTransactions();
     const recurringById = new Map(
@@ -553,10 +540,8 @@ Object.assign(DebtSnowballUI.prototype, {
     // is baked into the starting balances/checking. So reconcile only the
     // walk's window: instances dated before the projection start are historical
     // facts (real payments already reflected in every balance) and must never
-    // be zeroed or re-amounted against a future-only target. Without this
-    // boundary, a multi-occurrence month (semi-monthly, weekly) straddling
-    // today gets its already-made early payment trimmed away to match a target
-    // that never included it.
+    // be zeroed or re-amounted against a future-only target (e.g. the early
+    // payment of a semi-monthly month straddling today).
     const now = new Date();
     const projectionStartString = Utils.formatDateString(
       new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
@@ -574,9 +559,8 @@ Object.assign(DebtSnowballUI.prototype, {
           return;
         }
         // A skipped occurrence pays nothing, and the projection's target leaves
-        // it out — so it must not count toward the month's total either, or a
-        // semi-monthly debt with one payment skipped had its OTHER, real
-        // payment zeroed to make the sum match.
+        // it out — so it must not count toward the month's total either, or the
+        // month's OTHER, real payment would be zeroed to make the sum match.
         if (this.store.isTransactionSkipped(dateKey, t.recurringId) === true) {
           return;
         }
@@ -592,8 +576,7 @@ Object.assign(DebtSnowballUI.prototype, {
 
     // Promoting an expanded recurring instance to a hand-edit (modifiedInstance)
     // must also assign an id + _lastModified, or the cloud merge (_mergeById)
-    // drops it on the next sync — silently reverting the hide/reduce until
-    // re-expansion self-heals. Mirrors setTransactionSettled /
+    // drops it on the next sync. Mirrors setTransactionSettled /
     // autoSettleExpiredRecurring, which both promote expansions the same way.
     const markModified = (transaction) => {
       transaction.modifiedInstance = true;
@@ -618,8 +601,7 @@ Object.assign(DebtSnowballUI.prototype, {
         // moved later, so more minimums are now genuinely due). Clearing the
         // hand-edit flags lets the next re-expansion regenerate those instances
         // at their definition amount; a later adjust pass then re-reduces only
-        // what's truly needed. Without this a zeroed minimum (currentTotal 0)
-        // is trapped here forever and a real payment goes silently missing.
+        // what's truly needed. Otherwise a zeroed minimum would be trapped here.
         if (currentTotal < targetTotal - epsilon) {
           let released = false;
           occurrences.forEach(({ transaction }) => {
@@ -633,11 +615,8 @@ Object.assign(DebtSnowballUI.prototype, {
           // The released row is now a plain expansion, so the next expansion
           // clears it — and a cached month replays only what it captured,
           // which never includes a row that was a modified instance at
-          // capture time (every cold start, since the hidden row is
-          // persisted). Replaying that cache dropped the occurrence
-          // outright: a real minimum payment gone from the calendar and
-          // every balance for the rest of the session. Force a full
-          // re-expansion so it comes back at its definition amount.
+          // capture time. Force a full re-expansion so it comes back at its
+          // definition amount rather than disappearing.
           if (
             released &&
             this.recurringManager &&
@@ -651,9 +630,6 @@ Object.assign(DebtSnowballUI.prototype, {
       // Allocate the target chronologically: the walk pays minimums in date
       // order until the payoff day and suppresses everything after it, so the
       // earliest occurrences are the ones that were (or will be) actually paid.
-      // Allocating from the end instead would keep a minimum dated AFTER the
-      // payoff and zero the pre-payoff one — payments shown on days the walk
-      // never paid them.
       let remaining = targetTotal;
       for (let i = 0; i < occurrences.length; i++) {
         const { transaction } = occurrences[i];
@@ -742,9 +718,8 @@ Object.assign(DebtSnowballUI.prototype, {
         }
         const expected = expectedByDebtId.get(t.debtId);
         // Drop rows that are no longer expected, drifted to the wrong date, or
-        // duplicate an expected payment we already matched. The last condition
-        // self-heals previously materialized duplicate snowball rows, which
-        // otherwise persist forever and double-count as real outflows.
+        // duplicate an expected payment we already matched (a duplicate would
+        // double-count as a real outflow).
         if (
           !expected ||
           expected.dateString !== dateKey ||

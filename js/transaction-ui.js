@@ -43,12 +43,10 @@ class TransactionUI {
 
   initEventListeners() {
     // Bind ONLY the close buttons of the two modals this class owns. A blanket
-    // document.querySelectorAll(".close") also captured #appModalClose and the
-    // Recent/Allocated/Reconcile/Notes close buttons, so
-    // dismissing a confirmation dialog opened from the day modal tore the day
-    // modal down with it (and reset the half-filled add form). It also
-    // overwrote the Notes modal's inline onclick, since .onclick replaces
-    // rather than adds.
+    // document.querySelectorAll(".close") would also capture #appModalClose and
+    // the other modals' close buttons, so dismissing a confirmation opened from
+    // the day modal would tear the day modal down with it (and .onclick would
+    // replace the Notes modal's inline handler).
     this._ownedModalIds().forEach((modalId) => {
       const modal = document.getElementById(modalId);
       if (!modal) return;
@@ -64,20 +62,18 @@ class TransactionUI {
     // a day modal opened from the reconcile report) owns Escape first, exactly
     // as the other modals in the app already do via ModalManager.topModal().
     //
-    // CAPTURE phase, like every other modal's Escape handler here. In the
-    // bubble phase the dialog's own handler runs first — it is on a descendant
-    // of document — and by the time this ran, that dialog had already popped
-    // itself off the stack, so topModal() reported the day modal and the guard
-    // waved the teardown through. Capture sees the stack as it was.
+    // CAPTURE phase, like every other modal's Escape handler here: in the
+    // bubble phase the dialog's own handler would already have popped itself
+    // off the stack, so topModal() would report the day modal. Capture sees
+    // the stack as it was.
     this._boundEscapeHandler = (event) => {
       if (event.key !== "Escape") return;
       if (!this._ownsTopModal()) return;
       // The description autocomplete owns the first Escape while its list is
       // open: dismiss the suggestions, keep the half-filled form. That decision
-      // has to be made HERE. handleDescriptionKeydown is bound to the input,
-      // which is a descendant of document — so this capture-phase handler runs
-      // first, and its stopPropagation() came too late to stop closeModals()
-      // from tearing the modal down and wiping the entry the user was typing.
+      // has to be made HERE — this capture-phase handler runs before
+      // handleDescriptionKeydown on the input, so stopping propagation there
+      // would come too late.
       const suggestions = document.getElementById("descriptionSuggestions");
       if (suggestions && !suggestions.hidden) {
         event.preventDefault();
@@ -159,10 +155,8 @@ class TransactionUI {
   // plain parseable number (no thousands separators) so addTransaction's
   // parseFloat keeps working. Clears to empty when no digits remain.
   //
-  // A leading "-" is preserved. Stripping it (the field is type="text", so the
-  // browser doesn't) silently flipped the sign of an overdrawn Ending Balance:
-  // typing -42.10 recorded +42.10 and the reconciliation anchor was off by
-  // twice the overdraft with nothing to show for it. Income/expense still
+  // A leading "-" is preserved (the field is type="text", so the browser
+  // won't): an overdrawn Ending Balance is negative. Income/expense still
   // reject negatives in addTransaction, which is the right place to say so.
   formatAmountAsCents(el) {
     const negative = el.value.trim().startsWith("-");

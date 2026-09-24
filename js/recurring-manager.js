@@ -44,11 +44,10 @@ class RecurringTransactionManager {
 
   // Drop a date's pure recurring expansions (regenerated on every render) while
   // preserving hand-edited modified instances. A row that carries a recurringId
-  // but is NOT a modifiedInstance yet still has a persisted `id` is an anomaly:
-  // its hand-edit flag was cleared elsewhere (e.g. the snowball un-hide branch)
-  // while the synced id lingered. Dropping it silently lets a cloud sync-merge
-  // resurrect the remote copy (deletion-tombstones rule), so tombstone its id.
-  // Pure expansions are id-less and never persisted, so they need no tombstone.
+  // but is NOT a modifiedInstance yet still has a persisted `id` is an anomaly
+  // (its hand-edit flag was cleared while the synced id lingered); tombstone
+  // its id so a sync-merge can't resurrect the remote copy. Pure expansions are
+  // id-less and never persisted, so they need no tombstone.
   _clearRecurringExpansions(transactions, dateString) {
     if (!transactions[dateString]) {
       return;
@@ -127,9 +126,8 @@ class RecurringTransactionManager {
   }
 
   // How many whole `stepDays` intervals it takes to reach or pass `target` from
-  // `startDate`. Replaces the step-a-period-at-a-time catch-up loops in the
-  // day-stepped recurrences, which were O(distance) and therefore made a whole
-  // render O(months x history). Both dates are normalised to noon by
+  // `startDate` — O(1) instead of stepping a period at a time, which would make
+  // a render O(months x history). Both dates are normalised to noon by
   // daysBetween, so DST cannot shift the count.
   _catchUpSteps(startDate, target, stepDays) {
     const days = this.daysBetween(startDate, target);
@@ -205,12 +203,10 @@ class RecurringTransactionManager {
   // Check if a date is a US banking holiday.
   //
   // A holiday's OBSERVED date can fall in the previous calendar year: when
-  // Jan 1 lands on a Saturday, New Year's Day is observed on Dec 31 — which
-  // getUSBankingHolidays files under the January year, not December's. Looking
-  // only at the date's own year therefore missed it, and a business-day
-  // adjustment happily scheduled a payment on a day the banks are closed
-  // (Dec 31 2027, Dec 31 2032, …). December dates also consult the next year's
-  // list; that list is cached, so the extra lookup happens once per year.
+  // Jan 1 lands on a Saturday, New Year's Day is observed on Dec 31, which
+  // getUSBankingHolidays files under the January year. So December dates also
+  // consult the next year's list; that list is cached, so the extra lookup
+  // happens once per year.
   isUSBankingHoliday(date) {
     const year = date.getFullYear();
     const sameDay = (holiday) =>
@@ -366,17 +362,12 @@ class RecurringTransactionManager {
 
     this.store.getRecurringTransactions().forEach((rt) => {
       const startDate = Utils.parseDateString(rt.startDate);
-      // A series with no usable start date has no schedule to expand. Skipping
-      // it here is the ONLY place this can be caught cheaply: the guard below
-      // is `startDate <= targetEndOfMonth`, and `null <= aDate` coerces null to
-      // 0 and the date to its timestamp — so it is always true. Every one of
-      // the ten apply*Recurrence branches then dereferenced the null
-      // (getFullYear/getMonth/daysBetween) and threw, which takes
-      // applyRecurringTransactions down, and with it updateMonthlyBalances and
-      // the whole calendar render: a blank app with no way back. The form
-      // always supplies a start date, but recurring definitions are not
-      // normalized on the way in from an import or a cloud merge (debts are,
-      // via _normalizeDebt), so one bad value in a restored backup was enough.
+      // A series with no usable start date has no schedule to expand, and this
+      // is the only place to catch it cheaply: the guard below is
+      // `startDate <= targetEndOfMonth`, and `null <= aDate` is always true, so
+      // every apply*Recurrence branch would then dereference the null and take
+      // the calendar render down. Recurring definitions are not normalized on
+      // the way in from an import or a cloud merge.
       if (!startDate) {
         console.warn(
           `Recurring transaction ${rt && rt.id} has no usable startDate ` +
@@ -639,19 +630,14 @@ class RecurringTransactionManager {
     // Replaying a cached month can put a rolling-allocation bucket back on the
     // board, and the supersede rule is cross-month: whichever occurrence is the
     // LATEST on/before today wins, so re-adding one can retire an occurrence in
-    // some OTHER month. The collapse pass ran only on the full-expansion path,
-    // so when the supersedor's month happened to be a cache HIT nothing ever
-    // retired the earlier bucket — its reserve was subtracted from every
-    // projected balance for good. That is not hypothetical: any path that
-    // replaces the transactions map wholesale (a cloud merge importing the
-    // merged copy) drops the ephemeral expansions while leaving these caches
-    // populated, so the very next render replays them in this exact shape.
+    // some OTHER month. Any path that replaces the transactions map wholesale
+    // (a cloud merge importing the merged copy) drops the ephemeral expansions
+    // while leaving these caches populated, so the next render replays them in
+    // exactly this shape and the collapse must run here too.
     //
     // Gated on actually having re-added a live-eligible bucket, which is an
-    // O(cached rows) check: without that guard this would run a full-dataset
-    // pass per expanded month on every render — the quadratic cost the
-    // single-pass rewrite removed. Users with no rolling allocation never even
-    // reach the guard's true branch.
+    // O(cached rows) check; running the full-dataset pass per expanded month on
+    // every render would be quadratic in history.
     if (addedLiveRollingBucket) {
       this._collapseSupersededRollingAllocations();
     }
@@ -676,10 +662,8 @@ class RecurringTransactionManager {
     // (allocated, no auto close-out). This pass only ever removes pure
     // expansions — no id, not a modified instance — and a pure expansion's
     // flags always come from its definition, so checking the definitions is
-    // exactly equivalent and costs O(series). The scan below is O(every
-    // transaction ever stored) and runs once per expanded month, which made it
-    // the single largest cost of a render on a multi-year dataset (quadratic in
-    // history length) even for users with no allocations at all.
+    // exactly equivalent and costs O(series) instead of a full-dataset scan
+    // per expanded month.
     const hasRollingAllocationSeries = this.store
       .getRecurringTransactions()
       .some((rt) => rt && rt.allocated === true && rt.autoCloseout !== true);
@@ -693,22 +677,16 @@ class RecurringTransactionManager {
 
     // ONE pass over the dataset, collecting both things the collapse needs:
     //
-    //  - liveDate: per rolling series, the latest UNSKIPPED occurrence dated
-    //    on/before today. Drawn, id-bearing instances count, so the live date is
-    //    right even when the latest period was drawn from; skipped ones do not,
-    //    because a skipped period set nothing aside (see the note below, and
-    //    closeOutExpiredAllocations, which applies the same rule).
+    //  - liveDate: per rolling series, the latest occurrence dated on/before
+    //    today, skipped or not (see the note below, and
+    //    closeOutExpiredAllocations, which applies the same rule). Drawn,
+    //    id-bearing instances count, so the live date is right even when the
+    //    latest period was drawn from.
     //  - collapsible: per series, the dates carrying a PURE expansion (no id,
     //    not a modified instance) — the only rows this pass may remove.
     //
-    // This used to be two full sweeps of the transactions map, and the second
-    // one walked every row of every date to find the handful that were
-    // superseded. applyRecurringTransactions runs the collapse once per
-    // expanded month and updateMonthlyBalances expands every month from the
-    // earliest transaction forward, so that second sweep cost
-    // (months) x (whole dataset) — quadratic in history length, and after the
-    // reserved-total index it was the largest remaining cost of a render.
-    // Removal now visits only the dates that actually hold a candidate.
+    // The collapse runs once per expanded month, so removal visits only the
+    // dates that actually hold a candidate rather than re-walking every row.
     const liveDate = new Map();
     const collapsible = new Map();
     Object.keys(transactions).forEach((date) => {
@@ -742,8 +720,7 @@ class RecurringTransactionManager {
     if (liveDate.size === 0) return;
 
     // Dates above todayStr can never qualify: removal needs date < live, and
-    // every live date is on/before today — so the old full sweep could not
-    // have reached them either.
+    // every live date is on/before today.
     const affected = new Set();
     collapsible.forEach((dates, recurringId) => {
       const live = liveDate.get(recurringId);
@@ -787,18 +764,13 @@ class RecurringTransactionManager {
     // A superseded bucket is collapsed only once its SUPERSEDOR has been
     // materialized, which happens when a LATER month is expanded — after the
     // earlier month's cache entry was already captured with the bucket still in
-    // it. On the next render that month is a cache hit, _applyCachedTransactions
-    // re-adds the row verbatim (it does not run this pass), and nothing removes
-    // it again: the superseded period's reserve is subtracted from every
-    // projected balance, so the whole forward plan and the 30-day Minimum drop
-    // by the bucket amount from the second render on, permanently and with
-    // nothing on screen to explain it. A monthly rolling allocation resurrects
-    // one bucket per elapsed period.
+    // it. On the next render that month would be a cache hit, and
+    // _applyCachedTransactions would re-add the row verbatim, subtracting the
+    // superseded period's reserve from every projected balance.
     //
-    // Invalidating just the affected months is what keeps this cheap: re-running
-    // the collapse on every cache HIT would make it O(months x whole dataset)
-    // per render again — the quadratic cost the single-pass rewrite removed.
-    // Each month pays one extra expansion, once.
+    // Invalidating just the affected months keeps this cheap: re-running the
+    // collapse on every cache HIT would be O(months x whole dataset) per
+    // render. Each month pays one extra expansion, once.
     staleMonths.forEach((monthKey) => {
       this.expansionCache.delete(monthKey);
     });
@@ -912,9 +884,8 @@ class RecurringTransactionManager {
     const endOfMonth = new Date(year, month + 1, 0, 12, 0, 0);
     let currentDate = new Date(startDate);
     // Skip straight to the first occurrence on/after this month instead of
-    // stepping a week at a time. The loop was O(weeks since startDate) and runs
-    // once per rendered month, so a years-old series made expansion quadratic
-    // in history length. ceil() lands on exactly the date the loop stopped at:
+    // stepping a week at a time (which would be O(weeks since startDate) per
+    // rendered month). ceil() lands on exactly the date the loop would stop at:
     // startDate + steps*7 >= startOfMonth while startDate + (steps-1)*7 < it.
     let occurrenceCount = this._catchUpSteps(startDate, startOfMonth, 7);
     if (occurrenceCount > 0) {
@@ -1041,11 +1012,11 @@ class RecurringTransactionManager {
       return;
     }
     const startDay = startDate.getDate();
-    // "Last day of every month" is an explicit opt-in flag now, not inferred
-    // from the start date. Inferring it caused a bill started on the 30th (or a
-    // Feb-28 start) to silently jump to the 31st in longer months; the flag lets
-    // the user choose. Legacy recurrences that relied on the old inference are
-    // migrated to carry the flag on load (see TransactionStore.loadData).
+    // "Last day of every month" is an explicit opt-in flag, not inferred from
+    // the start date — otherwise a bill started on the 30th (or a Feb-28 start)
+    // would jump to the 31st in longer months. Legacy recurrences that relied
+    // on the inference are migrated to carry the flag on load (see
+    // TransactionStore.loadData).
     const isLastDayOfMonth = rt.lastDayOfMonth === true;
     let targetDay;
 
@@ -1119,12 +1090,11 @@ class RecurringTransactionManager {
     if (Utils.formatDateString(targetDate) < Utils.formatDateString(startDate)) {
       return;
     }
-    // The cap counts real OCCURRENCES, not months. The form lets the start
-    // date be any day and the pattern any Nth weekday, so the start month
-    // often has no occurrence at all (start Jan 20, "1st Monday") — counting
-    // months since the start then spent one of the user's N payments on that
-    // empty month and the series stopped after N−1. countOccurrencesBefore is
-    // the same count the "this and future" split sizes its new cap with.
+    // The cap counts real OCCURRENCES, not months. The start month often has
+    // no occurrence at all (start Jan 20, "1st Monday"), so counting months
+    // would spend one of the user's N payments on that empty month.
+    // countOccurrencesBefore is the same count the "this and future" split
+    // sizes its new cap with.
     if (
       maxOccurrences &&
       this.countOccurrencesBefore(rt, targetDate) >= maxOccurrences
@@ -1440,12 +1410,10 @@ class RecurringTransactionManager {
       return;
     }
     // Same hang, other field. getCustomIntervalDate only knows days/weeks/months
-    // and returns the START date unchanged for anything else — so the
-    // month-stepped catch-up loop below ("while currentDate < startOfMonth")
-    // never advances and the render never returns. The form's select can only
-    // emit the three known units, but recurring definitions arrive unnormalized
-    // from imports and cloud merges (unlike debts, which _normalizeDebt coerces),
-    // so an edited backup carrying "years" is enough to freeze the app.
+    // and returns the START date unchanged for anything else, so the
+    // month-stepped catch-up loop below would never advance. The form's select
+    // can only emit the three known units, but recurring definitions arrive
+    // unnormalized from imports and cloud merges.
     const intervalUnit = rt.customInterval.unit;
     if (
       intervalUnit !== "days" &&
@@ -1563,13 +1531,9 @@ class RecurringTransactionManager {
     const transactions = this.store.getTransactions();
 
     // The day's array is created only when there is actually something to put
-    // in it — see the push at the end. It used to be created up front, before
-    // the allocation guards below, both of which `return` — so every skipped
-    // past auto-close-out or superseded rolling bucket left an EMPTY array
-    // under its date. Those empties widened updateMonthlyBalances' month range
-    // (it derives earliest/latest from the map's keys), showed up in every
-    // scan, and were only swept away incidentally, by an unrelated
-    // full-map loop in _collapseSupersededRollingAllocations.
+    // in it (see the push at the end). The allocation guards below `return`
+    // early, and an empty array left under a date would widen
+    // updateMonthlyBalances' month range and show up in every scan.
     const occurrenceKey = originalDateString || dateString;
     const existingList = transactions[dateString];
     const existingInstance =
@@ -1595,24 +1559,22 @@ class RecurringTransactionManager {
           // — every occurrence it still owns is in the past, and no later one
           // will arrive to supersede the newest. Materializing it would
           // resurrect a bucket that already closed out, at its full definition
-          // amount rather than whatever was left of it, and reserve that money
-          // forever. "Delete all future occurrences" ends the series the day
-          // before the deleted occurrence, so it lands here every time; see
-          // closeOutExpiredAllocations, which retires the ones already stored.
+          // amount, and reserve that money forever. "Delete all future
+          // occurrences" ends the series the day before the deleted
+          // occurrence, so it lands here; closeOutExpiredAllocations retires
+          // the ones already stored.
           if (typeof rt.endDate === "string" && rt.endDate && rt.endDate < todayStr) {
             return;
           }
           // Rolling allocation (no auto close-out): the live bucket is the
           // latest occurrence on/before today and must persist even though its
           // date is in the past. Earlier, superseded periods are forfeited by
-          // closeOutExpiredAllocations and must not be re-materialized (else
-          // re-expansion would resurrect them). A period is superseded when an
-          // UNSKIPPED sibling instance already exists in (dateString, today].
-          // for...in rather than Object.keys().some(): this runs once per
-          // materialized past occurrence of every allocated series, and
-          // Object.keys allocates a fresh array of EVERY date in the dataset
-          // each time. On a multi-year history that allocation, not the
-          // comparison, was the cost. Same short-circuit, same semantics.
+          // closeOutExpiredAllocations and must not be re-materialized. A period
+          // is superseded when a sibling instance already exists in
+          // (dateString, today]. for...in rather than Object.keys().some():
+          // this runs once per materialized past occurrence of every allocated
+          // series, and Object.keys would allocate an array of every date in
+          // the dataset each time.
           let superseded = false;
           for (const d in transactions) {
             if (d <= dateString || d > todayStr) continue;
@@ -1621,8 +1583,7 @@ class RecurringTransactionManager {
               Array.isArray(siblings) &&
               // A skipped sibling supersedes too: the period turned over, it
               // simply set nothing aside (same rule as getAllocations / the two
-              // sweeps). Excluding skips here let a skipped period re-materialize
-              // the one before it, at its full definition amount, every render.
+              // sweeps).
               siblings.some(
                 (t) => t.recurringId === rt.id && t.allocated === true
               )
@@ -1738,10 +1699,8 @@ class RecurringTransactionManager {
           const parsed = this.parseDaySpecificData(rt.daySpecificData);
           if (parsed) {
             // Compared as calendar dates: getNthDayOfMonth returns local
-            // MIDNIGHT while startDate/beforeDate are noon, so comparing the
-            // Date objects dropped an occurrence ON the start date and counted
-            // one ON beforeDate as already past — the split then sized the new
-            // series' cap one payment short (or long).
+            // MIDNIGHT while startDate/beforeDate are noon, so comparing Date
+            // objects would be off by one at both ends.
             const startStr = Utils.formatDateString(startDate);
             const beforeStr = Utils.formatDateString(beforeDate);
             let y = startDate.getFullYear();
@@ -1866,12 +1825,9 @@ class RecurringTransactionManager {
     const recurringTransaction = this.getRecurringTransactionById(recurringId);
 
     // Both scoped edits rewrite the SERIES, so neither can run without its
-    // definition. The "all" branch already returns false when it is missing;
-    // "future" read recurringTransaction.recurrence while building the split
-    // and threw instead, taking the whole edit down. An instance can outlive
-    // its definition (a cloud merge that keeps a modified instance while the
-    // other device's tombstone removes the series), so fall back to editing
-    // just this occurrence rather than failing.
+    // definition. An instance can outlive its definition (a cloud merge that
+    // keeps a modified instance while the other device's tombstone removes
+    // the series), so fall back to editing just this occurrence.
     if (!recurringTransaction) {
       console.warn(
         `Recurring definition ${recurringId} is missing; editing this occurrence only.`
@@ -1895,12 +1851,11 @@ class RecurringTransactionManager {
         : startDate;
       // Month-end clamp. A monthly series due on the 29th-31st lands on the
       // last day of every shorter month, and anchoring the new series on that
-      // clamped occurrence rewrote the pattern the same way: split on Feb 28, a
-      // bill due the 29th became "monthly on the 28th" for good, a day early
-      // every month after. So a clamped occurrence is edited IN PLACE (a
-      // modified instance of the old series) and the new series starts at the
-      // next occurrence instead — which is never clamped, because every month
-      // that follows a short month has 31 days.
+      // clamped occurrence would rewrite the pattern (split on Feb 28, a bill
+      // due the 29th becomes "monthly on the 28th"). So a clamped occurrence is
+      // edited IN PLACE (a modified instance of the old series) and the new
+      // series starts at the next occurrence instead — which is never clamped,
+      // because every month that follows a short month has 31 days.
       const originalStart = Utils.parseDateString(recurringTransaction.startDate);
       let editClickedInPlace = false;
       if (
@@ -2019,18 +1974,12 @@ class RecurringTransactionManager {
         }
       }
       // TRANSFER the free-funds designation — it must move, not be copied, and
-      // it must not be left behind. The store enforces a single holder, so
-      // leaving the flag on the old (now-ended) series while the new one also
-      // carried it would put the most-recently-modified tie-break in charge of
-      // which series the calendar reads. Left behind entirely (the original
-      // bug), the calendar stayed in free-funds mode but resolved the ENDED
-      // series: it showed that series' last bucket — a stale figure — and once
-      // the ended series had no instance on/before today it showed nothing at
-      // all, while the ⭐ toggle still reported the designation as active. The
-      // free-funds number is what the family spends against, so it has to
-      // follow the series they are actually still running. A split that moves
-      // the type off expense leaves no allocation series to designate, so the
-      // flag is dropped rather than transferred.
+      // it must not be left behind. The store enforces a single holder, so a
+      // copy would leave the most-recently-modified tie-break choosing which
+      // series the calendar reads, and a flag left on the ended series would
+      // show that series' stale last bucket (or nothing once it has no
+      // instance on/before today). A split that moves the type off expense
+      // leaves no allocation series to designate, so the flag is dropped.
       if (recurringTransaction.freeFunds === true) {
         delete recurringTransaction.freeFunds;
         if (
@@ -2067,12 +2016,9 @@ class RecurringTransactionManager {
 
         // Floor at 1, never "leave it off". The occurrence being edited IS an
         // occurrence of the new series, so the remainder can never legitimately
-        // be zero — and omitting the field doesn't mean "none left", it means
-        // NO CAP: the capped series the user set up would silently become one
-        // that repeats forever. countOccurrencesBefore is an arithmetic
-        // estimate (business-day adjustments and Nth-weekday rules can put it a
-        // step out), so over-counting by one on the final occurrence is exactly
-        // the case that reached this.
+        // be zero — and omitting the field means NO CAP, not "none left".
+        // countOccurrencesBefore is an arithmetic estimate (business-day
+        // adjustments and Nth-weekday rules can put it a step out).
         newRecurringTransaction.maxOccurrences = Math.max(
           1,
           recurringTransaction.maxOccurrences - occurrencesBefore
