@@ -2154,7 +2154,9 @@ console.log("TEST 31: updateMonthlyBalances pre-expands the forward horizon (cal
 // so their `.balance` figures must agree byte-for-byte on every date. Also guards
 // the reserve add-back invariant: on a day carrying allocation reserves,
 // balanceExcludingAllocations === balance + getReservedTotalOnOrBefore(date)
-// (the "excluding allocations" figure releases exactly the live reserves).
+// (the "excluding allocations" figure releases exactly the live reserves), and
+// allocatedRemaining is exactly that reserve; with unsettledHeld, the modal's
+// rows add back up to the before-holdbacks figure.
 console.log("TEST 33: getDayBalanceBreakdown Shares The Walk And Releases Reserves Correctly");
 {
   const DB_RealDate = Date;
@@ -2206,6 +2208,31 @@ console.log("TEST 33: getDayBalanceBreakdown Shares The Walk And Releases Reserv
     }
     if (Math.abs(bd10.balanceExcludingAllocations - 2800) > 0.001) {
       throw new Error(`balanceExcludingAllocations should be 2800 (1800+1000 reserve), got ${bd10.balanceExcludingAllocations}`);
+    }
+    // "Allocated remaining" is the reserve itself — the same figure the
+    // excluding-allocations row adds back, so the modal's rows reconcile.
+    if (Math.abs(bd10.allocatedRemaining - reserved10) > 0.001 || Math.abs(bd10.allocatedRemaining - 1000) > 0.001) {
+      throw new Error(`allocatedRemaining should be the 1000 reserve, got ${bd10.allocatedRemaining}`);
+    }
+    if (bd10.unsettledHeld !== null) {
+      throw new Error(`unsettledHeld should be null with nothing unsettled, got ${bd10.unsettledHeld}`);
+    }
+
+    // An unsettled $40 on June 12: the Unsettled row holds it back, and the
+    // modal's rows reconcile — before holdbacks = balance + unsettled + allocated.
+    s.addTransaction("2026-06-12", {
+      amount: 40, type: "expense", description: "Pending", settled: false,
+    });
+    calc.invalidateCache();
+    const bd20 = calc.getDayBalanceBreakdown("2026-06-20");
+    if (Math.abs(bd20.unsettledHeld - 40) > 0.001) {
+      throw new Error(`unsettledHeld should be 40, got ${bd20.unsettledHeld}`);
+    }
+    const recomposed = bd20.balance + bd20.unsettledHeld + bd20.allocatedRemaining;
+    if (Math.abs(bd20.balanceWithoutUnsettled - recomposed) > 0.001) {
+      throw new Error(
+        `balanceWithoutUnsettled=${bd20.balanceWithoutUnsettled} must equal balance+unsettled+allocated=${recomposed}`
+      );
     }
     console.log("✅ getDayBalanceBreakdown matches getRunningBalanceForDate and releases reserves exactly");
   } finally {

@@ -577,7 +577,12 @@ class CalculationService {
   // count, and the two holdback-release variants. `balanceWithoutUnsettled`
   // releases BOTH holdbacks (unsettled + allocation reserves) — the modal
   // labels it "Balance before holdbacks" for that reason; the field name is
-  // historical. `balanceExcludingAllocations` releases only the reserves.
+  // historical. `balanceExcludingAllocations` releases only the reserves, and
+  // `allocatedRemaining` is those reserves themselves: the remaining amount
+  // still held across every live allocation bucket as of this date.
+  // `unsettledHeld` is the other holdback: unsettled expenses not yet
+  // reconciled by an anchor. The three reconcile exactly:
+  // balanceWithoutUnsettled = balance + unsettledHeld + allocatedRemaining.
   // Kept here so the day-detail modal reuses the same walk instead of
   // re-deriving it.
   getDayBalanceBreakdown(dateString) {
@@ -611,6 +616,12 @@ class CalculationService {
     const balanceExcludingAllocations = runningAllocatedExpense > 0
       ? this.roundToCents(runningBalance + runningAllocatedExpense)
       : null;
+    const unsettledHeld = runningUnsettledExpense > 0
+      ? this.roundToCents(runningUnsettledExpense)
+      : null;
+    const allocatedRemaining = runningAllocatedExpense > 0
+      ? this.roundToCents(runningAllocatedExpense)
+      : null;
 
     const todayStr = Utils.formatDateString(new Date());
     const isCurrentDay = dateString === todayStr;
@@ -631,6 +642,8 @@ class CalculationService {
       balance: runningBalance,
       balanceWithoutUnsettled,
       balanceExcludingAllocations,
+      unsettledHeld,
+      allocatedRemaining,
       transactionCount,
     };
   }

@@ -1654,6 +1654,11 @@ body.app-locked #calendarOptions {
   font-variant-numeric: tabular-nums;
 }
 
+/* Allocated remaining: a reserve still held — allocation purple, no sign. */
+.modal-balance-value.allocated {
+  color: #7c5cd6;
+}
+
 .modal-balance-total {
   margin-top: 3px;
   padding-top: 4px;

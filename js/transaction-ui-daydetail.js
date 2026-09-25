@@ -9,8 +9,9 @@ Object.assign(TransactionUI.prototype, {
 
   // Render the day-detail modal's balance summary. Shows the running balance
   // plus the same supporting figures the calendar cell surfaces (day expense,
-  // balance before holdbacks, balance excluding allocations, transaction
-  // count), each labeled. Figures come from CalculationService.getDayBalanceBreakdown
+  // balance before holdbacks, the two holdbacks — unsettled and allocated
+  // remaining — balance excluding allocations, transaction count), each
+  // labeled. Figures come from CalculationService.getDayBalanceBreakdown
   // so the modal reuses the calendar's balance walk instead of re-deriving it.
   renderModalBalance(date) {
     const modalBalance = document.getElementById("modalBalance");
@@ -39,6 +40,12 @@ Object.assign(TransactionUI.prototype, {
     }
     if (b.balanceWithoutUnsettled !== null) {
       rows.push(`<div class="modal-balance-row"><span class="modal-balance-label">Balance before holdbacks</span><span class="modal-balance-value">$${Utils.formatAmount(b.balanceWithoutUnsettled)}</span></div>`);
+    }
+    if (b.unsettledHeld !== null) {
+      rows.push(`<div class="modal-balance-row"><span class="modal-balance-label">Unsettled</span><span class="modal-balance-value">$${Utils.formatAmount(b.unsettledHeld)}</span></div>`);
+    }
+    if (b.allocatedRemaining !== null) {
+      rows.push(`<div class="modal-balance-row"><span class="modal-balance-label">Allocated remaining</span><span class="modal-balance-value allocated">$${Utils.formatAmount(b.allocatedRemaining)}</span></div>`);
     }
     if (b.balanceExcludingAllocations !== null) {
       rows.push(`<div class="modal-balance-row"><span class="modal-balance-label">Balance excluding allocations</span><span class="modal-balance-value">$${Utils.formatAmount(b.balanceExcludingAllocations)}</span></div>`);
