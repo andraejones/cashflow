@@ -7899,6 +7899,7 @@ console.log("TEST 93: Every Stored Field Survives Every Wrong Shape");
     calc.updateMonthlyBalances(new Date(Y, M, 1, 12, 0, 0));
     calc.calculateMinimum();
     calc.getDayBalanceBreakdown(ds(Y, M, 5));
+    calc.getBankView(Utils.formatDateString(new Date()));
     calc.getCarriedUnsettledList(ds(Y, M, 20));
     store.getAllocations();
     store.getFreeFundsAllocation();
@@ -7926,7 +7927,7 @@ console.log("TEST 93: Every Stored Field Survives Every Wrong Shape");
       "allocationDraws", "drawsFromRecurringId", "drawsFromPeriodDate", "drawAmount",
       "debtId", "debtRole",
       "debtName", "closeoutDate", "autoCloseout", "snowballMonth", "snowballGenerated",
-      "modifiedInstance", "_lastModified", "id"],
+      "modifiedInstance", "bankStatus", "_lastModified", "id"],
       (p, f, v) => Object.values(p.transactions).forEach((list) => list.forEach((t) => { t[f] = v; }))],
     ["recurring", ["type", "description", "recurrence", "startDate", "endDate", "daySpecific",
       "daySpecificData", "semiMonthlyDays", "semiMonthlyLastDay", "customInterval",
@@ -10577,6 +10578,125 @@ console.log("TEST 122: A Drifted Minimum Series Is Put Back On Its Debt's Schedu
     assert.strictEqual(ui.reconcileMinimumSeriesSchedules(), false, "idempotent");
     s.cancelPendingSave();
     console.log("✅ A drifted minimum series and its debt agree on the payment day");
+  } finally {
+    global.Date = RealDate;
+  }
+}
+
+console.log("TEST 123: The Day Detail Shows What The Bank Shows");
+{
+  // The day-detail figures are the app's projection: they already count
+  // today's scheduled bills, so nothing on screen matched the bank app's
+  // posted/available balances. getBankView answers the bank's figures from
+  // one rule (store.getBankStatus): the latest Ending Balance plus every
+  // CLEARED row after it is posted; PENDING rows come off that for available;
+  // everything else is EXPECTED and itemized. Fixture = the real 2026-09-28.
+  const assert = require("assert");
+  const RealDate = Date;
+  const FIXED = new RealDate(2026, 8, 28, 12, 0, 0);
+  class FrozenDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(FIXED.getTime()); else super(...a); }
+    static now() { return FIXED.getTime(); }
+  }
+  global.Date = FrozenDate;
+  try {
+    localStorage.clear();
+    const s = new TransactionStore();
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    const cs = new CalculationService(s, rm);
+    const add = (d, t) => s.addTransaction(d, t);
+    add("2026-09-23", { amount: 366.76, type: "balance", description: "Ending Balance" });
+    add("2026-09-24", { amount: 10.11, type: "expense", description: "Walmart", settled: true });
+    add("2026-09-27", { amount: 17.22, type: "expense", description: "Chevron", settled: true });
+    add("2026-09-27", { amount: 180.93, type: "balance", description: "Ending Balance" });
+    add("2026-09-28", { amount: 14.3, type: "expense", description: "Walmart", settled: true });
+    add("2026-09-28", { amount: 18.12, type: "expense", description: "Publix", settled: true });
+    add("2026-09-28", { amount: 212, type: "income", description: "Suncoast ATM" });
+    add("2026-09-28", { amount: 25, type: "expense", description: "TALKIAT", settled: false });
+    add("2026-09-28", { amount: 101.11, type: "expense", description: "Extra Space Storage", settled: false });
+    // A scheduled occurrence moved off the anchor day: the bank hasn't taken it.
+    add("2026-09-28", { amount: 75, type: "expense", description: "Pounce", settled: true,
+      movedFrom: "2026-09-27", originalRecurringId: "gone" });
+    // Never reach the bank: a bucket, a hidden zeroed minimum, a skipped bill.
+    add("2026-09-28", { amount: 60, type: "expense", description: "Horseback", allocated: true, settled: true });
+    add("2026-09-28", { amount: 0, type: "expense", description: "Zeroed", hidden: true, settled: true });
+    s.addRecurringTransaction({ startDate: "2026-07-28", amount: 79.51, type: "expense",
+      description: "Debt Payment: Best Egg", recurrence: "monthly" });
+    s.addRecurringTransaction({ startDate: "2026-08-28", amount: 2.99, type: "expense",
+      description: "Apple Storage", recurrence: "monthly" });
+    const skippedId = s.addRecurringTransaction({ startDate: "2026-08-28", amount: 40, type: "expense",
+      description: "Gym", recurrence: "monthly" });
+    rm.applyRecurringTransactions(2026, 8);
+    const gymId = typeof skippedId === "string" ? skippedId
+      : s.getRecurringTransactions().find((r) => r.description === "Gym").id;
+    rm.toggleSkipTransaction("2026-09-28", gymId);
+    cs.invalidateCache();
+
+    let v = cs.getBankView("2026-09-28");
+    assert.strictEqual(v.anchorDate, "2026-09-27");
+    assert.strictEqual(v.posted, 360.51, "anchor + one-time rows the user entered");
+    assert.strictEqual(v.available, 234.4, "unsettled expenses are the holds");
+    assert.deepStrictEqual(v.expected.map((x) => x.description).sort(),
+      ["Apple Storage", "Debt Payment: Best Egg", "Pounce"]);
+    assert.strictEqual(v.expectedNet, -157.5);
+    // The two views reconcile: everything the app counts = bank + not-yet.
+    cs.updateMonthlyBalances(new Date(2026, 8, 28, 12, 0, 0));
+    const b = cs.getDayBalanceBreakdown("2026-09-28");
+    assert.strictEqual(cs.roundToCents(v.available + v.expectedNet), b.balanceExcludingAllocations);
+
+    // Statement reconcile stamps each exact match: the Apple charge is a hold
+    // at the bank, so it moves from "not in bank" to pending.
+    const br = new BankReconcileUI(s, rm, () => {}, () => {});
+    br._renderReport = () => {};
+    const bank = (signed, description, pending) => ({ date: "2026-09-28", postedDate: "2026-09-28",
+      signed, description, pending, matched: false });
+    const rows = [
+      bank(-14.3, "WM SUPERCENTER #778", false), bank(-18.12, "PUBLIX #266", false),
+      bank(212, "Deposit at ATM SUNCOAST CREDIT UNION", false),
+      bank(-2.99, "APPLE.COM/BILL", true), bank(-25, "WWW.TALKIAT* TAL", true),
+      bank(-101.11, "EXTRA SPACE 0260", true),
+    ];
+    br._run(rows);
+    const apple = s.getTransactions()["2026-09-28"].find((t) => t.description === "Apple Storage");
+    assert.strictEqual(apple.bankStatus, "pending");
+    assert.ok(apple.modifiedInstance === true && apple.id, "a stamped occurrence persists and syncs");
+    cs.invalidateCache();
+    v = cs.getBankView("2026-09-28");
+    assert.strictEqual(v.posted, 360.51);
+    assert.strictEqual(v.available, 231.41, "the bank app's available balance");
+    assert.strictEqual(v.expectedNet, -154.51);
+    // A defaulted row that already agrees is not rewritten, so a re-run is a no-op.
+    assert.strictEqual(s.getTransactions()["2026-09-28"].find((t) => t.description === "Walmart").bankStatus, undefined);
+    assert.strictEqual(br._stampBankStatuses(rows), false);
+
+    // The chip's setter on a pure expansion, and the stamp, survive a reload.
+    const day = s.getTransactions()["2026-09-28"];
+    s.setTransactionBankStatus("2026-09-28", day.findIndex((t) => t.description === "Debt Payment: Best Egg"), "cleared");
+    s.saveData();
+    s.cancelPendingSave();
+    const s2 = new TransactionStore();
+    const rm2 = new RecurringTransactionManager(s2);
+    const cs2 = new CalculationService(s2, rm2);
+    rm2.applyRecurringTransactions(2026, 8);
+    v = cs2.getBankView("2026-09-28");
+    assert.strictEqual(v.posted, 281, "Best Egg cleared after a reload");
+    assert.strictEqual(v.available, 151.9);
+    assert.deepStrictEqual(v.expected.map((x) => x.description), ["Pounce"]);
+
+    // Only the open window answers: not a day an earlier anchor closed, not
+    // the future. The anchor day itself is the anchor.
+    assert.strictEqual(cs2.getBankView("2026-09-25"), null);
+    assert.strictEqual(cs2.getBankView("2026-09-29"), null);
+    assert.deepStrictEqual([cs2.getBankView("2026-09-27").posted, cs2.getBankView("2026-09-27").expected.length], [180.93, 0]);
+
+    // A wrong-typed stored status falls back to the default, never throws.
+    ["cleared!", 42, {}, null].forEach((bad) => {
+      assert.strictEqual(s2.getBankStatus({ type: "expense", settled: true, bankStatus: bad }), "cleared");
+      assert.strictEqual(s2.getBankStatus({ type: "expense", recurringId: "r", bankStatus: bad }), "expected");
+    });
+    s2.cancelPendingSave();
+    console.log("✅ Posted/available match the bank, and reconcile stamps what it matched");
   } finally {
     global.Date = RealDate;
   }

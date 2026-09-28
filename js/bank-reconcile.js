@@ -629,6 +629,10 @@ class BankReconcileUI {
       pendingMatched.push({ bank: b, app: a });
     });
 
+    // Record what the bank says about each exact match, so the day detail's
+    // "In bank" figures follow the statement without any tapping.
+    if (this._stampBankStatuses(bankRows)) this.onChange();
+
     const matchedCount = bankRows.filter((b) => b.matched).length;
 
     this.result = {
@@ -647,6 +651,34 @@ class BankReconcileUI {
       recurringSuggestions: this._detectRecurringCandidates(bankRows),
     };
     this._renderReport();
+  }
+
+  // Stamp the bank's status onto every exact (Pass 1) match: a posted line
+  // means the entry cleared, a hold means it is pending. Review pairs are
+  // unconfirmed and left alone. Only entries after the latest Ending Balance
+  // (on/before today) are touched — the only rows whose status anything
+  // reads (see CalculationService.getBankView) — and only when the status
+  // actually changes, so a re-run writes nothing. Returns whether it wrote.
+  _stampBankStatuses(bankRows) {
+    const todayStr = Utils.formatDateString(new Date());
+    const anchorDate = this.store.getLatestAnchorDate(todayStr);
+    if (anchorDate === null) return false;
+    let changed = false;
+    bankRows.forEach((b) => {
+      const a = b && b._match;
+      if (!a || a.date > todayStr || a.date <= anchorDate) return;
+      const index = this._currentIndex(a);
+      if (index === -1) return;
+      const row = this.store.getTransactions()[a.date][index];
+      const status = b.pending ? "pending" : "cleared";
+      if (this.store.getBankStatus(row) === status) return;
+      if (this.store.setTransactionBankStatus(a.date, index, status)) {
+        // The row may just have gained an id; keep the item pointing at it.
+        a.id = row.id;
+        changed = true;
+      }
+    });
+    return changed;
   }
 
   // ---- Recurring-pattern detection ----------------------------------------

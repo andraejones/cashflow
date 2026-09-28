@@ -38,6 +38,7 @@ Object.assign(TransactionUI.prototype, {
     if (b.expense > 0) {
       rows.push(`<div class="modal-balance-row"><span class="modal-balance-label">Expenses</span><span class="modal-balance-value expense">-$${Utils.formatAmount(b.expense)}</span></div>`);
     }
+    rows.push(...this._bankViewRows(date));
     if (b.balanceWithoutUnsettled !== null) {
       rows.push(`<div class="modal-balance-row"><span class="modal-balance-label">Balance before holdbacks</span><span class="modal-balance-value">$${Utils.formatAmount(b.balanceWithoutUnsettled)}</span></div>`);
     }
@@ -57,6 +58,66 @@ Object.assign(TransactionUI.prototype, {
 
     modalBalance.innerHTML = rows.join("");
     modalBalance.className = b.balance < 0 ? "modal-balance negative" : "modal-balance";
+  },
+
+  // The "what the bank should show" block (CalculationService.getBankView):
+  // posted and available balances, then what the app counts that the bank
+  // doesn't have yet, itemized. Empty outside the open window since the last
+  // Ending Balance.
+  _bankViewRows(date) {
+    const view = this.calculationService.getBankView(date);
+    if (!view) return [];
+    const signedMoney = (n) => `${n < 0 ? "-" : "+"}$${Utils.formatAmount(Math.abs(n))}`;
+    const rows = [
+      `<div class="modal-balance-row modal-bank-first"><span class="modal-balance-label">In bank — posted</span><span class="modal-balance-value">$${Utils.formatAmount(view.posted)}</span></div>`,
+      `<div class="modal-balance-row"><span class="modal-balance-label">In bank — available</span><span class="modal-balance-value">$${Utils.formatAmount(view.available)}</span></div>`,
+    ];
+    if (view.expected.length > 0) {
+      rows.push(`<div class="modal-balance-row"><span class="modal-balance-label">Not in bank yet</span><span class="modal-balance-value">${signedMoney(view.expectedNet)}</span></div>`);
+      view.expected.forEach((item) => {
+        const when = item.date !== date ? ` (${this.formatShortDisplayDate(item.date)})` : "";
+        rows.push(`<div class="modal-balance-row modal-bank-item"><span class="modal-balance-label">${Utils.escapeHtml(item.description || "(no description)")}${when}</span><span class="modal-balance-value">${signedMoney(item.signed)}</span></div>`);
+      });
+    }
+    rows.push(`<div class="modal-bank-divider" aria-hidden="true"></div>`);
+    return rows;
+  },
+
+  // Tap-to-cycle bank status for one row: not in bank → pending → cleared.
+  // The row is re-located by id at click time (re-expansion can reorder the
+  // day's array between render and click), as the settle toggle does.
+  _createBankStatusChip(date, index, t) {
+    const LABELS = { expected: "Not in bank", pending: "Pending", cleared: "✓ Cleared" };
+    const NEXT = { expected: "pending", pending: "cleared", cleared: "expected" };
+    const status = this.store.getBankStatus(t);
+    const chip = document.createElement("span");
+    chip.className = `bank-status-chip bank-status-${status}`;
+    chip.setAttribute("role", "button");
+    chip.setAttribute("tabindex", "0");
+    chip.setAttribute(
+      "aria-label",
+      `Bank status: ${LABELS[status]}. Change to ${LABELS[NEXT[status]]}`
+    );
+    chip.textContent = LABELS[status];
+    const txnId = t.id;
+    const cycle = () => {
+      const current = this.store.getTransactions()[date] || [];
+      const resolvedIndex = txnId ? current.findIndex((x) => x.id === txnId) : index;
+      const target = current[resolvedIndex];
+      if (!target) return;
+      const next = NEXT[this.store.getBankStatus(target)];
+      this.store.setTransactionBankStatus(date, resolvedIndex, next);
+      this.showTransactionDetails(date);
+      this._notifyChange();
+    };
+    chip.addEventListener("click", cycle);
+    chip.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        cycle();
+      }
+    });
+    return chip;
   },
 
   showTransactionDetails(date) {
@@ -92,6 +153,12 @@ Object.assign(TransactionUI.prototype, {
       modalDate.textContent = formattedDate;
 
       this.renderModalBalance(date);
+      // Rows after the latest Ending Balance, up to today, carry a bank-status
+      // chip; before it the anchor already reconciled them with the bank.
+      const bankView = this.calculationService
+        ? this.calculationService.getBankView(date)
+        : null;
+      const showBankChips = !!bankView && date > bankView.anchorDate;
 
       modalTransactions.innerHTML = "";
       transactionType.innerHTML = `
@@ -274,6 +341,16 @@ Object.assign(TransactionUI.prototype, {
             remainingSpan.className = "debt-remaining";
             remainingSpan.textContent = ` (Remaining: $${Utils.formatAmount(remaining)})`;
             transactionDiv.appendChild(remainingSpan);
+          }
+
+          let bankChip = null;
+          if (
+            showBankChips &&
+            (normalizedType === "income" || normalizedType === "expense") &&
+            !isAllocated && !isSkipped && !isHidden
+          ) {
+            bankChip = this._createBankStatusChip(date, index, t);
+            transactionDiv.appendChild(bankChip);
           }
 
           // Debt-linked transactions (minimum payments, snowball payments) are

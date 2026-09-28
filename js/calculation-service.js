@@ -648,6 +648,74 @@ class CalculationService {
     };
   }
 
+  // What the bank itself should show for a day, to match against the bank app:
+  // `posted` (the ledger balance) is the latest Ending Balance plus every
+  // cleared row after it, and `available` also takes out the pending holds.
+  // Everything else after the anchor is `expected` — scheduled in the app, not
+  // in the bank yet — and listed so the difference can be read off. Rows are
+  // classified by store.getBankStatus.
+  //
+  // Only answers inside the OPEN window: on/after the latest Ending Balance on
+  // or before today, and not after today. Before that anchor the next one
+  // already reconciled the bank; after today there is no bank to match. The
+  // anchor is the bank balance after its day's last posting, so the anchor
+  // day's own rows are inside it and the count starts the day after (the walk
+  // treats the anchor day the same way). Allocation buckets never reach the
+  // bank; draws against them do. Returns null outside the window.
+  getBankView(dateString) {
+    const todayStr = Utils.formatDateString(new Date());
+    if (typeof dateString !== "string" || dateString > todayStr) return null;
+    const anchorDate = this.store.getLatestAnchorDate(todayStr);
+    if (anchorDate === null || dateString < anchorDate) return null;
+
+    const transactions = this.store.getTransactions();
+    let posted = this.calculateDailyTotals(anchorDate).balance;
+    if (posted === null) return null;
+    let pendingNet = 0;
+    let expectedNet = 0;
+    const expected = [];
+
+    const [ay, am, ad] = anchorDate.split("-").map(Number);
+    for (let i = 1; ; i++) {
+      const date = Utils.formatDateString(new Date(ay, am - 1, ad + i, 12, 0, 0));
+      if (date > dateString) break;
+      const list = Array.isArray(transactions[date]) ? transactions[date] : [];
+      list.forEach((t) => {
+        if (!t || (t.type !== "income" && t.type !== "expense")) return;
+        if (t.hidden === true || t.allocated === true) return;
+        if (t.recurringId && this.recurringManager.isTransactionSkipped(date, t.recurringId)) {
+          return;
+        }
+        const amount = this._rowAmount(t.amount);
+        const signed = t.type === "income" ? amount : -amount;
+        const status = this.store.getBankStatus(t);
+        if (status === "cleared") {
+          posted = this.roundToCents(posted + signed);
+        } else if (status === "pending") {
+          pendingNet = this.roundToCents(pendingNet + signed);
+        } else {
+          expectedNet = this.roundToCents(expectedNet + signed);
+          expected.push({
+            date,
+            type: t.type,
+            description: typeof t.description === "string" ? t.description : "",
+            amount,
+            signed,
+          });
+        }
+      });
+    }
+
+    return {
+      anchorDate,
+      posted,
+      available: this.roundToCents(posted + pendingNet),
+      pendingNet,
+      expected,
+      expectedNet,
+    };
+  }
+
   calculateMonthlySummary(year, month) {
     const monthKey = `${year}-${String(month + 1).padStart(2, "0")}`;
     if (this._cachedSummaries[monthKey]) {

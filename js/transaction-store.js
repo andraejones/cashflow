@@ -398,6 +398,68 @@ class TransactionStore {
   }
 
 
+  // Where the bank is with a row: "cleared" (posted), "pending" (a hold), or
+  // "expected" (not in the bank yet). THE one rule — the day-detail bank
+  // figures, the status chip and statement reconcile all read it from here.
+  // An explicit `bankStatus` wins. Without one: an unsettled expense is a hold,
+  // a one-time row the user entered is posted (they enter what the bank
+  // shows), and a scheduled row — a recurring occurrence, a moved copy of one,
+  // a snowball payoff — hasn't reached the bank yet.
+  getBankStatus(t) {
+    if (!t || typeof t !== "object") return "expected";
+    if (TransactionStore.BANK_STATUSES.includes(t.bankStatus)) return t.bankStatus;
+    if (t.type === "expense" && t.settled === false) return "pending";
+    if (!t.recurringId && t.movedFrom === undefined && t.snowballGenerated !== true) {
+      return "cleared";
+    }
+    return "expected";
+  }
+
+
+  setTransactionBankStatus(date, index, status) {
+    if (!date || index === undefined || !TransactionStore.BANK_STATUSES.includes(status)) {
+      console.error("Invalid parameters for setTransactionBankStatus");
+      return false;
+    }
+    const target = this.transactions[date] && this.transactions[date][index];
+    if (!target) return false;
+    target.bankStatus = status;
+    target._lastModified = new Date().toISOString();
+    // Same persistence rules as setTransactionSettled: a recurring occurrence
+    // only survives re-expansion as a modified instance, and the cloud merge
+    // drops any persisted row without an id.
+    if (target.recurringId) {
+      target.modifiedInstance = true;
+    }
+    if (!target.id) {
+      target.id = Utils.generateUniqueId();
+    }
+    this.debouncedSave();
+    return true;
+  }
+
+
+  // Date of the latest Ending Balance on/before `dateString`, or null. Skip-
+  // aware the way calculateDailyTotals is, so it names the anchor the walk uses.
+  getLatestAnchorDate(dateString) {
+    let latest = null;
+    Object.keys(this.transactions).forEach((date) => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date > dateString) return;
+      if (latest !== null && date <= latest) return;
+      const list = this.transactions[date];
+      if (!Array.isArray(list)) return;
+      const hasAnchor = list.some(
+        (t) =>
+          t &&
+          t.type === "balance" &&
+          !(t.recurringId && this.isTransactionSkipped(date, t.recurringId))
+      );
+      if (hasAnchor) latest = date;
+    });
+    return latest;
+  }
+
+
   getUnsettledTransactions() {
     const results = [];
     Object.keys(this.transactions).forEach((date) => {
@@ -493,3 +555,6 @@ class TransactionStore {
 
 
 }
+
+// Stored values of a row's `bankStatus` (see getBankStatus).
+TransactionStore.BANK_STATUSES = ["cleared", "pending", "expected"];

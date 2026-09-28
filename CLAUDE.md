@@ -11,8 +11,8 @@ CashFlow Calendar is an offline-first, single-page personal finance application 
 **No build process required.** Open `index.html` directly in a browser or serve via any static server.
 
 **Tests:** `npm test` (or run the two scripts directly with Node) — it must pass before every commit:
-- `node scripts/verify-logic.js` — 116 numbered integration tests over vm-loaded sources
-  (numbered up to TEST 122; the numbering has gaps where tests were merged or
+- `node scripts/verify-logic.js` — 117 numbered integration tests over vm-loaded sources
+  (numbered up to TEST 123; the numbering has gaps where tests were merged or
   removed along with the feature they covered).
   Four of them are SWEEPS rather than scenarios, and they are the ones worth
   extending when something new is added:
@@ -296,6 +296,25 @@ own right, never from pure expansions — those are its own output, and counting
 them grew the range (and the persisted `monthlyBalances`) by a month per render
 (TEST 113).
 
+"What should the bank show today?" is a separate question from every balance
+above, which are projections and already count today's scheduled bills.
+`CalculationService.getBankView(date)` answers it for the day-detail modal's
+"In bank — posted / available / Not in bank yet" rows: the latest Ending
+Balance plus every CLEARED row after it is posted, PENDING rows come off that
+for available, and everything else is EXPECTED and itemized, so
+`available + expectedNet` equals `balanceExcludingAllocations`. It answers only
+in the open window (on/after the latest anchor on or before today, never after
+today) and returns null otherwise. A row's status comes from one rule,
+`TransactionStore.getBankStatus`: an explicit `bankStatus` ("cleared" /
+"pending" / "expected") wins; otherwise an unsettled expense is pending, a
+one-time row the user entered is cleared, and a recurring occurrence, a moved
+copy of one, or a snowball payoff is expected. Statement reconcile
+(`BankReconcileUI._stampBankStatuses`, called from `_run`) stamps every exact
+match in the open window with the bank's side, and writes only when the status
+actually changes. The day-detail chip cycles the status by hand. Both go
+through `setTransactionBankStatus`, which promotes a recurring occurrence to a
+modified instance with an id, the same way settling does (TEST 123).
+
 **CalendarUI** (`calendar-ui.js`) - Renders monthly calendar grid with daily balances, month navigation, and highlighting (lowest balance, negative balance, minimum balance ranges). The per-day balance-variant figures ("Balance before holdbacks", "Balance excluding allocations") live in the day-detail modal via `CalculationService.getDayBalanceBreakdown`, not in the calendar cells.
 
 **TransactionUI** (`transaction-ui.js`) - Add/edit transaction modals and recurrence form UI. Supports settle/unsettle toggling for one-time expenses and displays carried-forward unsettled transactions on today's date. The allocation-draw editor (`renderAllocationDrawEditor` / `collectAllocationDraws` in `transaction-ui-forms.js`) is shared by the add modal and the day-detail inline edit form; it enforces what the store can only clamp — one row per bucket, no row over what its bucket has available to this expense, no split totalling more than the expense.
@@ -409,7 +428,7 @@ local_last_sync, _backup_before_merge, calendar_view_mode
 
 - `styles.css` - CSS variables for theming (primary, accent, error colors)
 - `README.md` - Project documentation and feature overview
-- `scripts/verify-logic.js` - Standalone logic verification utility (116 tests)
+- `scripts/verify-logic.js` - Standalone logic verification utility (117 tests)
 - `scripts/verify-walk-parity.js` - Randomized balance-walk parity harness + source guard
 - `scripts/verify-ui.js` - Optional headless-Chromium UI harness (`npm run test:ui`)
 - `scripts/verify-sync.js` - Optional two-device cloud-sync harness (`npm run test:sync`)
