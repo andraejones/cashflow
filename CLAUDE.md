@@ -36,6 +36,13 @@ CashFlow Calendar is an offline-first, single-page personal finance application 
       and the engine may order them either way).
   Each was validated by reverting the fix it guards and watching it fail; keep
   doing that, or a sweep that cannot fail pins nothing.
+  A test that builds a store must `cancelPendingSave()` on every store it
+  touched before it ends. The debounced save is a 500ms timer, so it fires
+  after the synchronous tests finish and lands inside the async sync tests,
+  overwriting their localStorage; TEST 95 flaked on TEST 118's and TEST 121's
+  leftovers, depending only on how long the tests in between took. Anything
+  that depends on today's date should pin its clock the way TESTs 82 and
+  118–123 do: TEST 82's setup failed on every run near month end.
 - `node scripts/verify-walk-parity.js` — randomized cross-path invariants for the balance walk (~140k assertions; reproduce failures with `node scripts/verify-walk-parity.js <seed>`). Includes a source guard: calendar-ui must consume `CalculationService.walkDays` and never re-implement anchor math.
 
 **Optional browser harnesses** (both puppeteer-gated, both exit 0 with a

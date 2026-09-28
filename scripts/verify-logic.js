@@ -6414,6 +6414,18 @@ console.log("TEST 81: The Harness Utils Stubs Match The Real Utils");
 // with no error.
 console.log("TEST 82: A Due-Date Edit Leaves No Minimums Past The Payoff");
 {
+  // Pinned to a mid-month day. The debt clears tomorrow, so the only minimum
+  // this setup materializes is the zeroed first due date (today + 3); when
+  // that crossed into the next month it was never built, and the vacuity
+  // guard failed on every run from the 29th of a 31-day month (or the 28th
+  // of a 30-day one) through month end.
+  const RealDate = Date;
+  const FIXED = new RealDate(2026, 8, 14, 12, 0, 0);
+  global.Date = class extends RealDate {
+    constructor(...a) { if (a.length === 0) super(FIXED.getTime()); else super(...a); }
+    static now() { return FIXED.getTime(); }
+  };
+  try {
   const today = new Date();
   const dayOffset = (o) =>
     Utils.formatDateString(new Date(today.getFullYear(), today.getMonth(), today.getDate() + o));
@@ -6501,6 +6513,10 @@ console.log("TEST 82: A Due-Date Edit Leaves No Minimums Past The Payoff");
   console.log(
     `✅ ${beforeEdit} minimums before the edit, ${minimumCount()} after, none past the ${series.endDate} payoff`
   );
+  store.cancelPendingSave();
+  } finally {
+    global.Date = RealDate;
+  }
 }
 
 // TEST 83: expansion and cleanup must agree on which date the endDate bounds.
@@ -10170,6 +10186,9 @@ console.log("TEST 118: Payoff Priority Orders The Snowball");
     }
     static now() { return T118_TODAY.getTime(); }
   }
+  // Each built store has debounced saves pending; cancelled in `finally`
+  // so they cannot fire into the async sync tests (see TEST 121).
+  const built = [];
   global.Date = T118_FrozenDate;
   try {
     const assert = require("assert");
@@ -10178,6 +10197,7 @@ console.log("TEST 118: Payoff Priority Orders The Snowball");
     const build = ({ income, infusion }) => {
       localStorage.clear();
       const s = new TransactionStore();
+      built.push(s);
       s.resetData();
       const rm = new RecurringTransactionManager(s);
       const calc = new CalculationService(s, rm);
@@ -10311,6 +10331,7 @@ console.log("TEST 118: Payoff Priority Orders The Snowball");
     }
     console.log("✅ Payoff priority orders the snowball; all five sort sites agree");
   } finally {
+    built.forEach((s) => s.cancelPendingSave());
     global.Date = T118_RealDate;
   }
 }
@@ -10429,9 +10450,14 @@ console.log("TEST 121: A Debt Due On The 30th Is Not A Last-Day Debt");
   // day's intent as dueLastDay; debts saved before the flag keep the old
   // inference.
   const assert = require("assert");
+  // Every store here saved a debt, so each has a debounced save pending; left
+  // alone, those timers fire during the async sync tests that run after the
+  // synchronous ones and overwrite their localStorage (TEST 95 flaked on it).
+  const stores = [];
   const save = (dueDay, startDate) => {
     localStorage.clear();
     const s = new TransactionStore();
+    stores.push(s);
     s.resetData();
     const rm = new RecurringTransactionManager(s);
     const ui = Object.create(DebtSnowballUI.prototype);
@@ -10493,6 +10519,7 @@ console.log("TEST 121: A Debt Due On The 30th Is Not A Last-Day Debt");
     assert.strictEqual(ui.buildDebtRecurringTransaction(legacy).lastDayOfMonth, true);
     assert.strictEqual(s._normalizeDebt({ ...legacy, dueLastDay: "yes" }).dueLastDay, null);
   }
+  stores.forEach((s) => s.cancelPendingSave());
   console.log("✅ A debt's last-day schedule follows the due day the user typed");
 }
 
