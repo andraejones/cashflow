@@ -10702,6 +10702,60 @@ console.log("TEST 123: The Day Detail Shows What The Bank Shows");
   }
 }
 
+console.log("TEST 124: An Older Posted Line Can't Take A Newer Hold's Entry");
+{
+  // Pass 1 used to assign bank lines one at a time in date order, so the
+  // earliest line with a shared payee word claimed the entry even when a later
+  // line fit it exactly. The real 2026-09-28 statement: a posted 9/21
+  // "RVT*Sallie Jones" $75 (the user's one-time "Pounce" entry) took the
+  // unsettled 9/28 "RVT*SALLIE JONES" entry through the 7-day same-name window,
+  // the 9/28 hold went unmatched, and the stamp marked a pending hold cleared,
+  // so the day detail's posted figure came out $75 low.
+  const assert = require("assert");
+  const RealDate = Date;
+  const FIXED = new RealDate(2026, 8, 28, 12, 0, 0);
+  class FrozenDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(FIXED.getTime()); else super(...a); }
+    static now() { return FIXED.getTime(); }
+  }
+  global.Date = FrozenDate;
+  try {
+    localStorage.clear();
+    const s = new TransactionStore();
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    const cs = new CalculationService(s, rm);
+    const br = new BankReconcileUI(s, rm, () => {}, () => {});
+    br._renderReport = () => {};
+    s.addTransaction("2026-09-21", { amount: 75, type: "expense", description: "Pounce", settled: true });
+    s.addTransaction("2026-09-27", { amount: 180.93, type: "balance", description: "Ending Balance" });
+    s.addTransaction("2026-09-28", { amount: 75, type: "expense", description: "RVT*SALLIE JONES", settled: false });
+    const csv =
+      "Posted Date,Transaction Date,Description,Deposit,Withdrawal,Balance\n" +
+      "9/28/2026,9/28/2026,RVT*SALLIE JONES,$75.00,,$0.00\n" +
+      "9/21/2026,9/21/2026,Withdrawal Debit Card RVT*Sallie Jones Elemen 941-5755440 FL Card 2565,,($75.00),$955.14\n";
+    const parsed = br._parseSuncoastCsv(csv);
+    if (parsed.error) throw new Error("Parse error: " + parsed.error);
+    br._run(parsed.rows);
+
+    const hold = parsed.rows.find((b) => b.pending);
+    const posted = parsed.rows.find((b) => !b.pending);
+    assert.strictEqual(hold._match && hold._match.date, "2026-09-28", "the hold pairs with its own entry");
+    assert.strictEqual(posted._match && posted._match.date, "2026-09-21", "the posted line keeps its same-day entry");
+    assert.strictEqual(br.result.missingPending.length, 0);
+    const entry = s.getTransactions()["2026-09-28"].find((t) => t.description === "RVT*SALLIE JONES");
+    assert.strictEqual(s.getBankStatus(entry), "pending");
+    cs.invalidateCache();
+    const v = cs.getBankView("2026-09-28");
+    assert.strictEqual(v.posted, 180.93);
+    assert.strictEqual(v.available, 105.93);
+    s.cancelPendingSave();
+    console.log("✅ Exact matches are ranked across the statement, not claimed in date order");
+  } finally {
+    global.Date = RealDate;
+  }
+}
+
 // Run the async network tests sequentially (shared global.fetch mock): TEST 32
 // first, then TEST 30, which prints the final banner.
 async function runUnreadableGistTest() {

@@ -29,7 +29,7 @@ class BankReconcileUI {
     // dates are within this many days (Transaction Date vs the day it was
     // logged routinely differ by 1, sometimes 2). When the two also share a
     // distinctive payee word, pass 1 stretches this to unsettledToleranceDays —
-    // see _bestMatch.
+    // see _exactMatchPass.
     this.toleranceDays = 2;
     // Unsettled expenses are explicitly waiting to clear and can sit for days
     // before posting, so give them a wider match window than settled entries.
@@ -477,18 +477,9 @@ class BankReconcileUI {
         this._attestedIn(a._tokens, bankVocab);
     });
 
-    // Pass 1: exact amount, same sign, nearest date within tolerance.
-    sortedBank.forEach((b) => {
-      const a = this._bestMatch(b, appItems, (cand) =>
-        Math.abs(cand.signed - b.signed) < 0.005
-      );
-      if (a) {
-        b.matched = true;
-        a.matched = true;
-        b._match = a;
-        a._matchedBank = b;
-      }
-    });
+    // Pass 1: exact amount, same sign, best name and nearest date within
+    // tolerance, ranked across the whole statement (see _exactMatchPass).
+    this._exactMatchPass(sortedBank, appItems);
 
     // Pass 2: near amount (same sign) — "probably the same purchase with a tip
     // or auth-hold difference." Kept deliberately conservative to avoid pairing
@@ -891,8 +882,14 @@ class BankReconcileUI {
     return false;
   }
 
-  // Among unmatched candidates passing `predicate`, pick the best by name
-  // coherence first, then closest date (within tolerance), then earliest.
+  // Pair bank lines to app entries of the exact same signed amount. Every
+  // eligible pair across the statement is ranked before any is assigned — by
+  // name coherence first, then closest date, then earlier bank line, then
+  // earlier app entry — so a line can't claim an entry that another line fits
+  // better. Assigning line by line in date order let an older posted line
+  // take a newer entry whose own hold was further down the statement: a 9/21
+  // "RVT*Sallie Jones" $75 took the 9/28 "RVT*SALLIE JONES" hold's entry
+  // (same name, 7 days out), and the stamp then marked a pending hold cleared.
   //
   // Name coherence outranks date proximity on purpose: when several entries
   // share the bank line's exact amount, a name-agreeing entry beats a
@@ -901,34 +898,41 @@ class BankReconcileUI {
   // are assigned by date alone and can cross-match unrelated merchants — a
   // "VISIBLE" hold pairing with a "Publix" entry while the real "Visible -
   // Sofia" entry is left to land on the unrelated "Publix" ATM line.
-  _bestMatch(bankRow, appItems, predicate) {
-    let best = null;
-    let bestCoh = -Infinity;
-    let bestGap = Infinity;
-    for (const cand of appItems) {
-      if (cand.matched) continue;
-      if (this._blockMatch(bankRow, cand)) continue;
-      if (!predicate(cand)) continue;
-      const coh = this._nameCoherence(bankRow, cand);
-      // A shared distinctive payee word stretches the date window to the
-      // unsettled tolerance even for settled entries. Exact amount (pass 1's
-      // predicate) plus the same payee is strong evidence of the same money
-      // movement, and ACH drafts due before a holiday weekend legitimately
-      // post 3-4 days late (a payment due Fri 7/3 — July 4th observed —
-      // settles Mon 7/6), which the settled 2-day window can never cover.
-      const gap = this._dayGap(bankRow.date, cand.date);
-      const tol =
-        coh === 1
-          ? Math.max(this._toleranceFor(cand), this.unsettledToleranceDays)
-          : this._toleranceFor(cand);
-      if (gap > tol) continue;
-      if (coh > bestCoh || (coh === bestCoh && gap < bestGap)) {
-        best = cand;
-        bestCoh = coh;
-        bestGap = gap;
-      }
+  _exactMatchPass(sortedBank, appItems) {
+    const candidates = [];
+    sortedBank.forEach((bankRow, bankIndex) => {
+      appItems.forEach((cand, appIndex) => {
+        if (this._blockMatch(bankRow, cand)) return;
+        if (Math.abs(cand.signed - bankRow.signed) >= 0.005) return;
+        const coh = this._nameCoherence(bankRow, cand);
+        // A shared distinctive payee word stretches the date window to the
+        // unsettled tolerance even for settled entries. Exact amount plus the
+        // same payee is strong evidence of the same money movement, and ACH
+        // drafts due before a holiday weekend legitimately post 3-4 days late
+        // (a payment due Fri 7/3 — July 4th observed — settles Mon 7/6), which
+        // the settled 2-day window can never cover.
+        const gap = this._dayGap(bankRow.date, cand.date);
+        const tol =
+          coh === 1
+            ? Math.max(this._toleranceFor(cand), this.unsettledToleranceDays)
+            : this._toleranceFor(cand);
+        if (gap > tol) return;
+        candidates.push({ bank: bankRow, app: cand, coh, gap, bankIndex, appIndex });
+      });
+    });
+    candidates.sort((a, b) =>
+      b.coh - a.coh ||
+      a.gap - b.gap ||
+      a.bankIndex - b.bankIndex ||
+      a.appIndex - b.appIndex
+    );
+    for (const { bank, app } of candidates) {
+      if (bank.matched || app.matched) continue;
+      bank.matched = true;
+      app.matched = true;
+      bank._match = app;
+      app._matchedBank = bank;
     }
-    return best;
   }
 
   // Name relationship between a bank line and an app entry, used to rank

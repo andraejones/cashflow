@@ -11,8 +11,8 @@ CashFlow Calendar is an offline-first, single-page personal finance application 
 **No build process required.** Open `index.html` directly in a browser or serve via any static server.
 
 **Tests:** `npm test` (or run the two scripts directly with Node) — it must pass before every commit:
-- `node scripts/verify-logic.js` — 117 numbered integration tests over vm-loaded sources
-  (numbered up to TEST 123; the numbering has gaps where tests were merged or
+- `node scripts/verify-logic.js` — 118 numbered integration tests over vm-loaded sources
+  (numbered up to TEST 124; the numbering has gaps where tests were merged or
   removed along with the feature they covered).
   Four of them are SWEEPS rather than scenarios, and they are the ones worth
   extending when something new is added:
@@ -428,7 +428,7 @@ local_last_sync, _backup_before_merge, calendar_view_mode
 
 - `styles.css` - CSS variables for theming (primary, accent, error colors)
 - `README.md` - Project documentation and feature overview
-- `scripts/verify-logic.js` - Standalone logic verification utility (117 tests)
+- `scripts/verify-logic.js` - Standalone logic verification utility (118 tests)
 - `scripts/verify-walk-parity.js` - Randomized balance-walk parity harness + source guard
 - `scripts/verify-ui.js` - Optional headless-Chromium UI harness (`npm run test:ui`)
 - `scripts/verify-sync.js` - Optional two-device cloud-sync harness (`npm run test:sync`)
