@@ -635,7 +635,7 @@ Object.assign(TransactionUI.prototype, {
   },
 
   // When the "Allocation" type is selected, settlement no longer applies: the
-  // Settled toggle is hidden (saving forces settled=true so the reserve
+  // Pending toggle is hidden (saving forces settled=true so the reserve
   // subtracts like a normal cleared expense rather than being carried as
   // unsettled), the "Auto close-out" toggle is revealed, and the description
   // autocomplete is suppressed.
@@ -648,10 +648,10 @@ Object.assign(TransactionUI.prototype, {
   //     any unspent remainder back to the balance).
   syncAllocateState() {
     const typeEl = document.getElementById("transactionType");
-    const settledLabel = document.getElementById("settledToggleLabel");
-    if (!typeEl || !settledLabel) return;
+    const pendingLabel = document.getElementById("pendingToggleLabel");
+    if (!typeEl || !pendingLabel) return;
     const allocated = typeEl.value === "allocation";
-    settledLabel.style.display = allocated ? "none" : "";
+    pendingLabel.style.display = allocated ? "none" : "";
 
     // The auto close-out toggle only applies to allocations.
     const autoCloseoutCb = document.getElementById("transactionAutoCloseout");

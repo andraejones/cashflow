@@ -86,6 +86,9 @@ Object.assign(TransactionUI.prototype, {
   // Tap-to-cycle bank status for one row: not in bank → pending → cleared.
   // The row is re-located by id at click time (re-expansion can reorder the
   // day's array between render and click), as the settle toggle does.
+  // Where the chip shows it replaces Mark Settled/Unsettled: the store keeps
+  // an expense's `settled` in step with the status, so Pending and Not in bank
+  // carry it forward and Cleared settles it on this row's own date.
   _createBankStatusChip(date, index, t) {
     const LABELS = { expected: "Not in bank", pending: "Pending", cleared: "✓ Cleared" };
     const NEXT = { expected: "pending", pending: "cleared", cleared: "expected" };
@@ -411,7 +414,12 @@ Object.assign(TransactionUI.prototype, {
           let settleBtn = null;
           // A recurring allocation instance auto-closes on its date; settling
           // and manual close-out are both meaningless for it, so skip the button.
-          if (normalizedType === "expense" && !isSkipped && !(isAllocated && isRecurring)) {
+          // Where the bank-status chip shows, it is the settle control (the
+          // status sets `settled`), so the toggle would be a second copy.
+          if (
+            normalizedType === "expense" && !isSkipped && !(isAllocated && isRecurring) &&
+            !bankChip
+          ) {
             const isCurrentlyUnsettled = t.settled === false;
             settleBtn = document.createElement("span");
             settleBtn.className = "settle-btn";
@@ -848,6 +856,9 @@ Object.assign(TransactionUI.prototype, {
                   type: u.transaction.type,
                   description: u.transaction.description,
                   settled: true,
+                  // Settled here = cleared on this day. Without it a moved
+                  // copy reads "Not in bank" (see getBankStatus).
+                  bankStatus: "cleared",
                   movedFrom: u.date,
                   originalRecurringId: recId,
                 };
@@ -888,6 +899,7 @@ Object.assign(TransactionUI.prototype, {
                   type: u.transaction.type,
                   description: u.transaction.description,
                   settled: true,
+                  bankStatus: "cleared",
                 };
                 // Carry the debt link (see recurring branch).
                 if (u.transaction.debtId) {

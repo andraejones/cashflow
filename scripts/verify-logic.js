@@ -2814,7 +2814,7 @@ console.log("TEST 36: Add Form Rejects Unexpandable Custom Interval / NaN Variab
       transactionAmount: { value: "50" },
       transactionType: { value: "expense" },
       transactionDescription: { value: "Sub" },
-      transactionSettled: { checked: true },
+      transactionPending: { checked: false },
     };
 
     // Case 1: custom recurrence with interval 0 must be rejected, nothing saved.
@@ -10751,6 +10751,120 @@ console.log("TEST 124: An Older Posted Line Can't Take A Newer Hold's Entry");
     assert.strictEqual(v.available, 105.93);
     s.cancelPendingSave();
     console.log("✅ Exact matches are ranked across the statement, not claimed in date order");
+  } finally {
+    global.Date = RealDate;
+  }
+}
+
+console.log("TEST 125: Bank Status Decides What Carries Forward");
+{
+  // Cleared = posted on the statement, and it lives on the day it cleared.
+  // Pending (a hold) and Not in bank (nothing on the statement) are both
+  // money that hasn't left yet, so both carry forward until it clears. The
+  // chip, the carried-forward Settle and reconcile all write through
+  // setTransactionBankStatus, which keeps an expense's `settled` in step.
+  // Before, only Pending unsettled a row, reconcile never marked an entry the
+  // statement lacked, and a typed-in entry the bank never saw read "✓ Cleared".
+  const assert = require("assert");
+  const RealDate = Date;
+  const FIXED = new RealDate(2026, 8, 28, 12, 0, 0);
+  class FrozenDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(FIXED.getTime()); else super(...a); }
+    static now() { return FIXED.getTime(); }
+  }
+  global.Date = FrozenDate;
+  try {
+    localStorage.clear();
+    const s = new TransactionStore();
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    const cs = new CalculationService(s, rm);
+
+    // The setter's pairing.
+    s.addTransaction("2026-10-05", { amount: 9, type: "expense", description: "Plain", settled: true });
+    s.addTransaction("2026-10-05", { amount: 9, type: "income", description: "Pay" });
+    s.addTransaction("2026-10-05", { amount: 9, type: "expense", description: "Bucket", allocated: true, settled: true });
+    const at = (d, desc) => s.getTransactions()[d].findIndex((t) => t.description === desc);
+    const row = (d, desc) => s.getTransactions()[d].find((t) => t.description === desc);
+    [["expected", false], ["pending", false], ["cleared", true]].forEach(([status, settled]) => {
+      s.setTransactionBankStatus("2026-10-05", at("2026-10-05", "Plain"), status);
+      assert.strictEqual(row("2026-10-05", "Plain").settled, settled, `${status} → settled ${settled}`);
+    });
+    s.setTransactionBankStatus("2026-10-05", at("2026-10-05", "Pay"), "pending");
+    assert.strictEqual(row("2026-10-05", "Pay").settled, undefined, "income has no settled state");
+    s.setTransactionBankStatus("2026-10-05", at("2026-10-05", "Bucket"), "expected");
+    assert.strictEqual(row("2026-10-05", "Bucket").settled, true, "an allocation is always settled");
+    delete s.getTransactions()["2026-10-05"];
+
+    // Reconcile. Statement covers 9/26–9/27; the latest Ending Balance is 9/25.
+    const add = (d, t) => s.addTransaction(d, t);
+    add("2026-09-20", { amount: 11, type: "expense", description: "Before anchor", settled: true });
+    add("2026-09-25", { amount: 500, type: "balance", description: "Ending Balance" });
+    add("2026-09-26", { amount: 5, type: "expense", description: "Coffee", settled: true });
+    add("2026-09-26", { amount: 8, type: "income", description: "Refund" });
+    add("2026-09-26", { amount: 40, type: "expense", description: "Groceries", settled: false });
+    add("2026-09-27", { amount: 20, type: "expense", description: "Gas", settled: true });
+    add("2026-09-28", { amount: 12, type: "expense", description: "Lunch", settled: true });
+    s.addRecurringTransaction({ startDate: "2026-08-26", amount: 60, type: "expense",
+      description: "Internet", recurrence: "monthly", settled: false });
+    rm.applyRecurringTransactions(2026, 8);
+    let changes = 0;
+    const br = new BankReconcileUI(s, rm, () => { changes++; }, () => {});
+    br._renderReport = () => {};
+    const bank = (date, signed, description, pending) =>
+      ({ date, postedDate: date, signed, description, pending, matched: false });
+    const rows = [
+      bank("2026-09-26", -3.33, "UNRELATED MERCHANT", false),
+      bank("2026-09-27", -40, "GROCERIES", false),
+      bank("2026-09-27", -20, "GAS", true),
+      bank("2026-09-27", -60, "INTERNET", false),
+    ];
+    br._run(rows);
+
+    // Nothing on the statement: Not in bank, and an expense carries forward.
+    assert.strictEqual(row("2026-09-26", "Coffee").bankStatus, "expected");
+    assert.strictEqual(row("2026-09-26", "Coffee").settled, false);
+    assert.strictEqual(row("2026-09-26", "Refund").bankStatus, "expected");
+    assert.strictEqual(row("2026-09-26", "Refund").settled, undefined);
+    // A hold: Pending, carried forward.
+    assert.strictEqual(row("2026-09-27", "Gas").bankStatus, "pending");
+    assert.strictEqual(row("2026-09-27", "Gas").settled, false);
+    assert.deepStrictEqual(
+      cs.getCarriedUnsettledList("2026-09-28").map((u) => u.transaction.description).sort(),
+      ["Coffee", "Gas", "Groceries", "Internet"]
+    );
+    // Outside the open window, or past the statement's end: untouched.
+    assert.strictEqual(row("2026-09-20", "Before anchor").bankStatus, undefined);
+    assert.strictEqual(row("2026-09-28", "Lunch").bankStatus, undefined);
+    assert.strictEqual(row("2026-09-28", "Lunch").settled, true);
+    // The report was re-run on the stamped entries, so it names them as they
+    // now are, and a further run writes nothing.
+    assert.ok(br.result.appOnlyExpected.some((a) => a.description === "Coffee"));
+    assert.ok(br.result.appPendingAtBank.some((a) => a.description === "Gas"));
+    const before = changes;
+    br._run(rows);
+    assert.strictEqual(changes, before, "a re-run is a no-op");
+
+    // Posted, but the entry is unsettled: not cleared in place. "Mark settled"
+    // moves it to the day it cleared, as Cleared.
+    assert.strictEqual(row("2026-09-26", "Groceries").settled, false);
+    assert.notStrictEqual(row("2026-09-26", "Groceries").bankStatus, "cleared");
+    const pair = br.result.clearedUnsettled.find((p) => p.app.description === "Groceries");
+    assert.ok(pair, "offered under Cleared at bank — still unsettled");
+    br._settle(pair);
+    assert.strictEqual(row("2026-09-26", "Groceries"), undefined);
+    const moved = row("2026-09-27", "Groceries");
+    assert.strictEqual(moved.settled, true);
+    assert.strictEqual(s.getBankStatus(moved), "cleared");
+    // A recurring occurrence moves as a copy with movedFrom, which would
+    // otherwise read "Not in bank" on the very day it cleared.
+    br._settle(br.result.clearedUnsettled.find((p) => p.app.description === "Internet"));
+    const movedOcc = row("2026-09-27", "Internet");
+    assert.ok(movedOcc && movedOcc.movedFrom === "2026-09-26");
+    assert.strictEqual(movedOcc.settled, true);
+    assert.strictEqual(s.getBankStatus(movedOcc), "cleared");
+    s.cancelPendingSave();
+    console.log("✅ Pending and Not in bank carry forward; Cleared settles on the day it cleared");
   } finally {
     global.Date = RealDate;
   }

@@ -2958,7 +2958,7 @@ body.app-locked #calendarOptions {
   cursor: pointer;
 }
 
-/* Fixed-width checkbox cell keeps the "Settled"/"Allocate" text left edges
+/* Fixed-width checkbox cell keeps the "Pending"/"Allocate" text left edges
    aligned even though the labels differ in length. */
 .settled-toggle-label input[type="checkbox"] {
   flex: 0 0 18px;

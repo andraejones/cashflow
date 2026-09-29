@@ -236,13 +236,13 @@ class TransactionUI {
       transactionRecurrence.style.display = "";
     }
 
-    // Reset the Settled toggle to its checked default so an unchecked state
+    // Reset the Pending toggle to its unchecked default so a checked state
     // from an abandoned entry doesn't leak into the next add (addTransaction
     // only resets it after a successful save).
-    const transactionSettled = document.getElementById("transactionSettled");
-    if (transactionSettled) {
-      transactionSettled.checked = true;
-      transactionSettled.disabled = false;
+    const transactionPending = document.getElementById("transactionPending");
+    if (transactionPending) {
+      transactionPending.checked = false;
+      transactionPending.disabled = false;
     }
 
     // Reset an abandoned Allocation entry back to a plain expense so its

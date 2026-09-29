@@ -264,6 +264,99 @@ async function dismissAlert(page) {
     check('stale settle button preserves the next expense', staleDayActions.settle);
     check('imported transaction types cannot inject agenda markup', staleDayActions.typeEscaped);
 
+    // In the open bank window the status chip IS the settle control: the
+    // Mark Settled/Unsettled toggle is gone, and only Cleared settles —
+    // Pending and Not in bank carry the expense forward. Outside the window
+    // the toggle stays. The carried-forward Settle clears it on the viewed
+    // day. The add form's Pending box defaults off (= cleared).
+    const bankChipSettle = await page.evaluate(async () => {
+      const { store, transactionUI: ui, calendarUI } = window.app;
+      const saved = store.exportData();
+      const today = new Date();
+      const date = Utils.formatDateString(today);
+      const shift = (days) => {
+        const d = new Date(today);
+        d.setDate(d.getDate() + days);
+        return Utils.formatDateString(d);
+      };
+      const rowFor = (id) => [...document.querySelectorAll('#modalTransactions > div')]
+        .find((el) => el.textContent.includes(id));
+      const results = {};
+      try {
+        store.transactions = {};
+        store.recurringTransactions = [];
+        store.addTransaction(shift(-2), { type: 'balance', amount: 500 });
+        store.addTransaction(date, { type: 'expense', amount: 12, description: 'ChipRow' });
+        store.addTransaction(shift(3), { type: 'expense', amount: 7, description: 'FutureRow' });
+        const find = () => store.transactions[date].find((t) => t.description === 'ChipRow');
+        ui.showTransactionDetails(date);
+        let row = rowFor('ChipRow');
+        results.chipShown = !!(row && row.querySelector('.bank-status-chip'));
+        results.toggleHidden = !!row && !row.querySelector('.settle-btn');
+        // cleared → expected → pending → cleared: only Cleared settles.
+        row.querySelector('.bank-status-chip').click();
+        results.expectedUnsettled = find().bankStatus === 'expected' && find().settled === false;
+        rowFor('ChipRow').querySelector('.bank-status-chip').click();
+        results.pendingUnsettled = find().bankStatus === 'pending' && find().settled === false;
+        rowFor('ChipRow').querySelector('.bank-status-chip').click();
+        results.clearedSettled = find().bankStatus === 'cleared' && find().settled === true;
+        ui.showTransactionDetails(shift(3));
+        row = rowFor('FutureRow');
+        results.futureToggle = !!row && !row.querySelector('.bank-status-chip') &&
+          !!row.querySelector('.settle-btn');
+
+        // A recurring bill from yesterday, still not in the bank, carries
+        // forward; its Settle moves it to today as Cleared.
+        store.addRecurringTransaction({ startDate: shift(-1), amount: 30, type: 'expense',
+          description: 'CarryBill', recurrence: 'monthly' });
+        const billDay = Utils.parseDateString(shift(-1));
+        window.app.recurringManager.applyRecurringTransactions(billDay.getFullYear(), billDay.getMonth());
+        const billIdx = store.transactions[shift(-1)].findIndex((t) => t.description === 'CarryBill');
+        store.setTransactionBankStatus(shift(-1), billIdx, 'expected');
+        ui.showTransactionDetails(date);
+        const carried = [...document.querySelectorAll('#modalTransactions .carried-forward-transaction')]
+          .find((el) => el.textContent.includes('CarryBill'));
+        results.notInBankCarried = !!carried;
+        if (carried) carried.querySelector('.settle-btn').click();
+        const cleared = (store.transactions[date] || []).find((t) => t.description === 'CarryBill');
+        const clearedRow = rowFor('CarryBill');
+        results.carriedSettleCleared = !!cleared && cleared.settled === true &&
+          store.getBankStatus(cleared) === 'cleared' &&
+          !!clearedRow && clearedRow.querySelector('.bank-status-chip').textContent === '✓ Cleared';
+
+        ui.showTransactionDetails(date);
+        const pendingBox = document.getElementById('transactionPending');
+        results.formDefault = !!pendingBox && pendingBox.checked === false;
+        document.getElementById('transactionType').value = 'expense';
+        document.getElementById('transactionAmount').value = '3';
+        document.getElementById('transactionDescription').value = 'FormPending';
+        pendingBox.checked = true;
+        ui.addTransaction();
+        const added = (store.transactions[date] || []).find((t) => t.description === 'FormPending');
+        results.formPending = !!added && added.settled === false &&
+          store.getBankStatus(added) === 'pending';
+        results.formReset = document.getElementById('transactionPending').checked === false;
+      } finally {
+        store.importData(saved);
+        window.app.recurringManager.invalidateCache();
+        ui.closeModals();
+        calendarUI.generateCalendar();
+      }
+      return results;
+    });
+    check('bank chip replaces the settle toggle in the open window',
+      bankChipSettle.chipShown && bankChipSettle.toggleHidden, JSON.stringify(bankChipSettle));
+    check('bank chip: Pending and Not in bank unsettle, Cleared settles',
+      bankChipSettle.expectedUnsettled && bankChipSettle.pendingUnsettled && bankChipSettle.clearedSettled,
+      JSON.stringify(bankChipSettle));
+    check('a Not in bank expense carries forward; its Settle lands today as Cleared',
+      bankChipSettle.notInBankCarried && bankChipSettle.carriedSettleCleared,
+      JSON.stringify(bankChipSettle));
+    check('settle toggle stays outside the open window', bankChipSettle.futureToggle);
+    check('add form Pending box defaults off, writes settled:false, resets',
+      bankChipSettle.formDefault && bankChipSettle.formPending && bankChipSettle.formReset,
+      JSON.stringify(bankChipSettle));
+
     const searchAndEditChecks = await page.evaluate(async () => {
       const { store, transactionUI: ui, searchUI, recurringManager, calendarUI } = window.app;
       const saved = store.exportData();
@@ -659,7 +752,7 @@ async function dismissAlert(page) {
     // ---- Toggle checkboxes must look like checkboxes ---------------------
     // `#transactionForm input` is an ID-specificity rule, so it outranks
     // `.settled-toggle-label input[type="checkbox"]` on every property they
-    // share — the Settled / Auto close-out / Suggest-amount / Free-funds
+    // share — the Pending / Auto close-out / Suggest-amount / Free-funds
     // toggles rendered as >=140px-wide padded fields with their labels
     // stranded to the right. Measure the real layout.
     // The add form only has a layout while the day modal is open — addTransaction
@@ -677,7 +770,7 @@ async function dismissAlert(page) {
     await sleep(450);
     const toggleSizes = await page.evaluate(() =>
       [
-        "transactionSettled",
+        "transactionPending",
         "transactionAutoCloseout",
         "transactionAutoAdjust",
         "transactionFreeFunds",

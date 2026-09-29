@@ -394,7 +394,7 @@ class BankReconcileUI {
 
   // ---- Reconciliation ----------------------------------------------------
 
-  _run(bankRows) {
+  _run(bankRows, isRestamp = false) {
     // Stash the full statement so a re-run after Add/Settle/Fix compares
     // against the same set of bank lines.
     this._allBankRows = bankRows;
@@ -620,9 +620,18 @@ class BankReconcileUI {
       pendingMatched.push({ bank: b, app: a });
     });
 
-    // Record what the bank says about each exact match, so the day detail's
-    // "In bank" figures follow the statement without any tapping.
-    if (this._stampBankStatuses(bankRows)) this.onChange();
+    // Record what the bank says about each entry, so the day detail's "In
+    // bank" figures follow the statement without any tapping. The lists above
+    // were built from the pre-stamp entries, and a stamp can unsettle one
+    // (which also widens its match tolerance), so a stamp that wrote anything
+    // re-runs the report once on the stamped data.
+    if (this._stampBankStatuses(bankRows, [...appOnlyExpected, ...appOnlyUnmatched])) {
+      this.onChange();
+      if (!isRestamp) {
+        this._run(bankRows, true);
+        return;
+      }
+    }
 
     const matchedCount = bankRows.filter((b) => b.matched).length;
 
@@ -644,31 +653,43 @@ class BankReconcileUI {
     this._renderReport();
   }
 
-  // Stamp the bank's status onto every exact (Pass 1) match: a posted line
-  // means the entry cleared, a hold means it is pending. Review pairs are
-  // unconfirmed and left alone. Only entries after the latest Ending Balance
-  // (on/before today) are touched — the only rows whose status anything
-  // reads (see CalculationService.getBankView) — and only when the status
-  // actually changes, so a re-run writes nothing. Returns whether it wrote.
-  _stampBankStatuses(bankRows) {
+  // Stamp the bank's status onto every exact (Pass 1) match — a posted line
+  // means the entry cleared, a hold means it is pending — and "expected" (not
+  // in bank) onto every in-window app entry nothing on the statement matched.
+  // The store keeps an expense's `settled` in step, so pending and not-in-bank
+  // entries carry forward. A posted match to an unsettled expense is left for
+  // "Cleared at bank — still unsettled": its Mark settled moves the entry to
+  // the day it cleared, which clearing it in place here would skip. Review
+  // pairs are unconfirmed and left alone. Only entries after the latest Ending
+  // Balance (on/before today) are touched — the only rows whose status
+  // anything reads (see CalculationService.getBankView) — and only when
+  // something actually changes, so a re-run writes nothing. Returns whether it
+  // wrote.
+  _stampBankStatuses(bankRows, unmatchedAppItems = []) {
     const todayStr = Utils.formatDateString(new Date());
     const anchorDate = this.store.getLatestAnchorDate(todayStr);
     if (anchorDate === null) return false;
     let changed = false;
-    bankRows.forEach((b) => {
-      const a = b && b._match;
+    const stamp = (a, status) => {
       if (!a || a.date > todayStr || a.date <= anchorDate) return;
       const index = this._currentIndex(a);
       if (index === -1) return;
       const row = this.store.getTransactions()[a.date][index];
-      const status = b.pending ? "pending" : "cleared";
-      if (this.store.getBankStatus(row) === status) return;
+      const tracksSettled = row.type === "expense" && row.allocated !== true;
+      if (status === "cleared" && tracksSettled && row.settled === false) return;
+      const settledInStep =
+        !tracksSettled || (row.settled !== false) === (status === "cleared");
+      if (this.store.getBankStatus(row) === status && settledInStep) return;
       if (this.store.setTransactionBankStatus(a.date, index, status)) {
         // The row may just have gained an id; keep the item pointing at it.
         a.id = row.id;
         changed = true;
       }
+    };
+    bankRows.forEach((b) => {
+      if (b && b._match) stamp(b._match, b.pending ? "pending" : "cleared");
     });
+    unmatchedAppItems.forEach((a) => stamp(a, "expected"));
     return changed;
   }
 
@@ -1642,7 +1663,7 @@ class BankReconcileUI {
     const settleDate = (pair.bank && pair.bank.postedDate) || appItem.date;
 
     if (settleDate === appItem.date) {
-      this.store.setTransactionSettled(appItem.date, index, true);
+      this.store.setTransactionBankStatus(appItem.date, index, "cleared");
       Utils.showNotification("Marked settled.");
       this._afterMutation();
       return;
@@ -1777,6 +1798,8 @@ class BankReconcileUI {
     if (tx.type === "expense") {
       moved.settled = forceSettled ? true : tx.settled !== false;
     }
+    // Settling here means the bank posted it on the target date.
+    if (forceSettled) moved.bankStatus = "cleared";
     if (tx.debtId) moved.debtId = tx.debtId;
     if (tx.debtRole) moved.debtRole = tx.debtRole;
     if (tx.debtName) moved.debtName = tx.debtName;

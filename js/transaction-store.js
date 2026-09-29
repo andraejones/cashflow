@@ -405,6 +405,9 @@ class TransactionStore {
   // a one-time row the user entered is posted (they enter what the bank
   // shows), and a scheduled row — a recurring occurrence, a moved copy of one,
   // a snowball payoff — hasn't reached the bank yet.
+  // Setting a status (setTransactionBankStatus) keeps an expense's `settled`
+  // in step: only a cleared expense is settled. Pending and not-in-bank both
+  // mean the money hasn't left yet, so both carry forward until it clears.
   getBankStatus(t) {
     if (!t || typeof t !== "object") return "expected";
     if (TransactionStore.BANK_STATUSES.includes(t.bankStatus)) return t.bankStatus;
@@ -424,6 +427,9 @@ class TransactionStore {
     const target = this.transactions[date] && this.transactions[date][index];
     if (!target) return false;
     target.bankStatus = status;
+    if (target.type === "expense" && target.allocated !== true) {
+      target.settled = status === "cleared";
+    }
     target._lastModified = new Date().toISOString();
     // Same persistence rules as setTransactionSettled: a recurring occurrence
     // only survives re-expansion as a modified instance, and the cloud merge

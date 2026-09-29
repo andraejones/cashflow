@@ -110,7 +110,7 @@ Object.assign(TransactionUI.prototype, {
           // Allocated expenses always count as cleared (never carried unsettled).
           newTransaction.settled = allocated
             ? true
-            : document.getElementById("transactionSettled").checked;
+            : !document.getElementById("transactionPending").checked;
           if (allocated) {
             // A pinned, use-it-or-lose-it bucket. It stays drawable through
             // its close-out date (defaulting to its own date) and is
@@ -168,7 +168,7 @@ Object.assign(TransactionUI.prototype, {
           newRecurringTransaction.allocated = allocated;
           newRecurringTransaction.settled = allocated
             ? true
-            : document.getElementById("transactionSettled").checked;
+            : !document.getElementById("transactionPending").checked;
           // Two recurring-allocation flavors: with auto close-out, each period
           // drops a fresh pinned bucket that closes after its own date; without
           // it, each period's bucket rolls across its period and is forfeited
@@ -216,8 +216,8 @@ Object.assign(TransactionUI.prototype, {
       document.getElementById("transactionAmount").value = "";
       document.getElementById("transactionDescription").value = "";
       document.getElementById("transactionRecurrence").value = "once";
-      document.getElementById("transactionSettled").checked = true;
-      document.getElementById("transactionSettled").disabled = false;
+      document.getElementById("transactionPending").checked = false;
+      document.getElementById("transactionPending").disabled = false;
       // After saving an allocation, drop the form back to a plain expense so
       // the next add doesn't silently create another allocation.
       if (rawType === "allocation") {
@@ -231,7 +231,7 @@ Object.assign(TransactionUI.prototype, {
       document.getElementById("freeFundsToggleLabel").style.display = "none";
       document.getElementById("transactionCloseoutDate").value = "";
       document.getElementById("closeoutDateField").style.display = "none";
-      document.getElementById("settledToggleLabel").style.display = "";
+      document.getElementById("pendingToggleLabel").style.display = "";
       const drawEditor = document.getElementById("transactionDrawAllocations");
       if (drawEditor) {
         drawEditor.innerHTML = "";
