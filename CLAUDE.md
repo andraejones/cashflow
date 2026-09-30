@@ -11,8 +11,8 @@ CashFlow Calendar is an offline-first, single-page personal finance application 
 **No build process required.** Open `index.html` directly in a browser or serve via any static server.
 
 **Tests:** `npm test` (or run the two scripts directly with Node) — it must pass before every commit:
-- `node scripts/verify-logic.js` — 141 numbered integration tests over vm-loaded sources
-  (numbered up to TEST 147; the numbering has gaps where tests were merged or
+- `node scripts/verify-logic.js` — 142 numbered integration tests over vm-loaded sources
+  (numbered up to TEST 148; the numbering has gaps where tests were merged or
   removed along with the feature they covered).
   Seven of them are SWEEPS rather than scenarios, and they are the ones worth
   extending when something new is added:
@@ -368,10 +368,22 @@ above, which are projections and already count today's scheduled bills.
 `CalculationService.getBankView(date)` answers it for the day-detail modal's
 "In bank — posted / available / Not in bank yet" rows: the latest Ending
 Balance plus every CLEARED row after it is posted, PENDING rows come off that
-for available, and everything else is EXPECTED and itemized, so
-`available + expectedNet` equals `balanceExcludingAllocations`. It answers only
+for available, and everything else is EXPECTED and itemized. It answers only
 in the open window (on/after the latest anchor on or before today, never after
-today) and returns null otherwise. A row's status comes from one rule,
+today) and returns null otherwise. One thing reaches back past the anchor, and
+only in this view: an Ending Balance is the bank's LEDGER figure, which a hold
+has not left, so an expense stamped EXPLICITLY `bankStatus: "pending"` (and not
+marked settled by hand since) dated on/before the anchor also comes off
+available, itemized as `heldBeforeAnchor` / `heldBeforeAnchorNet` (the day
+detail's "Pending holds through <anchor> (not in projection)" rows). The walk,
+the carried-forward list and `getMonthSeed` still let the anchor absorb it, so
+the identities are `available = posted + pendingNet + heldBeforeAnchorNet` and
+`available + expectedNet − heldBeforeAnchorNet = balanceExcludingAllocations`
+(with no such hold, the old `available + expectedNet` rule). Only an explicit
+stamp counts: an unstamped unsettled expense before an anchor is one the anchor
+reconciled. So reconcile stamps a matched hold explicitly even when the entry
+already read "pending" by default, and the add form's Pending checkbox writes
+the stamp on a one-time expense (TEST 148). A row's status comes from one rule,
 `TransactionStore.getBankStatus`: an explicit `bankStatus` ("cleared" /
 "pending" / "expected") wins; otherwise an unsettled expense is pending, a
 one-time row the user entered is cleared, and a recurring occurrence, a moved
@@ -585,7 +597,7 @@ local_last_sync, _backup_before_merge, calendar_view_mode
 
 - `styles.css` - CSS variables for theming (primary, accent, error colors)
 - `README.md` - Project documentation and feature overview
-- `scripts/verify-logic.js` - Standalone logic verification utility (141 tests)
+- `scripts/verify-logic.js` - Standalone logic verification utility (142 tests)
 - `scripts/verify-walk-parity.js` - Randomized balance-walk parity harness + source guard
 - `scripts/verify-ui.js` - Optional headless-Chromium UI harness (`npm run test:ui`)
 - `scripts/verify-sync.js` - Optional two-device cloud-sync harness (`npm run test:sync`)

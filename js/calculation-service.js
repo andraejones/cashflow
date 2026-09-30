@@ -662,6 +662,21 @@ class CalculationService {
   // day's own rows are inside it and the count starts the day after (the walk
   // treats the anchor day the same way). Allocation buckets never reach the
   // bank; draws against them do. Returns null outside the window.
+  //
+  // One exception reaches back past the anchor, display-only. An Ending
+  // Balance is the bank's LEDGER figure, which a hold has not left yet, so an
+  // expense explicitly stamped `bankStatus: "pending"` (and not marked settled
+  // by hand since) dated on/before the anchor is still coming off the account:
+  // it is taken out of `available` and itemized in `heldBeforeAnchor`. The
+  // walk, the carried-forward list and getMonthSeed keep treating the anchor as
+  // having absorbed it, so the projection does not count it. The identities:
+  //   available = posted + pendingNet + heldBeforeAnchorNet
+  //   available + expectedNet - heldBeforeAnchorNet = balanceExcludingAllocations
+  // (with no pre-anchor hold heldBeforeAnchorNet is 0 and the second is the
+  // old `available + expectedNet` rule). Only explicit stamps count: an
+  // unstamped unsettled expense before the anchor was reconciled by it under
+  // the 2026-06-15 anchor model. Pending income is left out (the audit left
+  // its semantics open), as are hidden, allocated and skipped rows.
   getBankView(dateString) {
     const todayStr = Utils.formatDateString(new Date());
     if (typeof dateString !== "string" || dateString > todayStr) return null;
@@ -706,11 +721,37 @@ class CalculationService {
       });
     }
 
+    const heldBeforeAnchor = [];
+    let heldBeforeAnchorNet = 0;
+    Object.keys(transactions).sort().forEach((date) => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date > anchorDate) return;
+      const list = transactions[date];
+      if (!Array.isArray(list)) return;
+      list.forEach((t) => {
+        if (!t || t.type !== "expense" || t.bankStatus !== "pending") return;
+        if (t.settled === true || t.hidden === true || t.allocated === true) return;
+        if (t.recurringId && this.recurringManager.isTransactionSkipped(date, t.recurringId)) {
+          return;
+        }
+        const amount = this._rowAmount(t.amount);
+        heldBeforeAnchorNet = this.roundToCents(heldBeforeAnchorNet - amount);
+        heldBeforeAnchor.push({
+          date,
+          type: t.type,
+          description: typeof t.description === "string" ? t.description : "",
+          amount,
+          signed: -amount,
+        });
+      });
+    });
+
     return {
       anchorDate,
       posted,
-      available: this.roundToCents(posted + pendingNet),
+      available: this.roundToCents(posted + pendingNet + heldBeforeAnchorNet),
       pendingNet,
+      heldBeforeAnchor,
+      heldBeforeAnchorNet,
       expected,
       expectedNet,
     };

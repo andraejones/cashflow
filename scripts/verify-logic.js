@@ -13532,6 +13532,120 @@ console.log("TEST 147: An Entry Missing From The Bank Blocks The All-Clear");
   }
 }
 
+console.log("TEST 148: A Hold Pending Before The Ending Balance Stays Out Of Available");
+{
+  // An Ending Balance is the bank's LEDGER balance, which a hold has not left
+  // yet. getBankView counted pending rows only after the anchor, so entering
+  // the ledger figure while a hold was still pending put the hold's money
+  // back into "available" (real data: 1048.57 shown, 947.46 at the bank).
+  // Display-only fix: an EXPLICIT pending stamp on/before the anchor comes off
+  // available and is itemized; the walk, the carried list and the month seed
+  // still treat the anchor as having absorbed it. Reconcile now stamps a hold
+  // explicitly even when the entry already read "pending" by default.
+  const assert = require("assert");
+  const RealDate = Date;
+  const FIXED = new RealDate(2026, 8, 29, 12, 0, 0);
+  class FrozenDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(FIXED.getTime()); else super(...a); }
+    static now() { return FIXED.getTime(); }
+  }
+  global.Date = FrozenDate;
+  const stores = [];
+  try {
+    const fresh = () => {
+      localStorage.clear();
+      const s = new TransactionStore();
+      s.resetData();
+      stores.push(s);
+      const rm = new RecurringTransactionManager(s);
+      return { s, rm, cs: new CalculationService(s, rm) };
+    };
+    const at = (s, d, desc) => s.getTransactions()[d].findIndex((t) => t.description === desc);
+    const identity = (cs, ds) => {
+      const v = cs.getBankView(ds);
+      const b = cs.getDayBalanceBreakdown(ds);
+      const excl = b.balanceExcludingAllocations !== null ? b.balanceExcludingAllocations : b.balance;
+      assert.strictEqual(cs.roundToCents(v.posted + v.pendingNet + v.heldBeforeAnchorNet), v.available,
+        `${ds}: available = posted + pendingNet + heldBeforeAnchorNet`);
+      assert.strictEqual(cs.roundToCents(v.available + v.expectedNet - v.heldBeforeAnchorNet), excl,
+        `${ds}: available + expectedNet - heldBeforeAnchorNet = balanceExcludingAllocations`);
+      return v;
+    };
+
+    // Synthetic: a $100 hold stamped Pending, then the ledger balance entered.
+    {
+      const { s, cs } = fresh();
+      s.addTransaction("2026-09-25", { amount: 1000, type: "balance", description: "Ending Balance" });
+      s.addTransaction("2026-09-27", { amount: 100, type: "expense", description: "Storage", settled: true });
+      s.addTransaction("2026-09-27", { amount: 30, type: "expense", description: "Old unsettled", settled: false });
+      s.addTransaction("2026-09-29", { amount: 20, type: "expense", description: "Gas", settled: false, bankStatus: "expected" });
+      s.setTransactionBankStatus("2026-09-27", at(s, "2026-09-27", "Storage"), "pending");
+      cs.invalidateCache();
+      let v = cs.getBankView("2026-09-29");
+      assert.deepStrictEqual([v.posted, v.available], [1000, 870]);
+      // The ledger still reads 1000 (the hold has not posted). An unstamped
+      // unsettled row before it is one the anchor reconciled.
+      s.addTransaction("2026-09-28", { amount: 1000, type: "balance", description: "Ending Balance" });
+      cs.invalidateCache();
+      v = cs.getBankView("2026-09-29");
+      assert.strictEqual(v.anchorDate, "2026-09-28");
+      assert.strictEqual(v.posted, 1000);
+      assert.strictEqual(v.available, 900, `the hold stays out of available (got ${v.available})`);
+      v = identity(cs, "2026-09-29");
+      assert.strictEqual(v.heldBeforeAnchorNet, -100);
+      assert.deepStrictEqual(v.heldBeforeAnchor.map((h) => [h.date, h.description, h.signed]),
+        [["2026-09-27", "Storage", -100]]);
+      identity(cs, "2026-09-28");
+      // Display-only: the walk and the carried list are untouched.
+      assert.strictEqual(cs.getRunningBalanceForDate("2026-09-29"), 980, "projection: anchor 1000 - Gas 20");
+      assert.deepStrictEqual(cs.getCarriedUnsettledList("2026-09-30").map((u) => u.transaction.description), ["Gas"],
+        "the anchor still absorbs the hold for the carried list");
+      // Marking it settled by hand (the day detail's toggle, pre-anchor)
+      // releases it.
+      s.setTransactionSettled("2026-09-27", at(s, "2026-09-27", "Storage"), true);
+      cs.invalidateCache();
+      v = identity(cs, "2026-09-29");
+      assert.deepStrictEqual([v.available, v.heldBeforeAnchor.length], [1000, 0]);
+    }
+
+    // Reconcile: a hold matched to an entry that already read "pending" by
+    // default is stamped explicitly, so the next Ending Balance keeps it held.
+    {
+      const { s, rm, cs } = fresh();
+      s.addTransaction("2026-09-25", { amount: 500, type: "balance", description: "Ending Balance" });
+      s.addRecurringTransaction({ id: "stor", startDate: "2026-08-28", amount: 101.11, type: "expense",
+        description: "Extra Space Storage", recurrence: "monthly", settled: false });
+      s.addTransaction("2026-09-27", { amount: 9, type: "expense", description: "Coffee", settled: true });
+      rm.applyRecurringTransactions(2026, 8);
+      let writes = 0;
+      const br = new BankReconcileUI(s, rm, () => { writes++; }, () => {});
+      br._renderReport = () => {};
+      const rows = [
+        { date: "2026-09-27", postedDate: "2026-09-27", signed: -9, description: "COFFEE", pending: false, matched: false },
+        { date: "2026-09-28", postedDate: "2026-09-28", signed: -101.11, description: "EXTRA SPACE", pending: true, matched: false },
+      ];
+      br._run(rows);
+      const hold = () => s.getTransactions()["2026-09-28"].find((t) => t.recurringId === "stor");
+      assert.strictEqual(hold().bankStatus, "pending", "the hold is stamped explicitly");
+      assert.strictEqual(hold().settled, false);
+      const before = writes;
+      br._run(rows);
+      assert.strictEqual(writes, before, "a re-run is a no-op");
+      cs.invalidateCache();
+      assert.strictEqual(cs.getBankView("2026-09-29").available, 389.89);
+      s.addTransaction("2026-09-29", { amount: 491, type: "balance", description: "Ending Balance" });
+      cs.invalidateCache();
+      const v = identity(cs, "2026-09-29");
+      assert.deepStrictEqual([v.posted, v.available], [491, 389.89],
+        "the ledger balance entered with the hold still pending");
+    }
+    console.log("✅ Explicit holds before the Ending Balance come off available, itemized; the walk is unchanged");
+  } finally {
+    global.Date = RealDate;
+    stores.forEach((st) => st.cancelPendingSave());
+  }
+}
+
 // Run the async network tests sequentially (shared global.fetch mock): TEST 32
 // first, then TEST 30, which prints the final banner.
 async function runUnreadableGistTest() {

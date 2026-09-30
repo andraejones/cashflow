@@ -661,8 +661,9 @@ class BankReconcileUI {
   // "Cleared at bank — still unsettled": its Mark settled moves the entry to
   // the day it cleared, which clearing it in place here would skip. Review
   // pairs are unconfirmed and left alone. Only entries after the latest Ending
-  // Balance (on/before today) are touched — the only rows whose status
-  // anything reads (see CalculationService.getBankView) — and only when
+  // Balance (on/before today) are touched — the rows whose status the bank
+  // view reads (see CalculationService.getBankView; an explicit hold keeps
+  // being read after a later Ending Balance) — and only when
   // something actually changes, so a re-run writes nothing. Returns whether it
   // wrote.
   _stampBankStatuses(bankRows, unmatchedAppItems = []) {
@@ -679,7 +680,14 @@ class BankReconcileUI {
       if (status === "cleared" && tracksSettled && row.settled === false) return;
       const settledInStep =
         !tracksSettled || (row.settled !== false) === (status === "cleared");
-      if (this.store.getBankStatus(row) === status && settledInStep) return;
+      // A hold is stamped EXPLICITLY even when an unsettled expense already
+      // reads "pending" by default: getBankView reaches back past the next
+      // Ending Balance for explicit holds only (an unstamped unsettled row
+      // before an anchor is one the anchor reconciled), so an implicit hold
+      // vanished from "available" the moment the user entered the bank's
+      // ledger balance (TEST 148).
+      const current = status === "pending" ? row.bankStatus : this.store.getBankStatus(row);
+      if (current === status && settledInStep) return;
       if (this.store.setTransactionBankStatus(a.date, index, status)) {
         // The row may just have gained an id; keep the item pointing at it.
         a.id = row.id;

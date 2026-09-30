@@ -111,6 +111,10 @@ Object.assign(TransactionUI.prototype, {
           newTransaction.settled = allocated
             ? true
             : !document.getElementById("transactionPending").checked;
+          // "Pending" is the user's word that the bank holds it: stamp it, so
+          // the bank view keeps it out of "available" even after a later
+          // Ending Balance (see CalculationService.getBankView).
+          if (newTransaction.settled === false) newTransaction.bankStatus = "pending";
           if (allocated) {
             // A pinned, use-it-or-lose-it bucket. It stays drawable through
             // its close-out date (defaulting to its own date) and is

@@ -63,7 +63,10 @@ Object.assign(TransactionUI.prototype, {
   // The "what the bank should show" block (CalculationService.getBankView):
   // posted and available balances, then what the app counts that the bank
   // doesn't have yet, itemized. Empty outside the open window since the last
-  // Ending Balance.
+  // Ending Balance. A hold still pending from on/before that Ending Balance is
+  // already out of "available" but not out of the projection (the anchor
+  // absorbed it), so it gets its own itemized line: available, minus that
+  // line, plus "Not in bank yet" is the day's balance excluding allocations.
   _bankViewRows(date) {
     const view = this.calculationService.getBankView(date);
     if (!view) return [];
@@ -72,6 +75,13 @@ Object.assign(TransactionUI.prototype, {
       `<div class="modal-balance-row modal-bank-first"><span class="modal-balance-label">In bank — posted</span><span class="modal-balance-value">$${Utils.formatAmount(view.posted)}</span></div>`,
       `<div class="modal-balance-row"><span class="modal-balance-label">In bank — available</span><span class="modal-balance-value">$${Utils.formatAmount(view.available)}</span></div>`,
     ];
+    const held = Array.isArray(view.heldBeforeAnchor) ? view.heldBeforeAnchor : [];
+    if (held.length > 0) {
+      rows.push(`<div class="modal-balance-row"><span class="modal-balance-label">Pending holds through ${Utils.escapeHtml(this.formatShortDisplayDate(view.anchorDate))} (not in projection)</span><span class="modal-balance-value">${signedMoney(view.heldBeforeAnchorNet)}</span></div>`);
+      held.forEach((item) => {
+        rows.push(`<div class="modal-balance-row modal-bank-item"><span class="modal-balance-label">${Utils.escapeHtml(item.description || "(no description)")} (${this.formatShortDisplayDate(item.date)})</span><span class="modal-balance-value">${signedMoney(item.signed)}</span></div>`);
+      });
+    }
     if (view.expected.length > 0) {
       rows.push(`<div class="modal-balance-row"><span class="modal-balance-label">Not in bank yet</span><span class="modal-balance-value">${signedMoney(view.expectedNet)}</span></div>`);
       view.expected.forEach((item) => {
