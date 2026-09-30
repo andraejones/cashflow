@@ -19,6 +19,10 @@ class RecurringTransactionManager {
   // final check.
   static END_GATE_SLACK_DAYS = 7;
 
+  // How many months ahead nextOccurrenceAfter looks. Two years covers every
+  // interval the recurrence form offers short of a custom multi-year one.
+  static NEXT_OCCURRENCE_LOOKAHEAD = 24;
+
   constructor(store) {
     this.store = store;
     // Cache for expanded recurring transactions per month
@@ -1672,6 +1676,104 @@ class RecurringTransactionManager {
       }
       transactions[dateString].push(newTransaction);
     }
+  }
+
+  // Expand ONE definition for one month into an isolated map and return its
+  // occurrences there, sorted by landing date: `{ dateString, originalDate,
+  // amount }` (originalDate only when a business-day adjustment moved it).
+  // Nothing the real store holds — skips, modified instances, moves, other
+  // series — can colour the result, and nothing is written anywhere. The
+  // snowball projection reads clean scheduled amounts through it
+  // (DebtSnowballUI.getRecurringOccurrencesForMonth delegates here) and
+  // nextOccurrenceAfter reads the schedule through it.
+  static expandIsolated(recurringTransaction, year, month) {
+    if (!recurringTransaction?.startDate || !recurringTransaction?.recurrence) {
+      return [];
+    }
+    const transactions = {};
+    // Throwaway store for a throwaway manager. This has to cover everything
+    // applyRecurringTransactions can call on a store. Keep this list in step
+    // with the `this.store.*` calls in this file (TEST 68 reads both).
+    const readOnly = (name) => () => {
+      throw new Error(
+        `expandIsolated's throwaway store is read-only; something called ` +
+          `${name}(). An isolated expansion must not mutate anything.`
+      );
+    };
+    const dummyStore = {
+      getTransactions: () => transactions,
+      getRecurringTransactions: () => [recurringTransaction],
+      getSkippedTransactions: () => ({}),
+      isTransactionSkipped: () => false,
+      // Reachable: _clearRecurringExpansions tombstones any instance carrying
+      // an id. Rows built here have none, and dropping a tombstone for a
+      // throwaway map is the right no-op either way.
+      trackDeletedTransaction: () => { },
+      saveData: () => { },
+      debouncedSave: () => { },
+      // Not reachable from applyRecurringTransactions today. Present so the
+      // shape is complete, and loud rather than silent if a future path does
+      // reach one — a no-op would swallow a real mutation.
+      addRecurringTransaction: readOnly("addRecurringTransaction"),
+      updateRecurringTransaction: readOnly("updateRecurringTransaction"),
+      updateTransaction: readOnly("updateTransaction"),
+      deleteTransaction: readOnly("deleteTransaction"),
+      setTransactionSkipped: readOnly("setTransactionSkipped"),
+      cancelMoveTransaction: readOnly("cancelMoveTransaction"),
+      rekeyMovedTransaction: readOnly("rekeyMovedTransaction"),
+      // A pure read (the one bank-status rule), reached only by a series
+      // split; answered by the real rule so it can never disagree.
+      getBankStatus: (t) => TransactionStore.prototype.getBankStatus.call(null, t),
+    };
+    const manager = new RecurringTransactionManager(dummyStore);
+    manager.applyRecurringTransactions(year, month);
+    const occurrences = [];
+    Object.keys(transactions).forEach((dateString) => {
+      transactions[dateString].forEach((t) => {
+        if (t.recurringId === recurringTransaction.id) {
+          const occurrence = { dateString, amount: Number(t.amount) || 0 };
+          if (t.originalDate) occurrence.originalDate = t.originalDate;
+          occurrences.push(occurrence);
+        }
+      });
+    });
+    occurrences.sort((a, b) => a.dateString.localeCompare(b.dateString));
+    return occurrences;
+  }
+
+  // Landing date of the series' next occurrence after the one landing on
+  // `fromDate`, or null when there is none within NEXT_OCCURRENCE_LOOKAHEAD
+  // months (the series ended, ran out of occurrences, or recurs more rarely
+  // than that). `occurrenceKey` (the scheduled date, when known) keeps a
+  // business-day-adjusted twin of this occurrence from being taken for the next
+  // one.
+  //
+  // This is the SCHEDULE, not what the calendar currently shows: a skipped next
+  // occurrence still counts (the period turns over whether or not it holds
+  // money), and the allocation flags are dropped before expanding, because the
+  // rolling-bucket materialization guards in addRecurringTransactionToDate
+  // depend on today and would hide past periods from the schedule.
+  nextOccurrenceAfter(rt, fromDate, occurrenceKey = null) {
+    const from = Utils.parseDateString(fromDate);
+    if (!rt || !from) return null;
+    const schedule = { ...rt };
+    delete schedule.allocated;
+    delete schedule.autoCloseout;
+    for (let i = 0; i <= RecurringTransactionManager.NEXT_OCCURRENCE_LOOKAHEAD; i++) {
+      const month = new Date(from.getFullYear(), from.getMonth() + i, 1, 12, 0, 0);
+      const occurrences = RecurringTransactionManager.expandIsolated(
+        schedule,
+        month.getFullYear(),
+        month.getMonth()
+      );
+      const next = occurrences.find(
+        (o) =>
+          o.dateString > fromDate &&
+          (!occurrenceKey || (o.originalDate || o.dateString) > occurrenceKey)
+      );
+      if (next) return next.dateString;
+    }
+    return null;
   }
 
 

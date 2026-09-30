@@ -972,6 +972,8 @@ Object.assign(TransactionUI.prototype, {
                   return;
                 }
                 const restoreClone = { ...transactions[currentIndex] };
+                // Same undo contract as TransactionUI.deleteTransaction.
+                const originalId = restoreClone.id;
                 delete restoreClone.id;
                 delete restoreClone._lastModified;
                 delete restoreClone.drawAmount;
@@ -982,7 +984,7 @@ Object.assign(TransactionUI.prototype, {
                 this.showTransactionDetails(date);
                 this._notifyChange();
                 Utils.showUndoToast("Transaction deleted", () =>
-                  this._restoreDeletedTransaction(u.date, restoreClone)
+                  this._restoreDeletedTransaction(u.date, restoreClone, originalId)
                 );
               };
               deleteBtn.addEventListener("click", doDelete);

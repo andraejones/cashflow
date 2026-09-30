@@ -11,8 +11,8 @@ CashFlow Calendar is an offline-first, single-page personal finance application 
 **No build process required.** Open `index.html` directly in a browser or serve via any static server.
 
 **Tests:** `npm test` (or run the two scripts directly with Node) — it must pass before every commit:
-- `node scripts/verify-logic.js` — 124 numbered integration tests over vm-loaded sources
-  (numbered up to TEST 130; the numbering has gaps where tests were merged or
+- `node scripts/verify-logic.js` — 127 numbered integration tests over vm-loaded sources
+  (numbered up to TEST 133; the numbering has gaps where tests were merged or
   removed along with the feature they covered).
   Six of them are SWEEPS rather than scenarios, and they are the ones worth
   extending when something new is added:
@@ -23,13 +23,16 @@ CashFlow Calendar is an offline-first, single-page personal finance application 
       calendar render down) came from one that forgot.
     - TEST 94 drives every bank-reconcile action and asserts what it leaves
       behind for the OTHER components: allocation reserves conserved, persisted
-      ids intact and unique, balances stable across a re-render and a reload.
+      ids intact and unique, balances stable across a re-render and a reload,
+      and nothing left for the report's own re-run to re-stamp (an action that
+      drops a bank status is otherwise papered over by that re-run).
     - TEST 95 injects the user's next keystroke at every await boundary of
       saveToCloud and loadFromCloud. The failure mode there is not a bad push,
       it is the edit being destroyed in memory and on disk by the merged import.
     - TEST 96 pins the one rule five different readers have to agree on: which
       instance of a rolling allocation series is live (see below), including
-      across a "this and future" split of the series (case d).
+      across a "this and future" split of the series (case d) and a period
+      re-dated from the day detail, across its turnover (case e).
     - TEST 98 is a SOURCE sweep for two shapes that read as correct and are not:
       `parseDateString(a) <= parseDateString(b)` (a null coerces to 0, so the
       comparison is always true — this blanked the calendar once) and
@@ -256,6 +259,19 @@ definition amount, back to the start date. Hence the split above. Whatever was
 already drawn from a retired bucket stays a real expense, exactly as on an
 ordinary turnover. TEST 96.
 
+A period re-dated from the day detail becomes a one-time copy, and a one-time
+bucket with no close-out rolls forward forever — from the next turnover on, two
+periods were reserved. So `saveEdit` pins the copy to its period: it becomes an
+auto-close-out bucket whose `closeoutDate` is the day before the series' next
+occurrence lands (`RecurringTransactionManager.nextOccurrenceAfter`, read from
+the schedule through `expandIsolated`), and a move onto or past that next
+occurrence — or past an ended series' `endDate` — is refused before anything
+changes. The skipped original keeps marking the period as current and holds
+nothing, so none of the six readers needs a special case. A series with no
+next occurrence and no `endDate` (capped by `maxOccurrences`) keeps rolling, as
+its last bucket already does. Known limitation: while a free-funds series'
+period is moved, free funds reads 0 for that period (TESTs 96 (e), 132).
+
 A series whose `endDate` is already past has **no live bucket at all** — every
 occurrence it still owns is behind us, so nothing will ever arrive to supersede
 the newest one and its reserve would be held forever. Two sites enforce that:
@@ -299,7 +315,15 @@ Anything that copies a transaction to re-add it elsewhere (settle, move,
 relocate on a bank-statement date fix, undo-delete) must call
 `store.carryAllocationDraws(source, target)`. Deleting the original refunds
 every bucket, so a copy that carries only the first row leaves the spend
-standing while the other buckets are quietly credited back.
+standing while the other buckets are quietly credited back. It must also call
+`store.carryBankStatus(source, target)` unless it deliberately sets the status
+itself (the settle paths stamp "cleared"): a copy rebuilt without its
+`bankStatus` falls back to `getBankStatus`'s defaults, so a Cleared recurring
+bill came back "Not in bank" and a Not-in-bank purchase came back Pending on a
+mere re-date (TESTs 94, 131). And when the copy is itself an allocation BUCKET,
+it lands under a fresh id, so its drawers must be re-pointed at it with
+`repointAllocationDraws` — a date move does that, and so does undo-delete, which
+passes the deleted row's id to `_restoreDeletedTransaction` (TEST 133).
 
 The expansion cache and the rolling-allocation collapse are coupled, in both
 directions. A superseded bucket can only be collapsed once its SUPERSEDOR has
@@ -483,7 +507,7 @@ local_last_sync, _backup_before_merge, calendar_view_mode
 
 - `styles.css` - CSS variables for theming (primary, accent, error colors)
 - `README.md` - Project documentation and feature overview
-- `scripts/verify-logic.js` - Standalone logic verification utility (124 tests)
+- `scripts/verify-logic.js` - Standalone logic verification utility (127 tests)
 - `scripts/verify-walk-parity.js` - Randomized balance-walk parity harness + source guard
 - `scripts/verify-ui.js` - Optional headless-Chromium UI harness (`npm run test:ui`)
 - `scripts/verify-sync.js` - Optional two-device cloud-sync harness (`npm run test:sync`)

@@ -444,6 +444,28 @@ class TransactionStore {
     return true;
   }
 
+  // Copy a row's explicit bank status onto a fresh copy that is about to be
+  // re-added elsewhere (a date edit in the day detail, a reconcile "Move").
+  // Those paths rebuild the row field by field, and a copy without the stamp
+  // falls back to getBankStatus's defaults: a Cleared recurring bill came back
+  // "Not in bank" (a moved copy is scheduled) and a Not-in-bank purchase came
+  // back Pending, so the day detail's posted/available figures moved on a mere
+  // re-date. `settled` follows the status exactly as setTransactionBankStatus
+  // pairs them. No explicit status means nothing to carry: the copy's defaults
+  // already describe it the way the original's did. Paths that SETTLE the copy
+  // (the carried-forward Settle, reconcile's Mark settled) stamp "cleared"
+  // themselves instead.
+  carryBankStatus(source, target) {
+    if (!source || !target) return target;
+    const status = source.bankStatus;
+    if (!TransactionStore.BANK_STATUSES.includes(status)) return target;
+    target.bankStatus = status;
+    if (target.type === "expense" && target.allocated !== true) {
+      target.settled = status === "cleared";
+    }
+    return target;
+  }
+
 
   // Date of the latest Ending Balance on/before `dateString`, or null. Skip-
   // aware the way calculateDailyTotals is, so it names the anchor the walk uses.

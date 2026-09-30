@@ -100,64 +100,16 @@ Object.assign(DebtSnowballUI.prototype, {
     return this.getMonthIndex(year, month - 1);
   },
 
+  // Clean scheduled amounts for one month of ONE definition, isolated from the
+  // real data (skips, modified instances, other series). One implementation,
+  // shared with the recurring manager: see RecurringTransactionManager
+  // .expandIsolated, which owns the throwaway store.
   getRecurringOccurrencesForMonth(recurringTransaction, year, month) {
-    if (!recurringTransaction?.startDate || !recurringTransaction?.recurrence) {
-      return [];
-    }
-    const transactions = {};
-    // Throwaway store for a throwaway manager: expand ONE definition into an
-    // isolated map so the projection can read clean scheduled amounts without
-    // touching (or being coloured by) the real data.
-    //
-    // This has to cover everything applyRecurringTransactions can call on a
-    // store. Keep this list in step with the `this.store.*` calls in
-    // recurring-manager.js.
-    const readOnly = (name) => () => {
-      throw new Error(
-        `getRecurringOccurrencesForMonth's throwaway store is read-only; ` +
-          `something called ${name}(). Expansion for the projection must not mutate anything.`
-      );
-    };
-    const dummyStore = {
-      getTransactions: () => transactions,
-      getRecurringTransactions: () => [recurringTransaction],
-      getSkippedTransactions: () => ({}),
-      isTransactionSkipped: () => false,
-      // Reachable: _clearRecurringExpansions tombstones any instance carrying
-      // an id. Rows built here have none, and dropping a tombstone for a
-      // throwaway map is the right no-op either way.
-      trackDeletedTransaction: () => { },
-      saveData: () => { },
-      debouncedSave: () => { },
-      // Not reachable from applyRecurringTransactions today. Present so the
-      // shape is complete, and loud rather than silent if a future path does
-      // reach one — a no-op would swallow a real mutation.
-      addRecurringTransaction: readOnly("addRecurringTransaction"),
-      updateRecurringTransaction: readOnly("updateRecurringTransaction"),
-      updateTransaction: readOnly("updateTransaction"),
-      deleteTransaction: readOnly("deleteTransaction"),
-      setTransactionSkipped: readOnly("setTransactionSkipped"),
-      cancelMoveTransaction: readOnly("cancelMoveTransaction"),
-      rekeyMovedTransaction: readOnly("rekeyMovedTransaction"),
-      // A pure read (the one bank-status rule), reached only by a series
-      // split; answered by the real rule so it can never disagree.
-      getBankStatus: (t) => TransactionStore.prototype.getBankStatus.call(null, t),
-    };
-    const manager = new RecurringTransactionManager(dummyStore);
-    manager.applyRecurringTransactions(year, month);
-    const occurrences = [];
-    Object.keys(transactions).forEach((dateString) => {
-      transactions[dateString].forEach((t) => {
-        if (t.recurringId === recurringTransaction.id) {
-          occurrences.push({
-            dateString,
-            amount: Number(t.amount) || 0,
-          });
-        }
-      });
-    });
-    occurrences.sort((a, b) => a.dateString.localeCompare(b.dateString));
-    return occurrences;
+    return RecurringTransactionManager.expandIsolated(
+      recurringTransaction,
+      year,
+      month
+    ).map((o) => ({ dateString: o.dateString, amount: o.amount }));
   },
 
   getDebtScheduleLabel(debt) {

@@ -1798,8 +1798,12 @@ class BankReconcileUI {
     if (tx.type === "expense") {
       moved.settled = forceSettled ? true : tx.settled !== false;
     }
-    // Settling here means the bank posted it on the target date.
+    // Settling here means the bank posted it on the target date. A plain
+    // re-date keeps whatever the bank status was: the fix-date action only
+    // corrects WHEN the money moved, and dropping the stamp would turn a
+    // cleared recurring bill into "Not in bank" (see carryBankStatus).
     if (forceSettled) moved.bankStatus = "cleared";
+    else this.store.carryBankStatus(tx, moved);
     if (tx.debtId) moved.debtId = tx.debtId;
     if (tx.debtRole) moved.debtRole = tx.debtRole;
     if (tx.debtName) moved.debtName = tx.debtName;

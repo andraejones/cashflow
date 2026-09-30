@@ -4970,7 +4970,9 @@ async function runPushRaceTest() {
 
 // TEST 68: the snowball projection expands each debt's schedule through a
 // throwaway RecurringTransactionManager backed by a hand-written dummy store
-// (getRecurringOccurrencesForMonth). That store is maintained by hand, so it
+// (getRecurringOccurrencesForMonth, which delegates to
+// RecurringTransactionManager.expandIsolated since the store moved there so
+// nextOccurrenceAfter could share it). That store is maintained by hand, so it
 // drifts silently: it covered only 5 of the 12 store methods the manager can
 // call, and _clearRecurringExpansions reaches trackDeletedTransaction for any
 // instance carrying an id. Rows built there have no id today, so it was
@@ -4991,13 +4993,25 @@ console.log("TEST 68: The Projection's Dummy Store Covers Everything Its Manager
     throw new Error("Setup: found no this.store.* calls in recurring-manager.js");
   }
 
-  const engineSource = fs.readFileSync(path.join(jsDir, "debt-snowball-engine.js"), "utf8");
-  const literalStart = engineSource.indexOf("const dummyStore = {");
+  // The literal lives in RecurringTransactionManager.expandIsolated, in the
+  // same file whose calls it has to cover.
+  const literalStart = managerSource.indexOf("const dummyStore = {");
   if (literalStart === -1) {
-    throw new Error("Could not find the projection's dummy store literal");
+    throw new Error("Could not find expandIsolated's dummy store literal");
   }
-  const literalEnd = engineSource.indexOf("\n    };", literalStart);
-  const literal = engineSource.slice(literalStart, literalEnd);
+  if (managerSource.indexOf("const dummyStore = {", literalStart + 1) !== -1) {
+    throw new Error("recurring-manager.js has two dummy store literals; this check reads only the first");
+  }
+  // One implementation: a second hand-written copy elsewhere would drift
+  // exactly the way this one used to, with nothing reading it.
+  fs.readdirSync(jsDir).forEach((file) => {
+    if (!file.endsWith(".js") || file === "recurring-manager.js") return;
+    if (fs.readFileSync(path.join(jsDir, file), "utf8").includes("const dummyStore = {")) {
+      throw new Error(`${file} carries its own dummy store; expand through RecurringTransactionManager.expandIsolated`);
+    }
+  });
+  const literalEnd = managerSource.indexOf("\n    };", literalStart);
+  const literal = managerSource.slice(literalStart, literalEnd);
   const provided = new Set(
     [...literal.matchAll(/^\s{6}([A-Za-z_$][\w$]*)\s*:/gm)].map((m) => m[1])
   );
@@ -5005,7 +5019,7 @@ console.log("TEST 68: The Projection's Dummy Store Covers Everything Its Manager
   const missing = required.filter((name) => !provided.has(name));
   if (missing.length > 0) {
     throw new Error(
-      "getRecurringOccurrencesForMonth's dummy store is missing store method(s) " +
+      "expandIsolated's dummy store is missing store method(s) " +
         `RecurringTransactionManager can call: ${missing.join(", ")}. ` +
         "Add them (no-op if harmless, throwing if a mutation would be a bug)."
     );
@@ -7980,235 +7994,306 @@ console.log("TEST 93: Every Stored Field Survives Every Wrong Shape");
 // individually somewhere; what is NOT covered is what they leave behind for
 // everyone else — an allocation whose reserve no longer matches what was spent,
 // a persisted row that lost its id (which _mergeById silently drops on the next
-// sync), a duplicate id across two dates, or a balance that only survives until
-// the next reload.
+// sync), a duplicate id across two dates, a balance that only survives until
+// the next reload, or a bank status the statement set and the action dropped (a
+// fix-date Move rebuilt its copy without it; the report's re-run re-stamped the
+// copy, so the loss only showed as that extra write).
 console.log("TEST 94: Reconcile Actions Leave Every Component Consistent");
 {
-  const now = new Date();
-  const Y = now.getFullYear();
-  const M = now.getMonth();
-  const ds = (y, m, d) =>
-    `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  // Pinned: the bank view only answers for days on/after the anchor (the 3rd)
+  // and never after today, and the rows sit on the 7th-20th, so on the first
+  // days of a month the bank-view check below would compare two nulls.
+  const RealDate = Date;
+  const FIXED = new RealDate(2026, 8, 28, 12, 0, 0);
+  class FrozenDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(FIXED.getTime()); else super(...a); }
+    static now() { return FIXED.getTime(); }
+  }
+  global.Date = FrozenDate;
+  try {
+    const now = new Date();
+    const Y = now.getFullYear();
+    const M = now.getMonth();
+    const ds = (y, m, d) =>
+      `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 
-  const makeContext = () => {
-    localStorage.clear();
-    const stamp = new Date().toISOString();
-    const store = new TransactionStore();
-    store.resetData();
-    store.importData({
-      transactions: {
-        [ds(Y, M, 3)]: [
-          { id: "anchor", amount: 1800, type: "balance", description: "Ending Balance", _lastModified: stamp },
+    const makeContext = () => {
+      localStorage.clear();
+      const stamp = new Date().toISOString();
+      const store = new TransactionStore();
+      store.resetData();
+      store.importData({
+        transactions: {
+          [ds(Y, M, 3)]: [
+            { id: "anchor", amount: 1800, type: "balance", description: "Ending Balance", _lastModified: stamp },
+          ],
+          [ds(Y, M, 7)]: [
+            { id: "u1", amount: 64.2, type: "expense", description: "PUBLIX", settled: false, _lastModified: stamp },
+            { id: "b1", amount: 150, type: "expense", description: "Grocery Bucket",
+              allocated: true, settled: true, _lastModified: stamp },
+          ],
+          [ds(Y, M, 12)]: [
+            { id: "i1", amount: 1200, type: "income", description: "Paycheck", _lastModified: stamp },
+          ],
+        },
+        monthlyBalances: {},
+        recurringTransactions: [
+          { id: "rw", amount: 22.5, type: "expense", description: "NETFLIX",
+            recurrence: "monthly", startDate: ds(Y, M - 1, 9), _lastModified: stamp },
+          // First occurrence THIS month, so _seriesShiftable actually offers the
+          // whole-series shift — otherwise that mutation path is silently skipped.
+          { id: "rs", amount: 15.75, type: "expense", description: "SPOTIFY",
+            recurrence: "monthly", startDate: ds(Y, M, 18), _lastModified: stamp },
         ],
-        [ds(Y, M, 7)]: [
-          { id: "u1", amount: 64.2, type: "expense", description: "PUBLIX", settled: false, _lastModified: stamp },
-          { id: "b1", amount: 150, type: "expense", description: "Grocery Bucket",
-            allocated: true, settled: true, _lastModified: stamp },
-        ],
-        [ds(Y, M, 12)]: [
-          { id: "i1", amount: 1200, type: "income", description: "Paycheck", _lastModified: stamp },
-        ],
-      },
-      monthlyBalances: {},
-      recurringTransactions: [
-        { id: "rw", amount: 22.5, type: "expense", description: "NETFLIX",
-          recurrence: "monthly", startDate: ds(Y, M - 1, 9), _lastModified: stamp },
-        // First occurrence THIS month, so _seriesShiftable actually offers the
-        // whole-series shift — otherwise that mutation path is silently skipped.
-        { id: "rs", amount: 15.75, type: "expense", description: "SPOTIFY",
-          recurrence: "monthly", startDate: ds(Y, M, 18), _lastModified: stamp },
-      ],
-      debts: [], cashInfusions: [],
-      skippedTransactions: {}, movedTransactions: {}, monthlyNotes: {},
-      debtSnowballSettings: { dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false },
-      lastUpdated: stamp,
-    });
-    // The drawing expense goes in through addTransaction, NOT the import, so
-    // the bucket is actually debited — importing a row that merely CLAIMS a
-    // draw leaves the store inconsistent and the first mutation then "fixes"
-    // it, which reads as a change and masks what the mutation really did.
-    store.addTransaction(ds(Y, M, 7), {
-      amount: 40, type: "expense", description: "Groceries", settled: false,
-      drawsFromAllocationId: "b1",
-    });
-    const manager = new RecurringTransactionManager(store);
-    const calc = new CalculationService(store, manager);
-    const render = () => {
-      manager.applyRecurringTransactions(Y, M);
-      calc.updateMonthlyBalances(new Date(Y, M, 1, 12, 0, 0));
+        debts: [], cashInfusions: [],
+        skippedTransactions: {}, movedTransactions: {}, monthlyNotes: {},
+        debtSnowballSettings: { dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false },
+        lastUpdated: stamp,
+      });
+      // The drawing expense goes in through addTransaction, NOT the import, so
+      // the bucket is actually debited — importing a row that merely CLAIMS a
+      // draw leaves the store inconsistent and the first mutation then "fixes"
+      // it, which reads as a change and masks what the mutation really did.
+      store.addTransaction(ds(Y, M, 7), {
+        amount: 40, type: "expense", description: "Groceries", settled: false,
+        drawsFromAllocationId: "b1",
+      });
+      const manager = new RecurringTransactionManager(store);
+      const calc = new CalculationService(store, manager);
+      const render = () => {
+        manager.applyRecurringTransactions(Y, M);
+        calc.updateMonthlyBalances(new Date(Y, M, 1, 12, 0, 0));
+      };
+      const reconcile = new BankReconcileUI(store, manager, render, () => {});
+      render();
+      return { store, manager, calc, reconcile, render };
     };
-    const reconcile = new BankReconcileUI(store, manager, render, () => {});
-    render();
-    return { store, manager, calc, reconcile, render };
-  };
 
-  const bucketRemaining = (store) => {
-    const bucket = store.getAllocations().find((a) => a.description === "Grocery Bucket");
-    return bucket ? bucket.remaining : null;
-  };
-  const drawnTotal = (store) => {
-    let total = 0;
-    const transactions = store.getTransactions();
-    Object.keys(transactions).forEach((d) =>
-      transactions[d].forEach((t) => {
-        if (t.drawsFromAllocationId) total += Number(t.drawAmount) || 0;
-      })
-    );
-    return Math.round(total * 100) / 100;
-  };
-  // Conservation alone cannot tell "the draw moved with the row" from "the draw
-  // was dropped and the bucket refunded" — both keep bucket+drawn constant.
-  const drawerCount = (store) => {
-    let n = 0;
-    const transactions = store.getTransactions();
-    Object.keys(transactions).forEach((d) =>
-      transactions[d].forEach((t) => { if (t.drawsFromAllocationId) n++; })
-    );
-    return n;
-  };
-  const persistedIds = (store) => {
-    const persisted = store._filterPersistedTransactions(store.getTransactions());
-    const ids = [];
-    Object.keys(persisted).forEach((d) => persisted[d].forEach((t) => ids.push(t.id)));
-    return ids;
-  };
-  const monthBalances = (calc) => {
-    const daysInMonth = new Date(Y, M + 1, 0).getDate();
-    const out = [];
-    for (let d = 1; d <= daysInMonth; d++) out.push(calc.getRunningBalanceForDate(ds(Y, M, d)));
-    return out;
-  };
-  const sameBalances = (a, b) =>
-    a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) < 0.005);
+    const bucketRemaining = (store) => {
+      const bucket = store.getAllocations().find((a) => a.description === "Grocery Bucket");
+      return bucket ? bucket.remaining : null;
+    };
+    const drawnTotal = (store) => {
+      let total = 0;
+      const transactions = store.getTransactions();
+      Object.keys(transactions).forEach((d) =>
+        transactions[d].forEach((t) => {
+          if (t.drawsFromAllocationId) total += Number(t.drawAmount) || 0;
+        })
+      );
+      return Math.round(total * 100) / 100;
+    };
+    // Conservation alone cannot tell "the draw moved with the row" from "the draw
+    // was dropped and the bucket refunded" — both keep bucket+drawn constant.
+    const drawerCount = (store) => {
+      let n = 0;
+      const transactions = store.getTransactions();
+      Object.keys(transactions).forEach((d) =>
+        transactions[d].forEach((t) => { if (t.drawsFromAllocationId) n++; })
+      );
+      return n;
+    };
+    const persistedIds = (store) => {
+      const persisted = store._filterPersistedTransactions(store.getTransactions());
+      const ids = [];
+      Object.keys(persisted).forEach((d) => persisted[d].forEach((t) => ids.push(t.id)));
+      return ids;
+    };
+    const monthBalances = (calc) => {
+      const daysInMonth = new Date(Y, M + 1, 0).getDate();
+      const out = [];
+      for (let d = 1; d <= daysInMonth; d++) out.push(calc.getRunningBalanceForDate(ds(Y, M, d)));
+      return out;
+    };
+    const sameBalances = (a, b) =>
+      a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) < 0.005);
+    // The day detail's "In bank" figures as of today (dates left out: a Move
+    // changes them by design).
+    const bankView = (c) => {
+      c.calc.invalidateCache();
+      const v = c.calc.getBankView(Utils.formatDateString(new Date()));
+      if (!v) throw new Error("the bank view has no open window on the pinned day");
+      return JSON.stringify({
+        posted: v.posted, available: v.available, pendingNet: v.pendingNet,
+        expectedNet: v.expectedNet, notInBank: v.expected.map((e) => e.description).sort(),
+      });
+    };
 
-  const ACTIONS = {
-    "settle on the same day": (c) => {
-      c.reconcile._run([
-        { date: ds(Y, M, 7), postedDate: ds(Y, M, 7), signed: -64.2, description: "PUBLIX #123", pending: false, matched: false },
-        { date: ds(Y, M, 7), postedDate: ds(Y, M, 7), signed: -40.0, description: "GROCERIES CO", pending: false, matched: false },
-      ]);
-      const pairs = c.reconcile.result.clearedUnsettled || [];
-      pairs.slice().forEach((p) => c.reconcile._settle(p));
-      return pairs.length;
-    },
-    "settle onto a later posted date (relocates)": (c) => {
-      c.reconcile._run([
-        { date: ds(Y, M, 7), postedDate: ds(Y, M, 9), signed: -64.2, description: "PUBLIX #123", pending: false, matched: false },
-        { date: ds(Y, M, 7), postedDate: ds(Y, M, 10), signed: -40.0, description: "GROCERIES CO", pending: false, matched: false },
-      ]);
-      const pairs = c.reconcile.result.clearedUnsettled || [];
-      pairs.slice().forEach((p) => c.reconcile._settle(p));
-      return pairs.length;
-    },
-    "fix a drifted date": (c) => {
-      c.reconcile._run([
-        { date: ds(Y, M, 11), postedDate: ds(Y, M, 11), signed: -22.5, description: "NETFLIX.COM", pending: false, matched: false },
-      ]);
-      const pair = (c.reconcile.result.dateDrifted || [])[0];
-      if (pair) c.reconcile._fixDate(pair);
-      return pair ? 1 : 0;
-    },
-    "shift a whole series": (c) => {
-      c.reconcile._run([
-        { date: ds(Y, M, 20), postedDate: ds(Y, M, 20), signed: -15.75, description: "SPOTIFY USA", pending: false, matched: false },
-      ]);
-      const pair = (c.reconcile.result.dateDrifted || []).find((p) => p.seriesShiftable);
-      if (pair) c.reconcile._shiftSeries(pair);
-      return pair ? 1 : 0;
-    },
-    "fix an amount": (c) => {
-      c.reconcile._run([
-        { date: ds(Y, M, 7), postedDate: ds(Y, M, 7), signed: -70.0, description: "PUBLIX #123", pending: false, matched: false },
-      ]);
-      const pair = (c.reconcile.result.reviewPairs || [])[0];
-      if (pair) c.reconcile._fixAmount(pair);
-      return pair ? 1 : 0;
-    },
-    "add a missing bank row": (c) => {
-      c.reconcile._run([
-        { date: ds(Y, M, 15), postedDate: ds(Y, M, 15), signed: -31.99, description: "WAWA 4412", pending: false, matched: false },
-      ]);
-      const row = (c.reconcile.result.missingFromApp || [])[0];
-      if (row) c.reconcile._addBankRow(row, true);
-      return row ? 1 : 0;
-    },
-  };
+    const ACTIONS = {
+      "settle on the same day": (c) => {
+        c.reconcile._run([
+          { date: ds(Y, M, 7), postedDate: ds(Y, M, 7), signed: -64.2, description: "PUBLIX #123", pending: false, matched: false },
+          { date: ds(Y, M, 7), postedDate: ds(Y, M, 7), signed: -40.0, description: "GROCERIES CO", pending: false, matched: false },
+        ]);
+        const pairs = c.reconcile.result.clearedUnsettled || [];
+        pairs.slice().forEach((p) => c.reconcile._settle(p));
+        return pairs.length;
+      },
+      "settle onto a later posted date (relocates)": (c) => {
+        c.reconcile._run([
+          { date: ds(Y, M, 7), postedDate: ds(Y, M, 9), signed: -64.2, description: "PUBLIX #123", pending: false, matched: false },
+          { date: ds(Y, M, 7), postedDate: ds(Y, M, 10), signed: -40.0, description: "GROCERIES CO", pending: false, matched: false },
+        ]);
+        const pairs = c.reconcile.result.clearedUnsettled || [];
+        pairs.slice().forEach((p) => c.reconcile._settle(p));
+        return pairs.length;
+      },
+      "fix a drifted date": (c) => {
+        c.reconcile._run([
+          { date: ds(Y, M, 11), postedDate: ds(Y, M, 11), signed: -22.5, description: "NETFLIX.COM", pending: false, matched: false },
+        ]);
+        const pair = (c.reconcile.result.dateDrifted || [])[0];
+        // A Move only corrects WHEN the money moved: whatever the run just
+        // stamped on the entry has to travel with it (checked below).
+        if (pair) {
+          const row = c.store.getTransactions()[pair.app.date][c.reconcile._currentIndex(pair.app)];
+          if (!row || !row.bankStatus) {
+            throw new Error(`"fix a drifted date": the run stamped no bank status, so the view check would pin nothing`);
+          }
+          c.bankViewBefore = bankView(c);
+          c.reconcile._fixDate(pair);
+        }
+        return pair ? 1 : 0;
+      },
+      "shift a whole series": (c) => {
+        c.reconcile._run([
+          { date: ds(Y, M, 20), postedDate: ds(Y, M, 20), signed: -15.75, description: "SPOTIFY USA", pending: false, matched: false },
+        ]);
+        const pair = (c.reconcile.result.dateDrifted || []).find((p) => p.seriesShiftable);
+        if (pair) c.reconcile._shiftSeries(pair);
+        return pair ? 1 : 0;
+      },
+      "fix an amount": (c) => {
+        c.reconcile._run([
+          { date: ds(Y, M, 7), postedDate: ds(Y, M, 7), signed: -70.0, description: "PUBLIX #123", pending: false, matched: false },
+        ]);
+        const pair = (c.reconcile.result.reviewPairs || [])[0];
+        if (pair) c.reconcile._fixAmount(pair);
+        return pair ? 1 : 0;
+      },
+      "add a missing bank row": (c) => {
+        c.reconcile._run([
+          { date: ds(Y, M, 15), postedDate: ds(Y, M, 15), signed: -31.99, description: "WAWA 4412", pending: false, matched: false },
+        ]);
+        const row = (c.reconcile.result.missingFromApp || [])[0];
+        if (row) c.reconcile._addBankRow(row, true);
+        return row ? 1 : 0;
+      },
+    };
 
-  Object.entries(ACTIONS).forEach(([label, run]) => {
-    const c = makeContext();
-    const bucketBefore = bucketRemaining(c.store);
-    const drawnBefore = drawnTotal(c.store);
-    const drawersBefore = drawerCount(c.store);
+    Object.entries(ACTIONS).forEach(([label, run]) => {
+      const c = makeContext();
+      const bucketBefore = bucketRemaining(c.store);
+      const drawnBefore = drawnTotal(c.store);
+      const drawersBefore = drawerCount(c.store);
 
+      // Count what the report's own re-run (every action ends in
+    // _afterMutation -> _run) finds to re-stamp. An action has to leave each
+    // entry as the statement describes it: a re-stamp means it dropped a bank
+    // status the first run had set, and the re-run only papered over it — and
+    // only because this statement still matches the entry.
+    let restamps = 0;
+    let firstRunDone = false;
+    const realRun = c.reconcile._run.bind(c.reconcile);
+    const realStamp = c.reconcile._stampBankStatuses.bind(c.reconcile);
+    c.reconcile._run = (rows) => {
+      const result = realRun(rows);
+      firstRunDone = true;
+      return result;
+    };
+    c.reconcile._stampBankStatuses = (...args) => {
+      const wrote = realStamp(...args);
+      if (firstRunDone && wrote) restamps++;
+      return wrote;
+    };
     const applied = run(c);
-    // A scenario that produces no pair proves nothing — fail loudly rather than
-    // reporting a pass for a path that never ran.
-    if (!applied) {
-      throw new Error(`"${label}" produced no actionable pair; the path was never exercised`);
-    }
-    c.render();
+      // A scenario that produces no pair proves nothing — fail loudly rather than
+      // reporting a pass for a path that never ran.
+      if (!applied) {
+        throw new Error(`"${label}" produced no actionable pair; the path was never exercised`);
+      }
+      c.render();
 
-    const bucketAfter = bucketRemaining(c.store);
-    const drawnAfter = drawnTotal(c.store);
-    if (
-      bucketAfter !== null &&
-      Math.abs(bucketAfter + drawnAfter - (bucketBefore + drawnBefore)) > 0.005
-    ) {
+      const bucketAfter = bucketRemaining(c.store);
+      const drawnAfter = drawnTotal(c.store);
+      if (
+        bucketAfter !== null &&
+        Math.abs(bucketAfter + drawnAfter - (bucketBefore + drawnBefore)) > 0.005
+      ) {
+        throw new Error(
+          `"${label}": the allocation reserve was not conserved — ` +
+            `${bucketBefore}+${drawnBefore} became ${bucketAfter}+${drawnAfter}`
+        );
+      }
+      // None of these actions changes what was SPENT, so the bucket must not move
+      // and no row may quietly stop being billed against it.
+      if (bucketAfter !== null && Math.abs(bucketAfter - bucketBefore) > 0.005) {
+        throw new Error(`"${label}": the bucket's remaining moved ${bucketBefore} -> ${bucketAfter}`);
+      }
+      const drawersAfter = drawerCount(c.store);
+      if (drawersAfter < drawersBefore) {
+        throw new Error(
+          `"${label}": a row stopped drawing from its bucket (${drawersBefore} -> ${drawersAfter})`
+        );
+      }
+
+      if (restamps > 0) {
       throw new Error(
-        `"${label}": the allocation reserve was not conserved — ` +
-          `${bucketBefore}+${drawnBefore} became ${bucketAfter}+${drawnAfter}`
+        `"${label}": the report's re-run had to re-stamp ${restamps} time(s) — ` +
+          `the action dropped a bank status the statement had set`
       );
     }
-    // None of these actions changes what was SPENT, so the bucket must not move
-    // and no row may quietly stop being billed against it.
-    if (bucketAfter !== null && Math.abs(bucketAfter - bucketBefore) > 0.005) {
-      throw new Error(`"${label}": the bucket's remaining moved ${bucketBefore} -> ${bucketAfter}`);
-    }
-    const drawersAfter = drawerCount(c.store);
-    if (drawersAfter < drawersBefore) {
-      throw new Error(
-        `"${label}": a row stopped drawing from its bucket (${drawersBefore} -> ${drawersAfter})`
-      );
-    }
+    if (c.bankViewBefore !== undefined) {
+        const after = bankView(c);
+        if (after !== c.bankViewBefore) {
+          throw new Error(
+            `"${label}": the bank view moved — a re-dated entry lost its bank status\n` +
+              `    before ${c.bankViewBefore}\n    after  ${after}`
+          );
+        }
+      }
 
-    const ids = persistedIds(c.store);
-    if (ids.some((id) => !id)) {
-      throw new Error(`"${label}": a persisted row lost its id — _mergeById would drop it on sync`);
-    }
-    const duplicates = [...new Set(ids.filter((id, i) => ids.indexOf(id) !== i))];
-    if (duplicates.length) {
-      throw new Error(`"${label}": the same id lives at two dates: ${duplicates.join(", ")}`);
-    }
+      const ids = persistedIds(c.store);
+      if (ids.some((id) => !id)) {
+        throw new Error(`"${label}": a persisted row lost its id — _mergeById would drop it on sync`);
+      }
+      const duplicates = [...new Set(ids.filter((id, i) => ids.indexOf(id) !== i))];
+      if (duplicates.length) {
+        throw new Error(`"${label}": the same id lives at two dates: ${duplicates.join(", ")}`);
+      }
 
-    const live = monthBalances(c.calc);
-    if (live.some((v) => !Number.isFinite(v))) {
-      throw new Error(`"${label}": produced a non-finite balance`);
-    }
-    c.render();
-    if (!sameBalances(live, monthBalances(c.calc))) {
-      throw new Error(`"${label}": a repeat render changed the balances`);
-    }
+      const live = monthBalances(c.calc);
+      if (live.some((v) => !Number.isFinite(v))) {
+        throw new Error(`"${label}": produced a non-finite balance`);
+      }
+      c.render();
+      if (!sameBalances(live, monthBalances(c.calc))) {
+        throw new Error(`"${label}": a repeat render changed the balances`);
+      }
 
-    c.store.saveData(true);
-    const reloaded = new TransactionStore();
-    const reloadedManager = new RecurringTransactionManager(reloaded);
-    const reloadedCalc = new CalculationService(reloaded, reloadedManager);
-    reloadedManager.applyRecurringTransactions(Y, M);
-    reloadedCalc.updateMonthlyBalances(new Date(Y, M, 1, 12, 0, 0));
-    const afterReload = monthBalances(reloadedCalc);
-    if (!sameBalances(live, afterReload)) {
-      const i = live.findIndex((v, j) => Math.abs(v - afterReload[j]) >= 0.005);
-      throw new Error(
-        `"${label}": a reload changed the balance on day ${i + 1}: ${live[i]} -> ${afterReload[i]}`
-      );
-    }
-    c.store.cancelPendingSave();
-    reloaded.cancelPendingSave();
-  });
+      c.store.saveData(true);
+      const reloaded = new TransactionStore();
+      const reloadedManager = new RecurringTransactionManager(reloaded);
+      const reloadedCalc = new CalculationService(reloaded, reloadedManager);
+      reloadedManager.applyRecurringTransactions(Y, M);
+      reloadedCalc.updateMonthlyBalances(new Date(Y, M, 1, 12, 0, 0));
+      const afterReload = monthBalances(reloadedCalc);
+      if (!sameBalances(live, afterReload)) {
+        const i = live.findIndex((v, j) => Math.abs(v - afterReload[j]) >= 0.005);
+        throw new Error(
+          `"${label}": a reload changed the balance on day ${i + 1}: ${live[i]} -> ${afterReload[i]}`
+        );
+      }
+      c.store.cancelPendingSave();
+      reloaded.cancelPendingSave();
+    });
 
-  console.log(
-    `✅ ${Object.keys(ACTIONS).length} reconcile actions conserve reserves, ids, balances and reloads`
-  );
+    console.log(
+      `✅ ${Object.keys(ACTIONS).length} reconcile actions conserve reserves, ids, balances, reloads and the bank view`
+    );
+  } finally {
+    global.Date = RealDate;
+  }
 }
 
 // TEST 95: an edit made at ANY await boundary of a sync must survive it.
@@ -8637,6 +8722,129 @@ console.log("TEST 96: A Skipped Occurrence Ends The Period Before It");
       throw new Error(`(d) balance ${bal}, expected 1800`);
     }
     store.cancelPendingSave();
+  }
+
+  // (e) A period re-dated from the day detail. The copy is a one-time row, so
+  //     before it was pinned to its period it rolled forward forever and the
+  //     readers split at the next turnover: the drawable list, the reserve
+  //     index and the Allocated modal all carried two Groceries buckets while
+  //     the series' own sweeps saw one. The skipped original keeps marking the
+  //     period as current (holding nothing), and the pinned copy retires the
+  //     day the next period lands, so every reader names exactly one bucket
+  //     at every date. Clock pinned: the turnover has to be crossed.
+  {
+    const RealDate = Date;
+    let FIXED = new RealDate(2026, 8, 29, 12, 0, 0);
+    class FrozenDate extends RealDate {
+      constructor(...a) { if (a.length === 0) super(FIXED.getTime()); else super(...a); }
+      static now() { return FIXED.getTime(); }
+    }
+    global.Date = FrozenDate;
+    let store = null;
+    try {
+      localStorage.clear();
+      store = new TransactionStore();
+      store.resetData();
+      const manager = new RecurringTransactionManager(store);
+      const calc = new CalculationService(store, manager);
+      store.addTransaction("2026-09-20", { amount: 1000, type: "balance", description: "Ending Balance" });
+      store.addRecurringTransaction({ id: "wk", startDate: "2026-09-07", amount: 100, type: "expense",
+        description: "Groceries", recurrence: "weekly", allocated: true, settled: true });
+      const render = () => {
+        store.closeOutExpiredAllocations();
+        store.rollForwardAllocations();
+        const n = new Date();
+        manager.applyRecurringTransactions(n.getFullYear(), n.getMonth());
+        manager.applyRecurringTransactions(n.getFullYear(), n.getMonth() + 1);
+        manager._collapseSupersededRollingAllocations();
+        store.closeOutExpiredAllocations();
+        calc.invalidateCache();
+        calc.updateMonthlyBalances(n);
+      };
+      render();
+      // The real day-detail date edit: this period's bucket, 9/28 -> 9/29.
+      const ui = Object.create(TransactionUI.prototype);
+      Object.assign(ui, { store, recurringManager: manager, calculationService: calc,
+        onUpdate() {}, cloudSync: null, showTransactionDetails() {} });
+      const D = "2026-09-28";
+      const idx = store.getTransactions()[D].findIndex((t) => t.recurringId === "wk");
+      const prevFields = global.__domFields;
+      global.__domFields = {
+        [`edit-amount-${D}-${idx}`]: "100", [`edit-type-${D}-${idx}`]: "expense",
+        [`edit-description-${D}-${idx}`]: "Groceries", [`edit-date-${D}-${idx}`]: "2026-09-29",
+        [`edit-recurrence-${D}-${idx}`]: "this",
+      };
+      try {
+        ui.saveEdit(D, idx, store.getTransactions()[D][idx].id);
+      } finally {
+        global.__domFields = prevFields;
+      }
+      if (!(store.getTransactions()["2026-09-29"] || []).some((t) => t.originalRecurringId === "wk")) {
+        throw new Error("(e) setup: the period did not move");
+      }
+
+      const readers = () => {
+        const today = Utils.formatDateString(new Date());
+        const tx = store.getTransactions();
+        const isGroceries = (t) => t.recurringId === "wk" || t.originalRecurringId === "wk";
+        // Rows actually holding money (what the anchors hold back).
+        const held = [];
+        // The Allocated modal: the live rolling bucket (unless skipped), plus
+        // the entered buckets on/before today (transcribed from app.js).
+        const liveRolling = new Map();
+        Object.keys(tx).forEach((d) => {
+          if (d > today) return;
+          tx[d].forEach((t) => {
+            if (t.allocated !== true || !isGroceries(t)) return;
+            if (!(t.recurringId && store.isTransactionSkipped(d, t.recurringId))) {
+              held.push(`${d}:${t.amount}`);
+            }
+            if (t.autoCloseout === true || !t.recurringId) return;
+            const cur = liveRolling.get(t.recurringId);
+            if (!cur || d > cur) liveRolling.set(t.recurringId, d);
+          });
+        });
+        const modal = [];
+        Object.keys(tx).forEach((d) => {
+          if (d > today) return;
+          tx[d].forEach((t) => {
+            if (t.allocated !== true || !isGroceries(t)) return;
+            const liveDate = t.recurringId && t.autoCloseout !== true ? liveRolling.get(t.recurringId) : undefined;
+            if (liveDate) {
+              if (d === liveDate && !store.isTransactionSkipped(d, t.recurringId)) modal.push(`${d}:${t.amount}`);
+              return;
+            }
+            if (t._lastModified) modal.push(`${d}:${t.amount}`);
+          });
+        });
+        return {
+          drawable: store.getAllocations(today).map((a) => `${a.date}:${a.remaining}`).sort(),
+          held: held.sort(),
+          modal: modal.sort(),
+          reserved: calc.getReservedTotalOnOrBefore(today),
+        };
+      };
+      for (const [m, d] of [[8, 29], [9, 4], [9, 5], [9, 6], [9, 12]]) {
+        FIXED = new RealDate(2026, m, d, 12, 0, 0);
+        render();
+        render();
+        const r = readers();
+        const on = Utils.formatDateString(new Date());
+        if (r.drawable.length !== 1) {
+          throw new Error(`(e) on ${on} ${r.drawable.length} Groceries buckets are drawable: ${JSON.stringify(r)}`);
+        }
+        if (JSON.stringify(r.held) !== JSON.stringify(r.drawable) ||
+            JSON.stringify(r.modal) !== JSON.stringify(r.drawable)) {
+          throw new Error(`(e) on ${on} the readers disagree: ${JSON.stringify(r)}`);
+        }
+        if (Math.abs(r.reserved - 100) > 0.005) {
+          throw new Error(`(e) on ${on} the reserve index holds ${r.reserved}, expected one period (100)`);
+        }
+      }
+    } finally {
+      global.Date = RealDate;
+      if (store) store.cancelPendingSave();
+    }
   }
 
   console.log("✅ A skipped period retires the one before it, holds nothing, and never walks backwards");
@@ -11585,6 +11793,361 @@ console.log("TEST 130: Series-Scope Edits Keep A Bucket's Definition And Reach T
   }
 }
 
+// TEST 131: a date edit keeps the bank status.
+//
+// Re-dating an entry from the day detail (and reconcile's fix-date "Move")
+// rebuilds it field by field as a fresh copy, and the copy was built without
+// its `bankStatus`, so it fell back to getBankStatus's defaults: a Cleared
+// recurring bill came back "Not in bank" (a moved copy is scheduled), a
+// Not-in-bank purchase came back Pending, and the day detail's posted and
+// available figures moved although nothing about the money had changed. Every
+// copy-and-re-add path now calls store.carryBankStatus, which also keeps
+// `settled` paired with the status the way setTransactionBankStatus does. All
+// three saveEdit branches are driven through the real form (recurring
+// occurrence, a re-move of a moved copy, a one-time row), then the reconcile
+// fix-date path.
+console.log("TEST 131: A Date Edit Keeps The Bank Status");
+{
+  const assert = require("assert");
+  const RealDate = Date;
+  const FIXED = new RealDate(2026, 8, 29, 12, 0, 0);
+  class FrozenDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(FIXED.getTime()); else super(...a); }
+    static now() { return FIXED.getTime(); }
+  }
+  global.Date = FrozenDate;
+  let s = null;
+  try {
+    localStorage.clear();
+    s = new TransactionStore();
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    const cs = new CalculationService(s, rm);
+    const ui = P2_editUI(s, rm, cs);
+    s.addTransaction("2026-09-20", { amount: 1000, type: "balance", description: "Ending Balance" });
+    s.addRecurringTransaction({ id: "net", startDate: "2026-08-24", amount: 80, type: "expense",
+      description: "Internet", recurrence: "monthly", settled: true });
+    s.addRecurringTransaction({ id: "phone", startDate: "2026-08-25", amount: 50, type: "expense",
+      description: "Phone", recurrence: "monthly", settled: true });
+    s.addTransaction("2026-09-25", { amount: 40, type: "expense", description: "Store", settled: true });
+    s.addRecurringTransaction({ id: "water", startDate: "2026-08-27", amount: 30, type: "expense",
+      description: "Water", recurrence: "monthly", settled: true });
+    s.addTransaction("2026-09-26", { amount: 25, type: "expense", description: "Gift", settled: true });
+    const expand = () => { rm.invalidateCache(); rm.applyRecurringTransactions(2026, 8); };
+    expand();
+    const at = (d, desc) => (s.getTransactions()[d] || []).findIndex((t) => t.description === desc);
+    const row = (d, desc) => s.getTransactions()[d][at(d, desc)];
+    // Reconcile-style stamps, one of each status.
+    s.setTransactionBankStatus("2026-09-24", at("2026-09-24", "Internet"), "cleared");
+    s.setTransactionBankStatus("2026-09-25", at("2026-09-25", "Store"), "expected");
+    s.setTransactionBankStatus("2026-09-25", at("2026-09-25", "Phone"), "pending");
+    s.setTransactionBankStatus("2026-09-27", at("2026-09-27", "Water"), "cleared");
+    s.setTransactionBankStatus("2026-09-26", at("2026-09-26", "Gift"), "expected");
+    const view = () => {
+      expand();
+      cs.invalidateCache();
+      const v = cs.getBankView("2026-09-29");
+      assert.ok(v, "the bank view answers on 9/29");
+      return {
+        posted: v.posted, available: v.available, pendingNet: v.pendingNet,
+        expectedNet: v.expectedNet,
+        notInBank: v.expected.map((e) => e.description).sort(),
+      };
+    };
+    const before = view();
+    assert.deepStrictEqual(before.notInBank, ["Gift", "Store"], "setup: Gift and Store are not in the bank");
+    assert.strictEqual(before.pendingNet, -50, "setup: Phone is a $50 hold");
+
+    const edit = (d, desc, to) => {
+      const idx = at(d, desc);
+      assert.ok(idx !== -1, `setup: ${desc} is on ${d}`);
+      P2_saveEdit(ui, d, idx, { amount: s.getTransactions()[d][idx].amount, description: desc, date: to });
+    };
+    // Recurring branch: the cleared Internet bill posted a day earlier.
+    edit("2026-09-24", "Internet", "2026-09-23");
+    // Recurring branch, then the re-move branch on the moved copy.
+    edit("2026-09-25", "Phone", "2026-09-26");
+    edit("2026-09-26", "Phone", "2026-09-27");
+    // One-time branch: the purchase that is not in the bank.
+    edit("2026-09-25", "Store", "2026-09-24");
+
+    const status = (d, desc) => {
+      const t = row(d, desc);
+      return [s.getBankStatus(t), t.settled];
+    };
+    assert.deepStrictEqual(status("2026-09-23", "Internet"), ["cleared", true],
+      "a cleared recurring bill stays cleared (and settled) after a re-date");
+    assert.deepStrictEqual(status("2026-09-27", "Phone"), ["pending", false],
+      "a pending hold stays pending (and unsettled) across a move and a re-move");
+    assert.deepStrictEqual(status("2026-09-24", "Store"), ["expected", false],
+      "a not-in-bank purchase stays not in bank rather than turning into a hold");
+    assert.deepStrictEqual(view(), before, "the day detail's bank figures don't move on a re-date");
+
+    // Reconcile's fix-date "Move" (a non-forced relocation). Called without
+    // a prior run, so the report's re-run can't re-stamp what the Move
+    // dropped (TEST 94 counts those re-stamps). Both rows are ones whose
+    // rebuilt copy would read differently by default: a moved recurring
+    // occurrence reads "Not in bank", and a one-time row stamped Not in bank
+    // is unsettled, so it would read Pending.
+    const reconcile = new BankReconcileUI(s, rm, () => {}, () => {});
+    const fix = (d, desc, to) => {
+      const t = row(d, desc);
+      reconcile._fixDate({
+        app: { date: d, id: t.id, type: t.type, amount: t.amount, description: desc,
+          recurringId: t.recurringId || null },
+        bank: { date: to, postedDate: to },
+        targetDate: to,
+      });
+    };
+    fix("2026-09-27", "Water", "2026-09-28");
+    assert.deepStrictEqual(status("2026-09-28", "Water"), ["cleared", true],
+      "fix-date keeps a cleared recurring bill cleared");
+    fix("2026-09-26", "Gift", "2026-09-27");
+    assert.deepStrictEqual(status("2026-09-27", "Gift"), ["expected", false],
+      "fix-date keeps a not-in-bank purchase not in bank");
+    assert.deepStrictEqual(view(), before, "and the bank figures still don't move");
+    console.log("✅ Re-dating an entry, from the day detail or a reconcile Move, keeps its bank status");
+  } finally {
+    global.Date = RealDate;
+    if (s) s.cancelPendingSave();
+  }
+}
+
+// TEST 132: a re-dated rolling-allocation period retires with its period.
+//
+// A rolling recurring allocation's current bucket, moved to another date from
+// the day detail, became a one-time copy, and a one-time bucket with no
+// close-out rolls forward forever: nothing supersedes it. From the next
+// turnover on, two periods were reserved against every balance (three after
+// the next re-date, and so on). The copy is now pinned to its period — an
+// auto-close-out bucket closing the day before the series' next occurrence —
+// and a move past that next occurrence is refused, so at every date the moved
+// series reads exactly like one that was never moved.
+console.log("TEST 132: A Re-Dated Rolling Allocation Period Retires With Its Period");
+{
+  const assert = require("assert");
+  const RealDate = Date;
+  let FIXED = new RealDate(2026, 8, 29, 12, 0, 0);
+  class FrozenDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(FIXED.getTime()); else super(...a); }
+    static now() { return FIXED.getTime(); }
+  }
+  const freeze = (y, m, d) => { FIXED = new RealDate(y, m, d, 12, 0, 0); };
+  global.Date = FrozenDate;
+  const stores = [];
+  const realNotify = Utils.showNotification;
+  const notices = [];
+  Utils.showNotification = (msg, kind) => { notices.push([msg, kind]); };
+  try {
+    const make = (def, anchor) => {
+      localStorage.clear();
+      const s = new TransactionStore();
+      s.resetData();
+      stores.push(s);
+      const rm = new RecurringTransactionManager(s);
+      const cs = new CalculationService(s, rm);
+      s.addTransaction(anchor.date, { amount: anchor.amount, type: "balance", description: "Ending Balance" });
+      s.addRecurringTransaction({ ...def });
+      return { s, rm, cs, ui: P2_editUI(s, rm, cs) };
+    };
+    // The app's render order (app.js updateUI), on the months in play.
+    const render = ({ s, rm, cs }) => {
+      s.autoSettleExpiredRecurring();
+      if (s.closeOutExpiredAllocations()) rm.invalidateCache();
+      s.rollForwardAllocations();
+      const n = new Date();
+      rm.applyRecurringTransactions(n.getFullYear(), n.getMonth());
+      rm.applyRecurringTransactions(n.getFullYear(), n.getMonth() + 1);
+      if (s.closeOutExpiredAllocations()) rm.invalidateCache();
+      cs.invalidateCache();
+      cs.updateMonthlyBalances(n);
+    };
+    const read = (c) => {
+      const today = Utils.formatDateString(new Date());
+      const b = c.cs.getDayBalanceBreakdown(today);
+      return {
+        balance: b.balance,
+        allocatedRemaining: b.allocatedRemaining,
+        running: c.cs.getRunningBalanceForDate(today),
+        buckets: c.s.getAllocations().length,
+        held: c.s.getAllocations().reduce((sum, a) => Math.round((sum + a.remaining) * 100) / 100, 0),
+      };
+    };
+    const occIdx = (c, d, rid) => (c.s.getTransactions()[d] || []).findIndex((t) => t.recurringId === rid);
+
+    // (a) Weekly, moved forward within its period, and drawn from.
+    {
+      const def = { id: "groc", startDate: "2026-09-07", amount: 100, type: "expense",
+        description: "Groceries", recurrence: "weekly", allocated: true, settled: true };
+      const anchor = { date: "2026-09-20", amount: 1000 };
+      freeze(2026, 8, 29);
+      const control = make(def, anchor);
+      const moved = make(def, anchor);
+      render(control);
+      render(moved);
+      P2_saveEdit(moved.ui, "2026-09-28", occIdx(moved, "2026-09-28", "groc"),
+        { amount: 100, description: "Groceries", date: "2026-09-29" });
+      const copy = moved.s.getTransactions()["2026-09-29"].find((t) => t.allocated === true);
+      assert.ok(copy, "(a) setup: the period moved to 9/29");
+      assert.deepStrictEqual([copy.autoCloseout, copy.closeoutDate], [true, "2026-10-04"],
+        "(a) the moved period closes the day before the next one lands");
+      // The same $30 spend, billed against this period's bucket in both.
+      [control, moved].forEach((c) => {
+        render(c);
+        const bucket = c.s.getAllocations("2026-09-29")[0];
+        c.s.addTransaction("2026-09-29", { amount: 30, type: "expense", description: "Publix",
+          settled: true, allocationDraws: [{ allocationId: bucket.id, amount: null }] });
+      });
+      for (const [y, m, d] of [[2026, 8, 29], [2026, 9, 4], [2026, 9, 5], [2026, 9, 6], [2026, 9, 13]]) {
+        freeze(y, m, d);
+        render(control);
+        render(moved);
+        render(moved);
+        assert.deepStrictEqual(read(moved), read(control),
+          `(a) on ${Utils.formatDateString(new Date())} the moved series reads like the unmoved one`);
+        assert.strictEqual(read(moved).buckets, 1, "(a) exactly one live Groceries bucket");
+      }
+    }
+
+    // (b) Monthly, moved within its period; checked past the turnover.
+    {
+      const def = { id: "fun", startDate: "2026-09-01", amount: 100, type: "expense",
+        description: "Fun money", recurrence: "monthly", allocated: true, settled: true };
+      const anchor = { date: "2026-08-31", amount: 2000 };
+      freeze(2026, 8, 29);
+      const control = make(def, anchor);
+      const moved = make(def, anchor);
+      render(control);
+      render(moved);
+      P2_saveEdit(moved.ui, "2026-09-01", occIdx(moved, "2026-09-01", "fun"),
+        { amount: 100, description: "Fun money", date: "2026-09-05" });
+      const copy = moved.s.getTransactions()["2026-09-05"].find((t) => t.allocated === true);
+      assert.deepStrictEqual([copy.autoCloseout, copy.closeoutDate], [true, "2026-09-30"],
+        "(b) the moved month closes on the last day of its month");
+      for (const [y, m, d] of [[2026, 8, 29], [2026, 8, 30], [2026, 9, 1], [2026, 9, 15], [2026, 10, 2]]) {
+        freeze(y, m, d);
+        render(control);
+        render(moved);
+        assert.deepStrictEqual(read(moved), read(control),
+          `(b) on ${Utils.formatDateString(new Date())} the moved series reads like the unmoved one`);
+      }
+    }
+
+    // (c) A move past the next period is refused, before anything changes —
+    //     for the first move and for a re-move of the moved copy.
+    {
+      const def = { id: "groc", startDate: "2026-09-07", amount: 100, type: "expense",
+        description: "Groceries", recurrence: "weekly", allocated: true, settled: true };
+      freeze(2026, 8, 29);
+      const c = make(def, { date: "2026-09-20", amount: 1000 });
+      render(c);
+      const snapshot = () => JSON.stringify({
+        t: c.s._filterPersistedTransactions(c.s.getTransactions()),
+        skipped: c.s.getSkippedTransactions(),
+        moved: c.s.movedTransactions,
+      });
+      let before = snapshot();
+      notices.length = 0;
+      P2_saveEdit(c.ui, "2026-09-28", occIdx(c, "2026-09-28", "groc"),
+        { amount: 100, description: "Groceries", date: "2026-10-05" });
+      assert.strictEqual(snapshot(), before, "(c) a move onto the next period's date changes nothing");
+      assert.ok(notices.some(([msg, kind]) => kind === "error" && /next period/.test(msg)),
+        `(c) and says why: ${JSON.stringify(notices)}`);
+
+      P2_saveEdit(c.ui, "2026-09-28", occIdx(c, "2026-09-28", "groc"),
+        { amount: 100, description: "Groceries", date: "2026-10-02" });
+      const idx = c.s.getTransactions()["2026-10-02"].findIndex((t) => t.allocated === true);
+      assert.ok(idx !== -1, "(c) setup: a move inside the period is allowed");
+      before = snapshot();
+      notices.length = 0;
+      P2_saveEdit(c.ui, "2026-10-02", idx, { amount: 100, description: "Groceries", date: "2026-10-06" });
+      assert.strictEqual(snapshot(), before, "(c) a re-move past the next period changes nothing");
+      assert.ok(notices.some(([msg, kind]) => kind === "error" && /next period/.test(msg)),
+        "(c) and says why");
+      P2_saveEdit(c.ui, "2026-10-02", idx, { amount: 100, description: "Groceries", date: "2026-10-03" });
+      const reMoved = c.s.getTransactions()["2026-10-03"].find((t) => t.allocated === true);
+      assert.deepStrictEqual([reMoved && reMoved.autoCloseout, reMoved && reMoved.closeoutDate],
+        [true, "2026-10-04"], "(c) a re-move inside the period keeps the period's close-out");
+    }
+    console.log("✅ A moved rolling period holds its period's money and retires with it");
+  } finally {
+    global.Date = RealDate;
+    Utils.showNotification = realNotify;
+    stores.forEach((st) => st.cancelPendingSave());
+  }
+}
+
+// TEST 133: undoing a bucket delete re-links its drawers.
+//
+// Undo restores a deleted row under a FRESH id (the old one is tombstoned for
+// sync). For an allocation bucket that left every expense drawing from it
+// naming the dead id: the restored bucket kept the spend deducted, and a later
+// refund — deleting or editing a drawer — went nowhere, so the bucket stayed
+// short and the balance drifted by the refund. The undo now re-points the
+// drawers at the restored bucket, the same repair a date move makes.
+async function runUndoBucketDeleteTest() {
+  console.log("TEST 133: Undoing A Bucket Delete Re-Links Its Drawers");
+  const assert = require("assert");
+  const RealDate = Date;
+  const FIXED = new RealDate(2026, 8, 29, 12, 0, 0);
+  class FrozenDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(FIXED.getTime()); else super(...a); }
+    static now() { return FIXED.getTime(); }
+  }
+  global.Date = FrozenDate;
+  const realConfirm = Utils.showModalConfirm;
+  const realUndo = Utils.showUndoToast;
+  let s = null;
+  try {
+    localStorage.clear();
+    s = new TransactionStore();
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    const cs = new CalculationService(s, rm);
+    const D = "2026-09-29";
+    s.addTransaction("2026-09-01", { amount: 1000, type: "balance", description: "Ending Balance" });
+    const bucketId = s.addTransaction(D, { amount: 100, type: "expense", description: "Groceries",
+      allocated: true, settled: true });
+    s.addTransaction(D, { amount: 30, type: "expense", description: "Publix", settled: true,
+      allocationDraws: [{ allocationId: bucketId, amount: null }] });
+    const balance = () => {
+      cs.invalidateCache();
+      cs.updateMonthlyBalances(new Date(2026, 8, 29, 12));
+      return cs.getDayBalanceBreakdown(D);
+    };
+    assert.strictEqual(balance().balance, 900, "setup: 1000 - 30 spent - 70 still reserved");
+
+    const ui = P2_editUI(s, rm, cs);
+    ui._notifyChange = () => {};
+    let undo = null;
+    Utils.showModalConfirm = async () => true;
+    Utils.showUndoToast = (msg, cb) => { undo = cb; };
+    await ui.deleteTransaction(D, s.getTransactions()[D].findIndex((t) => t.id === bucketId), bucketId);
+    assert.strictEqual(typeof undo, "function", "setup: the delete offered an undo");
+    undo();
+
+    const bucket = s.getTransactions()[D].find((t) => t.allocated === true);
+    const drawer = s.getTransactions()[D].find((t) => t.description === "Publix");
+    assert.ok(bucket && bucket.id !== bucketId, "setup: the bucket is back under a fresh id");
+    assert.strictEqual(bucket.amount, 70, "the restored bucket still holds 70");
+    assert.deepStrictEqual(s.getAllocationDraws(drawer).map((r) => [r.allocationId, r.drawn]),
+      [[bucket.id, 30]], "the drawer names the restored bucket");
+    assert.strictEqual(balance().balance, 900, "the balance is what it was before the delete");
+
+    // The refund now reaches the bucket.
+    s.deleteTransaction(D, s.getTransactions()[D].findIndex((t) => t.description === "Publix"));
+    assert.strictEqual(s.findTransactionById(bucket.id).transaction.amount, 100,
+      "deleting the drawer refunds the restored bucket");
+    assert.strictEqual(balance().balance, 900, "1000 - 100 reserved");
+    console.log("✅ An undone bucket delete keeps its drawers, and their refunds reach it");
+  } finally {
+    global.Date = RealDate;
+    Utils.showModalConfirm = realConfirm;
+    Utils.showUndoToast = realUndo;
+    if (s) s.cancelPendingSave();
+  }
+}
+
 // Run the async network tests sequentially (shared global.fetch mock): TEST 32
 // first, then TEST 30, which prints the final banner.
 async function runUnreadableGistTest() {
@@ -11669,6 +12232,7 @@ runRuntimeTailTests()
   .then(runPushRaceTest)
   .then(runAwaitBoundaryRaceTest)
   .then(runPinRekeyTest)
+  .then(runUndoBucketDeleteTest)
   .then(runTest30Final)
   .catch((err) => {
     console.error(err);

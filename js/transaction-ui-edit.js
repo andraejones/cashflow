@@ -182,7 +182,37 @@ Object.assign(TransactionUI.prototype, {
         this._notifyChange();
         Utils.showNotification("Transaction updated successfully");
       } else {
-        // Date changed — move the transaction
+        // Date changed — move the transaction.
+        //
+        // A rolling recurring-allocation period is pinned to its period when
+        // it moves (see _movedRollingPeriodCloseout). Resolved BEFORE any
+        // mutation, because it can refuse the move.
+        let rollingPin = null;
+        if (type === "expense" && transaction.allocated === true) {
+          if (isRecurring && transaction.autoCloseout !== true) {
+            rollingPin = this._movedRollingPeriodCloseout(
+              transaction.recurringId,
+              date,
+              transaction.originalDate || date,
+              newDate
+            );
+          } else if (
+            transaction.movedFrom &&
+            transaction.originalRecurringId &&
+            newDate !== transaction.movedFrom
+          ) {
+            rollingPin = this._movedRollingPeriodCloseout(
+              transaction.originalRecurringId,
+              transaction.movedFrom,
+              null,
+              newDate
+            );
+          }
+          if (rollingPin && rollingPin.error) {
+            Utils.showNotification(rollingPin.error, "error");
+            return;
+          }
+        }
         if (isRecurring) {
           if (!this.recurringManager.isTransactionSkipped(date, transaction.recurringId)) {
             this.recurringManager.toggleSkipTransaction(date, transaction.recurringId);
@@ -207,8 +237,14 @@ Object.assign(TransactionUI.prototype, {
             movedTransaction.settled = true;
             if (transaction.autoCloseout === true) {
               movedTransaction.autoCloseout = true;
+            } else if (rollingPin) {
+              // A rolling period: the copy holds this period's money until the
+              // next one arrives, then retires like any turnover.
+              movedTransaction.autoCloseout = true;
+              movedTransaction.closeoutDate = rollingPin.closeoutDate;
             }
           }
+          this.store.carryBankStatus(transaction, movedTransaction);
           const movedId = this.store.addTransaction(newDate, movedTransaction);
           this._repointMovedAllocation(transaction, movedTransaction, movedId);
         } else if (transaction.movedFrom && transaction.originalRecurringId) {
@@ -248,6 +284,11 @@ Object.assign(TransactionUI.prototype, {
                   editedCloseout || transaction.closeoutDate || newDate;
                 reMovedTransaction.closeoutDate =
                   carried < newDate ? newDate : carried;
+              } else if (rollingPin) {
+                // A rolling period moved before periods were pinned: pin it
+                // now, the same way a first move would.
+                reMovedTransaction.autoCloseout = true;
+                reMovedTransaction.closeoutDate = rollingPin.closeoutDate;
               }
             }
             // Carry the allocation split across the re-move, honoring any
@@ -265,6 +306,7 @@ Object.assign(TransactionUI.prototype, {
                 this.store.carryAllocationDraws(transaction, reMovedTransaction);
               }
             }
+            this.store.carryBankStatus(transaction, reMovedTransaction);
             const reMovedId = this.store.addTransaction(newDate, reMovedTransaction);
             this._repointMovedAllocation(transaction, reMovedTransaction, reMovedId);
           }
@@ -299,6 +341,7 @@ Object.assign(TransactionUI.prototype, {
               this.store.carryAllocationDraws(transaction, newTransaction);
             }
           }
+          this.store.carryBankStatus(transaction, newTransaction);
           const newId = this.store.addTransaction(newDate, newTransaction);
           this._repointMovedAllocation(transaction, newTransaction, newId);
         }
@@ -326,6 +369,63 @@ Object.assign(TransactionUI.prototype, {
     this.store.repointAllocationDraws(original.id, newId);
   },
 
+  // Re-dating one period of a ROLLING recurring allocation (allocated, no auto
+  // close-out) turns it into a one-time copy, and a one-time bucket without a
+  // close-out rolls forward forever: nothing ever supersedes it, so from the
+  // next turnover on two periods were reserved, and one more per re-date.
+  // The copy is pinned to its period instead: an auto-close-out bucket that
+  // closes the day before the series' next occurrence lands. The skipped
+  // original still marks the period as current (and holds nothing), so the
+  // six live-bucket readers need no special case, and the copy retires through
+  // closeOutExpiredAllocations exactly when the period turns over.
+  //
+  // Returns null when this is not a rolling period (nothing to pin),
+  // `{ closeoutDate }` to pin it, or `{ error }` to refuse the move:
+  //   - past the next period's own date — the copy would outlive its period
+  //     and overlap the next one's bucket;
+  //   - past the end of an ended series — an ended series has no live bucket
+  //     after its endDate (see closeOutExpiredAllocations).
+  // With no next occurrence and no endDate (a series capped by
+  // maxOccurrences, or one recurring more rarely than the lookahead), the
+  // series' last period is already live indefinitely by the rolling rule, so
+  // the copy keeps rolling too: that is not a new overlap.
+  //
+  // Known limitation: free funds reads the series' live bucket, and while one
+  // of its periods is moved that bucket is the skipped original, so the
+  // free-funds figure reads 0 for that period.
+  _movedRollingPeriodCloseout(recurringId, fromDate, occurrenceKey, newDate) {
+    const rt = this.recurringManager.getRecurringTransactionById(recurringId);
+    if (!rt || rt.allocated !== true || rt.autoCloseout === true) return null;
+    const nextLanding = this.recurringManager.nextOccurrenceAfter(
+      rt,
+      fromDate,
+      occurrenceKey
+    );
+    if (nextLanding) {
+      if (newDate >= nextLanding) {
+        return {
+          error:
+            "An allocation period can't move past the next period " +
+            `(${Utils.formatDisplayDate(nextLanding)}).`,
+        };
+      }
+      const dayBefore = Utils.parseDateString(nextLanding);
+      dayBefore.setDate(dayBefore.getDate() - 1);
+      return { closeoutDate: Utils.formatDateString(dayBefore) };
+    }
+    if (typeof rt.endDate === "string" && rt.endDate) {
+      if (newDate > rt.endDate) {
+        return {
+          error:
+            "An allocation period can't move past the end of its series " +
+            `(${Utils.formatDisplayDate(rt.endDate)}).`,
+        };
+      }
+      return { closeoutDate: rt.endDate };
+    }
+    return null;
+  },
+
   // Attach a split just confirmed in the edit form to a copy that is about to
   // be re-added at a new date. A row naming a bucket the expense ALREADY drew
   // from keeps that row's series/period provenance, so its demand history
@@ -350,8 +450,18 @@ Object.assign(TransactionUI.prototype, {
   // through addTransaction so it gets a fresh id/timestamp, re-applies any
   // allocation draw, persists, and syncs. Refreshes the day modal only if the
   // user still has it open.
-  _restoreDeletedTransaction(date, transaction) {
-    this.store.addTransaction(date, transaction);
+  //
+  // The restored row has a fresh id, so when it is an allocation bucket every
+  // expense that drew from it still names the deleted id (`originalId`):
+  // re-point them, the same repair a date move makes (_repointMovedAllocation).
+  // Without it the drawers dangle, and a later refund — deleting or editing
+  // one of them — goes to a bucket that no longer exists, while the restored
+  // bucket keeps the spend deducted forever.
+  _restoreDeletedTransaction(date, transaction, originalId = null) {
+    const newId = this.store.addTransaction(date, transaction);
+    if (transaction.allocated === true && originalId && newId) {
+      this.store.repointAllocationDraws(originalId, newId);
+    }
     const modal = document.getElementById("transactionModal");
     if (modal && modal.style.display === "block") {
       this.showTransactionDetails(date);

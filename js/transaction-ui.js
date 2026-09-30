@@ -336,6 +336,8 @@ class TransactionUI {
       // delete the restored copy again). Dropping what was already drawn lets
       // addTransaction re-apply the allocation split cleanly.
       const restoreClone = { ...this.store.getTransactions()[date][liveIndex] };
+      // Kept so the undo can re-point a restored bucket's drawers at it.
+      const originalId = restoreClone.id;
       delete restoreClone.id;
       delete restoreClone._lastModified;
       delete restoreClone.drawAmount;
@@ -344,7 +346,7 @@ class TransactionUI {
       this.showTransactionDetails(date);
       this._notifyChange();
       Utils.showUndoToast("Transaction deleted", () =>
-        this._restoreDeletedTransaction(date, restoreClone)
+        this._restoreDeletedTransaction(date, restoreClone, originalId)
       );
       return;
     }
