@@ -27,6 +27,17 @@ Object.assign(TransactionStore.prototype, {
     return num > 0 ? num : 0;
   },
 
+  // Debt and infusion money (a debt's balance and minimum payment, an
+  // infusion's amount): finite, rounded to cents, and never below zero —
+  // the same refusal the debt and infusion forms make, applied on every
+  // other way in (add/update, load, import, and the cloud merge, which
+  // imports its result). Rounding before the sign test also keeps a -0.001
+  // from surviving as -0.
+  _normalizeDebtMoney(value) {
+    const num = Math.round(this._finiteNumber(value) * 100) / 100;
+    return num > 0 ? num : 0;
+  },
+
   // The domain collections (debts, infusions, dailyFloor) normalize their
   // money on the way in. The three inputs the balance walk steps through — the
   // transactions map, the recurring definitions, and the monthly anchors — are
@@ -81,8 +92,12 @@ Object.assign(TransactionStore.prototype, {
       // tiebreaks, which run inside the calendar render, so a non-string name
       // from an import or merge must be coerced here.
       name: typeof debt.name === "string" ? debt.name : "",
-      balance: Math.round(this._finiteNumber(debt.balance) * 100) / 100,
-      minPayment: Math.round(this._finiteNumber(debt.minPayment) * 100) / 100,
+      // Never negative: the form refuses one, so every other way in must too.
+      // A restored backup carrying minPayment -50 booked the minimum series as
+      // +$50 INCOME on the calendar every month while the projection dropped
+      // it, and a negative balance printed as "Balance $-100.00".
+      balance: this._normalizeDebtMoney(debt.balance),
+      minPayment: this._normalizeDebtMoney(debt.minPayment),
       dueDay: this._finiteNumber(debt.dueDay) || 1,
       dueDayPattern:
         typeof debt.dueDayPattern === "string" ? debt.dueDayPattern : "",
@@ -141,7 +156,10 @@ Object.assign(TransactionStore.prototype, {
       id: infusion.id || Utils.generateUniqueId(),
       _lastModified: infusion._lastModified || new Date().toISOString(),
       name: typeof infusion.name === "string" ? infusion.name : "",
-      amount: Math.round(this._finiteNumber(infusion.amount) * 100) / 100,
+      // The infusion form refuses anything not above 0; so does every other
+      // way in (a negative infusion would otherwise sit in the list the plan
+      // silently ignores).
+      amount: this._normalizeDebtMoney(infusion.amount),
       date: typeof infusion.date === "string" ? infusion.date : "",
       targetDebtId: infusion.targetDebtId || null,
     };

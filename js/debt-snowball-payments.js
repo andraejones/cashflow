@@ -94,6 +94,16 @@ Object.assign(DebtSnowballUI.prototype, {
       const rt = recurrings.find((r) => r && r.id === debt.minRecurringId);
       if (!rt) return;
       let template = this.buildDebtRecurringTransaction(debt);
+      // A negative minimum (restored from a backup an older build wrote) is
+      // booked by the expansion as INCOME every month. _normalizeDebt refuses
+      // one on the debt; the series it left behind gets the debt's own
+      // minimum. Only a negative is touched: a positive series amount that
+      // differs from the debt is the adjusted-minimum machinery's business.
+      if (Number(rt.amount) < 0) {
+        rt.amount = template.amount;
+        rt._lastModified = now;
+        changed = true;
+      }
       let diff = diffKeys(rt, template);
       if (!diff.length) return;
       if (diff.includes("startDate") && this.isValidDateString(rt.startDate)) {

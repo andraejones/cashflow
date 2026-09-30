@@ -11,8 +11,8 @@ CashFlow Calendar is an offline-first, single-page personal finance application 
 **No build process required.** Open `index.html` directly in a browser or serve via any static server.
 
 **Tests:** `npm test` (or run the two scripts directly with Node) — it must pass before every commit:
-- `node scripts/verify-logic.js` — 136 numbered integration tests over vm-loaded sources
-  (numbered up to TEST 142; the numbering has gaps where tests were merged or
+- `node scripts/verify-logic.js` — 139 numbered integration tests over vm-loaded sources
+  (numbered up to TEST 145; the numbering has gaps where tests were merged or
   removed along with the feature they covered).
   Seven of them are SWEEPS rather than scenarios, and they are the ones worth
   extending when something new is added:
@@ -155,7 +155,7 @@ and it is what `Utils.formatAmount` and the snowball hero's `formatWhole` use,
 so both collapse `-0` explicitly. TEST 81 asserts the rule, not just that the
 two harness stubs agree with the real Utils.
 
-Money entering the store is normalized, never trusted: the domain collections go through `_normalizeDebt` / `_normalizeCashInfusion` (both built on `_finiteNumber`), and the three inputs the balance walk steps through — the transactions map, the recurring definitions, and the monthly anchors — are swept by `_repairWalkAmounts()` in both `loadData` and `importData`. That sweep is the only guard covering data that never passed a form: `"1e999"` is valid JSON that parses to `Infinity`, so an imported backup can otherwise put a non-finite amount straight into the walk. It rewrites non-finite values only, so finite money is never re-rounded. Use `Number.isFinite`, never bare `isNaN`, on any amount that gets persisted. A value the FORM rejects has to be rejected on every other path too: the snowball's `dailyFloor` was coerced with `_finiteNumber` in `loadData`, `importData` and `setDebtSnowballSettings`, none of which refused a negative — and a negative floor makes the projection schedule payoffs that drive the projected balance below zero. `_normalizeDailyFloor` is the single choke point now (TEST 97).
+Money entering the store is normalized, never trusted: the domain collections go through `_normalizeDebt` / `_normalizeCashInfusion` (both built on `_finiteNumber`), and the three inputs the balance walk steps through — the transactions map, the recurring definitions, and the monthly anchors — are swept by `_repairWalkAmounts()` in both `loadData` and `importData`. That sweep is the only guard covering data that never passed a form: `"1e999"` is valid JSON that parses to `Infinity`, so an imported backup can otherwise put a non-finite amount straight into the walk. It rewrites non-finite values only, so finite money is never re-rounded. Use `Number.isFinite`, never bare `isNaN`, on any amount that gets persisted. A value the FORM rejects has to be rejected on every other path too: the snowball's `dailyFloor` was coerced with `_finiteNumber` in `loadData`, `importData` and `setDebtSnowballSettings`, none of which refused a negative — and a negative floor makes the projection schedule payoffs that drive the projected balance below zero. `_normalizeDailyFloor` is the single choke point now (TEST 97). Debt and infusion money follows the same rule through `_normalizeDebtMoney` (a debt's `balance` / `minPayment`, an infusion's `amount`: never below 0, on add/update, load, import and the merge's import), and `reconcileMinimumSeriesSchedules` gives a minimum series left at a negative amount the debt's minimum; a restored -50 minimum was booked on the calendar as +$50 income every month (TEST 144).
 
 Shape is guarded per FIELD too, and that is the reader's job. Only money
 (`_repairWalkAmounts`) and the domain collections (`_normalizeDebt` /
@@ -207,6 +207,11 @@ is kept; a posted row (`getBankStatus` "cleared") keeps every field (TEST 128).
 "Delete all future" removes the moved copies of the occurrences it deletes
 (through `store.deleteTransaction`, so they are tombstoned and refund their
 buckets) together with their move records (TEST 129).
+
+A semi-monthly pair is read in month order (`_semiMonthlyDays`, used by the
+expansion and `countOccurrencesBefore`; the form also saves it ordered): the
+cap's catch-up count assumed the first day comes first, so "20 and 5" capped
+at 4 paid 3. "Last day" stays on the day it was chosen for (TEST 145).
 
 A series-scope edit ("future" / "all") on a drawn recurring-allocation bucket
 keeps the DEFINITION's amount unless the amount field was changed: the bucket's
@@ -459,6 +464,17 @@ debt's explicit `dueLastDay`, decided in `saveDebt` from the due day the user
 typed (31, or a day the first due month is too short for); `null` = saved
 before the flag, which keeps the old start-date inference (TEST 121).
 
+Convert to Debt prefills the first due date with the series' next SCHEDULED
+occurrence on/after today (`occurrenceOnOrAfter`), never the series' start:
+the balance typed is today's, and the snapshot subtracts every minimum since
+the first due date, so the old prefill took a year of already-deducted
+payments off it again. The old series is then ENDED (`endSeriesFrom`, the
+same path as "delete all future"), not deleted, before the earlier of the new
+series' first scheduled and landing dates, so past payments stay on the
+calendar as plain, un-linked history and a payment pulled back across the
+boundary is paid once. A series with nothing before that point is deleted as
+before (TEST 143).
+
 Payoff ORDER is one rule with one implementation: `makePayoffOrder()` (engine
 companion) — a debt's optional `payoffPriority` (whole 1–99, lower first;
 `null` = auto, ranked `UNRANKED_PAYOFF`), then smallest balance, then name,
@@ -561,7 +577,7 @@ local_last_sync, _backup_before_merge, calendar_view_mode
 
 - `styles.css` - CSS variables for theming (primary, accent, error colors)
 - `README.md` - Project documentation and feature overview
-- `scripts/verify-logic.js` - Standalone logic verification utility (136 tests)
+- `scripts/verify-logic.js` - Standalone logic verification utility (139 tests)
 - `scripts/verify-walk-parity.js` - Randomized balance-walk parity harness + source guard
 - `scripts/verify-ui.js` - Optional headless-Chromium UI harness (`npm run test:ui`)
 - `scripts/verify-sync.js` - Optional two-device cloud-sync harness (`npm run test:sync`)

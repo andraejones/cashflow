@@ -839,6 +839,10 @@ Object.assign(TransactionUI.prototype, {
           days.push(31);
         } else {
           days.push(parseInt(secondDay.value, 10));
+          // Saved in the order they fall in a month ("20 and 5" is stored as
+          // [5, 20]). The expansion orders the pair itself too, for data an
+          // older build saved reversed; this keeps new data unambiguous.
+          if (days[1] < days[0]) days.reverse();
         }
 
         recurringTransaction.semiMonthlyDays = days;

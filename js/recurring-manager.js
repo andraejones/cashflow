@@ -1173,6 +1173,27 @@ class RecurringTransactionManager {
   }
 
 
+  // A semi-monthly series' two days, in the order they fall in a month.
+  // The form never forced "first < second", so "the 20th and the 5th" is a
+  // stored shape, and both readers below assume the first day comes first: the
+  // cap's catch-up count credited a start between the two days with the whole
+  // start month, and the emit blocks paid the 20th before the 5th, so a capped
+  // series lost an occurrence. Ordering the pair changes no date either series
+  // pays on, only which one is called "first". "Last day" stays with the day
+  // it was chosen for (index 1, or a stored 31), which is never earlier than
+  // the other day, so a last-day pair is already in order. Days are coerced
+  // with Number() because nothing coerces them on the way in from an import.
+  _semiMonthlyDays(rt) {
+    const stored = rt.semiMonthlyDays;
+    let first = Number(stored ? stored[0] : 1);
+    let second = Number(stored ? stored[1] : 15);
+    const isLastDay = Boolean(rt.semiMonthlyLastDay) || second === 31;
+    if (!isLastDay && second < first) {
+      [first, second] = [second, first];
+    }
+    return { first, second, isLastDay };
+  }
+
   applySemiMonthlyRecurrence(
     rt,
     startDate,
@@ -1186,9 +1207,10 @@ class RecurringTransactionManager {
     const startOfMonth = new Date(year, month, 1, 12, 0, 0);
     const endOfMonth = new Date(year, month + 1, 0, 12, 0, 0);
     const lastDayOfMonth = endOfMonth.getDate();
-    let firstDate = rt.semiMonthlyDays ? rt.semiMonthlyDays[0] : 1;
-    let secondDate = rt.semiMonthlyDays ? rt.semiMonthlyDays[1] : 15;
-    const isLastDayOfMonthSpecial = rt.semiMonthlyLastDay || secondDate === 31;
+    const days = this._semiMonthlyDays(rt);
+    let firstDate = days.first;
+    let secondDate = days.second;
+    const isLastDayOfMonthSpecial = days.isLastDay;
     if (isLastDayOfMonthSpecial) {
       secondDate = lastDayOfMonth;
     }
@@ -1207,7 +1229,7 @@ class RecurringTransactionManager {
             startDate.getMonth() + 1,
             0
           ).getDate()
-        : (rt.semiMonthlyDays ? rt.semiMonthlyDays[1] : 15);
+        : days.second;
       if (startDate.getDate() <= firstDate) {
         occurrenceCount = monthsDifference * 2;
       } else if (startDate.getDate() <= startMonthSecondDate) {
@@ -1776,6 +1798,32 @@ class RecurringTransactionManager {
     return null;
   }
 
+  // The series' first occurrence whose SCHEDULED date is on/after `fromDate`,
+  // as `{ scheduled, landing }`, or null when there is none within
+  // NEXT_OCCURRENCE_LOOKAHEAD months. Read from the schedule the same way
+  // nextOccurrenceAfter is (skips and hand edits don't count). The search
+  // starts a month early because a backward business-day adjustment can land
+  // an occurrence scheduled early in fromDate's month in the month before.
+  occurrenceOnOrAfter(rt, fromDate) {
+    const from = Utils.parseDateString(fromDate);
+    if (!rt || !from) return null;
+    const schedule = { ...rt };
+    delete schedule.allocated;
+    delete schedule.autoCloseout;
+    for (let i = -1; i <= RecurringTransactionManager.NEXT_OCCURRENCE_LOOKAHEAD; i++) {
+      const month = new Date(from.getFullYear(), from.getMonth() + i, 1, 12, 0, 0);
+      const hit = RecurringTransactionManager.expandIsolated(
+        schedule,
+        month.getFullYear(),
+        month.getMonth()
+      ).find((o) => (o.originalDate || o.dateString) >= fromDate);
+      if (hit) {
+        return { scheduled: hit.originalDate || hit.dateString, landing: hit.dateString };
+      }
+    }
+    return null;
+  }
+
 
   countOccurrencesBefore(rt, beforeDate) {
     const startDate = Utils.parseDateString(rt.startDate);
@@ -1871,9 +1919,11 @@ class RecurringTransactionManager {
         break;
 
       case "semi-monthly": {
-        const firstDay = rt.semiMonthlyDays ? rt.semiMonthlyDays[0] : 1;
-        const secondDay = rt.semiMonthlyDays ? rt.semiMonthlyDays[1] : 15;
-        const isLastDay = rt.semiMonthlyLastDay || secondDay === 31;
+        const {
+          first: firstDay,
+          second: secondDay,
+          isLastDay,
+        } = this._semiMonthlyDays(rt);
         const startMs = new Date(
           startDate.getFullYear(),
           startDate.getMonth(),
@@ -2425,6 +2475,97 @@ class RecurringTransactionManager {
   }
 
 
+  // End a series the day before `date`: every occurrence dated on/after it
+  // (persisted instances tombstoned, pure expansions dropped), every moved
+  // copy of one, and every skip from there on go, and the definition's
+  // endDate is set so expansion never brings them back. Past occurrences are
+  // left exactly as they are. "Delete all future" and Convert to Debt both
+  // end a series this way.
+  endSeriesFrom(recurringId, date) {
+    const currentDate = Utils.parseDateString(date);
+    if (!recurringId || !currentDate) return false;
+    this.invalidateCache();
+    const transactions = this.store.getTransactions();
+    const recurringTransaction =
+      this.getRecurringTransactionById(recurringId);
+    if (recurringTransaction) {
+      const endDate = new Date(currentDate);
+      endDate.setDate(endDate.getDate() - 1);
+      const newEnd = Utils.formatDateString(endDate);
+      // Only ever shortens the series. Convert to Debt can end a series that
+      // already ended (its prefill falls back to today), and writing a later
+      // endDate would bring back the occurrences between the two.
+      const oldEnd = recurringTransaction.endDate;
+      if (!(typeof oldEnd === "string" && Utils.parseDateString(oldEnd) && oldEnd <= newEnd)) {
+        this.store.updateRecurringTransaction(recurringId, { endDate: newEnd });
+      }
+    }
+    Object.keys(transactions).forEach((dateKey) => {
+      if (Utils.parseDateString(dateKey) >= currentDate) {
+        const newTransactions = transactions[dateKey].filter((t) => {
+          if (t.recurringId !== recurringId) {
+            return true;
+          }
+          // Tombstone persisted (id-bearing) instances so a sync-merge
+          // can't resurrect them past the new endDate.
+          this.store.trackDeletedTransaction(t.id);
+          return false;
+        });
+
+        if (newTransactions.length === 0) {
+          delete transactions[dateKey];
+        } else {
+          transactions[dateKey] = newTransactions;
+        }
+      }
+    });
+    // Moved copies of the occurrences just deleted. A copy carries
+    // `originalRecurringId`, not `recurringId`, so the filter above never
+    // sees it, and it would keep charging the bill the user just ended on
+    // the date it was moved to. Deleted through the store so each is
+    // tombstoned and refunds any bucket it drew from; highest index first
+    // so the positions still to visit stay valid. Its move record goes
+    // with it.
+    const copies = [];
+    Object.keys(transactions).forEach((dateKey) => {
+      const list = transactions[dateKey];
+      if (!Array.isArray(list)) return;
+      list.forEach((t, i) => {
+        if (
+          t &&
+          t.originalRecurringId === recurringId &&
+          typeof t.movedFrom === "string" &&
+          t.movedFrom >= date
+        ) {
+          copies.push([dateKey, i, t.movedFrom]);
+        }
+      });
+    });
+    copies
+      .sort((a, b) => b[1] - a[1])
+      .forEach(([dateKey, i, movedFrom]) => {
+        this.store.deleteTransaction(dateKey, i);
+        this.store.cancelMoveTransaction(recurringId, movedFrom);
+      });
+    // Skips on/after the deleted occurrence no longer describe anything
+    // the series will generate. Cleared as skip EVENTS, so the cloud
+    // merge's union of skip lists can't bring them back.
+    const skippedTransactions = this.store.getSkippedTransactions();
+    Object.keys(skippedTransactions)
+      .filter(
+        (skipDate) =>
+          skipDate >= date &&
+          Array.isArray(skippedTransactions[skipDate]) &&
+          skippedTransactions[skipDate].includes(recurringId)
+      )
+      .forEach((skipDate) => {
+        this.store.setTransactionSkipped(skipDate, recurringId, false);
+      });
+
+    this.store.debouncedSave();
+    return true;
+  }
+
   deleteTransaction(date, index, deleteFuture) {
     const transactions = this.store.getTransactions();
     if (!transactions[date] || !transactions[date][index]) {
@@ -2435,80 +2576,7 @@ class RecurringTransactionManager {
     if (transaction.recurringId) {
       this.invalidateCache();
       if (deleteFuture) {
-        const recurringId = transaction.recurringId;
-        const currentDate = Utils.parseDateString(date);
-        const recurringTransaction =
-          this.getRecurringTransactionById(recurringId);
-        if (recurringTransaction) {
-          const endDate = new Date(currentDate);
-          endDate.setDate(endDate.getDate() - 1);
-          this.store.updateRecurringTransaction(recurringId, {
-            endDate: Utils.formatDateString(endDate),
-          });
-        }
-        Object.keys(transactions).forEach((dateKey) => {
-          if (Utils.parseDateString(dateKey) >= currentDate) {
-            const newTransactions = transactions[dateKey].filter((t) => {
-              if (t.recurringId !== recurringId) {
-                return true;
-              }
-              // Tombstone persisted (id-bearing) instances so a sync-merge
-              // can't resurrect them past the new endDate.
-              this.store.trackDeletedTransaction(t.id);
-              return false;
-            });
-
-            if (newTransactions.length === 0) {
-              delete transactions[dateKey];
-            } else {
-              transactions[dateKey] = newTransactions;
-            }
-          }
-        });
-        // Moved copies of the occurrences just deleted. A copy carries
-        // `originalRecurringId`, not `recurringId`, so the filter above never
-        // sees it, and it would keep charging the bill the user just ended on
-        // the date it was moved to. Deleted through the store so each is
-        // tombstoned and refunds any bucket it drew from; highest index first
-        // so the positions still to visit stay valid. Its move record goes
-        // with it.
-        const copies = [];
-        Object.keys(transactions).forEach((dateKey) => {
-          const list = transactions[dateKey];
-          if (!Array.isArray(list)) return;
-          list.forEach((t, i) => {
-            if (
-              t &&
-              t.originalRecurringId === recurringId &&
-              typeof t.movedFrom === "string" &&
-              t.movedFrom >= date
-            ) {
-              copies.push([dateKey, i, t.movedFrom]);
-            }
-          });
-        });
-        copies
-          .sort((a, b) => b[1] - a[1])
-          .forEach(([dateKey, i, movedFrom]) => {
-            this.store.deleteTransaction(dateKey, i);
-            this.store.cancelMoveTransaction(recurringId, movedFrom);
-          });
-        // Skips on/after the deleted occurrence no longer describe anything
-        // the series will generate. Cleared as skip EVENTS, so the cloud
-        // merge's union of skip lists can't bring them back.
-        const skippedTransactions = this.store.getSkippedTransactions();
-        Object.keys(skippedTransactions)
-          .filter(
-            (skipDate) =>
-              skipDate >= date &&
-              Array.isArray(skippedTransactions[skipDate]) &&
-              skippedTransactions[skipDate].includes(recurringId)
-          )
-          .forEach((skipDate) => {
-            this.store.setTransactionSkipped(skipDate, recurringId, false);
-          });
-
-        this.store.debouncedSave();
+        this.endSeriesFrom(transaction.recurringId, date);
       } else {
         this.store.setTransactionSkipped(date, transaction.recurringId, true);
       }

@@ -263,13 +263,39 @@ class DebtSnowballUI {
 
     this.showView();
 
+    // The balance the user is about to type is TODAY's, and the snapshot reads
+    // a debt's balance as of its first due date, subtracting every minimum
+    // paid since. So the first due date is the series' next occurrence (its
+    // scheduled date, on/after today), never the series' original start:
+    // prefilling that subtracted a year of payments the lender had already
+    // taken off the typed balance. With nothing left to come, today. The user
+    // can still type an older date; that is their explicit choice.
+    const today = Utils.formatDateString(new Date());
+    const next = this.recurringManager.occurrenceOnOrAfter(
+      recurringTransaction,
+      today
+    );
+    const dueStartDate = next ? next.scheduled : today;
+    // A capped series keeps only the payments it has left.
+    let maxOccurrences = recurringTransaction.maxOccurrences || null;
+    if (maxOccurrences) {
+      maxOccurrences = Math.max(
+        1,
+        maxOccurrences -
+          this.recurringManager.countOccurrencesBefore(
+            recurringTransaction,
+            Utils.parseDateString(dueStartDate)
+          )
+      );
+    }
+
     const debtFromRecurring = {
       name: recurringTransaction.description || "",
       balance: "", // User must fill this in
       minPayment: recurringTransaction.amount || 0,
       recurrence: recurringTransaction.recurrence || "monthly",
-      dueDay: this.extractDayFromDate(recurringTransaction.startDate) || 1,
-      dueStartDate: recurringTransaction.startDate || "",
+      dueDay: this.extractDayFromDate(dueStartDate) || 1,
+      dueStartDate,
       dueDayPattern: recurringTransaction.daySpecific ? recurringTransaction.daySpecificData : "",
       dueLastDay: recurringTransaction.lastDayOfMonth === true,
       interestRate: "", // User must fill this in
@@ -278,10 +304,25 @@ class DebtSnowballUI {
       semiMonthlyLastDay: recurringTransaction.semiMonthlyLastDay || false,
       customInterval: recurringTransaction.customInterval || null,
       endDate: recurringTransaction.endDate || "",
-      maxOccurrences: recurringTransaction.maxOccurrences || null,
+      maxOccurrences,
     };
 
     this.showDebtForm(debtFromRecurring);
+
+    // showDebtForm takes the due day from the first due date, which is the
+    // CLAMPED day when that month is short (a series on the 31st next pays
+    // Sep 30). Show the series' own day instead, so saveDebt keeps paying on
+    // it rather than on the 30th forever.
+    const anchorDay = this.extractDayFromDate(recurringTransaction.startDate);
+    if (
+      this.debtDueDayInput &&
+      debtFromRecurring.recurrence === "monthly" &&
+      !recurringTransaction.daySpecific &&
+      !debtFromRecurring.dueLastDay &&
+      anchorDay > Number(this.debtDueDayInput.value)
+    ) {
+      this.debtDueDayInput.value = anchorDay;
+    }
 
     if (this.debtFormTitle) {
       this.debtFormTitle.textContent = "Convert to Debt";
@@ -854,8 +895,11 @@ class DebtSnowballUI {
       }
 
       if (this.convertingFromRecurringId) {
-        this.store.deleteRecurringTransaction(this.convertingFromRecurringId);
-        this.recurringManager.invalidateCache();
+        this.endConvertedSeries(
+          this.convertingFromRecurringId,
+          normalizedStartDate,
+          debtId
+        );
         this.convertingFromRecurringId = null;
         Utils.showNotification("Recurring transaction converted to debt");
       } else {
@@ -865,6 +909,35 @@ class DebtSnowballUI {
     this.hideDebtForm();
     this.refresh();
     this.onUpdate();
+  }
+
+  // Convert to Debt hands the old series' future to the debt's minimum
+  // series. The old one is ENDED, not deleted: the payments already made stay
+  // on the calendar as plain history, exactly as they were, and are not
+  // debt-linked, so they never come off the balance the user just typed. It
+  // ends before the new series' first payment, judged on the earlier of that
+  // payment's scheduled and landing dates, so an occurrence pulled back
+  // across the boundary by a business-day adjustment is never paid by both.
+  // A series with nothing before that point has no history to keep and is
+  // deleted, as before.
+  endConvertedSeries(recurringId, firstDueDate, debtId) {
+    const oldSeries = this.recurringManager.getRecurringTransactionById(recurringId);
+    if (!oldSeries) return;
+    let cutoff = firstDueDate;
+    const debt = this.store.getDebts().find((d) => d.id === debtId);
+    const minimumSeries = debt?.minRecurringId
+      ? this.recurringManager.getRecurringTransactionById(debt.minRecurringId)
+      : null;
+    const first = minimumSeries
+      ? this.recurringManager.occurrenceOnOrAfter(minimumSeries, minimumSeries.startDate)
+      : null;
+    if (first && first.landing < cutoff) cutoff = first.landing;
+    if (typeof oldSeries.startDate !== "string" || oldSeries.startDate >= cutoff) {
+      this.store.deleteRecurringTransaction(recurringId);
+      this.recurringManager.invalidateCache();
+      return;
+    }
+    this.recurringManager.endSeriesFrom(recurringId, cutoff);
   }
 
   editDebt(debtId) {

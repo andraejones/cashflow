@@ -13009,6 +13009,376 @@ console.log("TEST 142: The Projection, The Snapshot And The Breakdown Apply Each
   }
 }
 
+console.log("TEST 143: Convert To Debt Keeps The Future Payments");
+{
+  // Convert to Debt prefilled the debt's first due date with the series'
+  // ORIGINAL start (a year back) while the user typed TODAY's balance, then
+  // deleted the series. The snapshot reads a debt's balance as of its first
+  // due date and subtracts every minimum since, so a year of payments the
+  // lender had already taken off came off the typed balance a second time:
+  // $4,000 owed showed as $400 and the payoff moved a year early. The prefill
+  // is now the series' next scheduled occurrence, and the old series is ENDED
+  // before the new one's first payment, so its past rows stay as history.
+  const assert = require("assert");
+  const RealDate = Date;
+  const FIXED = new RealDate(2026, 8, 29, 12, 0, 0);
+  class FrozenDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(FIXED.getTime()); else super(...a); }
+    static now() { return FIXED.getTime(); }
+  }
+  const prevFields = global.__domFields;
+  const stores = [];
+  global.Date = FrozenDate;
+  try {
+    // One conversion, driven through the real prefill and saveDebt. `form`
+    // stands in for the inputs the user edits; the returned `prefill` is the
+    // object the form was populated from.
+    const convert = (series, balance, { adjustment = "none", months = [] } = {}) => {
+      localStorage.clear();
+      global.__domFields = adjustment === "none" ? {} : { debtBusinessDayAdjustment: adjustment };
+      const s = new TransactionStore();
+      s.resetData();
+      stores.push(s);
+      const rm = new RecurringTransactionManager(s);
+      const cs = new CalculationService(s, rm);
+      const ui = new DebtSnowballUI(s, rm, () => {}, cs);
+      const input = (value) => ({ value, focus() {}, style: {} });
+      Object.assign(ui, {
+        debtForm: { style: {} }, debtFormTitle: null,
+        debtNameInput: input(""), debtBalanceInput: input(""), debtMinPaymentInput: input(""),
+        debtRecurrenceInput: input("monthly"), debtStartDateInput: input(""),
+        debtDueDayInput: input("1"), debtDueDayPatternInput: null, debtInterestInput: input(""),
+        debtPayoffPriorityInput: input(""), debtAdvancedOptions: null,
+      });
+      let prefill = null;
+      ui.populateDebtAdvancedOptions = (debt) => { prefill = debt; };
+      ui.showView = () => {};
+      ui.refresh = () => {};
+      ui.onUpdate = () => {};
+      ui.renderPlan = () => {};
+      s.addTransaction("2026-09-01", { amount: 2000, type: "balance", description: "Ending Balance" });
+      s.setDebtSnowballSettings({ dailyFloor: 1e9, extraPaymentStartMonth: "", autoGenerate: false });
+      const rtId = s.addRecurringTransaction({ type: "expense", description: "Car Loan", ...series });
+      months.forEach(([y, m]) => rm.applyRecurringTransactions(y, m));
+      ui.showDebtFormFromRecurring(s.getRecurringTransactions().find((r) => r.id === rtId));
+      const form = {
+        start: ui.debtStartDateInput.value,
+        dueDay: String(ui.debtDueDayInput.value),
+        prefill,
+      };
+      ui.debtBalanceInput.value = String(balance);
+      ui.saveDebt();
+      const debt = s.getDebts()[0];
+      const rowsOf = (pred) => {
+        const out = [];
+        Object.keys(s.getTransactions()).sort().forEach((d) =>
+          s.getTransactions()[d].forEach((t) => { if (pred(t)) out.push({ date: d, t }); }));
+        return out;
+      };
+      const expand = (list) => { rm.invalidateCache(); list.forEach(([y, m]) => rm.applyRecurringTransactions(y, m)); };
+      return { s, rm, ui, rtId, debt, form, rowsOf, expand };
+    };
+    const history = [];
+    for (let m = 9; m <= 20; m++) history.push([2025 + Math.floor(m / 12), m % 12]);
+    const ahead = [];
+    for (let m = 8; m <= 14; m++) ahead.push([2026 + Math.floor(m / 12), m % 12]);
+
+    // (a) The auditor's case: a year-old $300 car payment, $4,000 owed today.
+    {
+      const c = convert({ startDate: "2025-10-05", amount: 300, recurrence: "monthly" }, 4000, { months: history });
+      assert.strictEqual(c.form.start, "2026-10-05", "the first due date is the next payment, not the series' start");
+      assert.strictEqual(c.form.dueDay, "5");
+      assert.strictEqual(c.debt.dueStartDate, "2026-10-05");
+      const summary = c.ui.getDebtSummaries(new Date(2026, 8, 30))[0];
+      assert.strictEqual(summary.remaining, 4000, `today's remaining is the typed balance (got ${summary.remaining}, paid ${summary.paid})`);
+      const payoff = c.ui.calculateSnowballProjection(2026, 8, false).payoffByDebtId[c.debt.id];
+      // 4000 / 300 = 13.3: fourteen payments, October 2026 through November 2027.
+      assert.deepStrictEqual([payoff.year, payoff.month], [2027, 10], `payoff ${JSON.stringify(payoff)}`);
+      const old = c.s.getRecurringTransactions().find((r) => r.id === c.rtId);
+      assert.ok(old, "the original series is ended, not deleted");
+      assert.strictEqual(old.endDate, "2026-10-04");
+      c.expand([...history, ...ahead]);
+      const oldRows = c.rowsOf((t) => t.recurringId === c.rtId);
+      assert.deepStrictEqual(oldRows.map((r) => r.date), history.map(([y, m]) =>
+        `${y}-${String(m + 1).padStart(2, "0")}-05`).filter((d) => d < "2026-10-05"),
+        "every past payment is still on the calendar, and nothing of the old series from the first due date on");
+      assert.ok(oldRows.every((r) => !r.t.debtId), "history stays plain, never debt-linked");
+      const debtRows = c.rowsOf((t) => t.debtId === c.debt.id);
+      assert.strictEqual(debtRows[0].date, "2026-10-05", "the debt pays from its first due date");
+      const october = c.rowsOf((t) => t.description === "Car Loan" || t.debtId === c.debt.id)
+        .filter((r) => r.date.startsWith("2026-10"));
+      assert.strictEqual(october.length, 1, "October is paid once");
+    }
+
+    // (b) A capped series hands over only the payments it has left.
+    {
+      const c = convert({ startDate: "2025-10-05", amount: 300, recurrence: "monthly", maxOccurrences: 18 }, 1800);
+      assert.strictEqual(c.form.start, "2026-10-05");
+      assert.strictEqual(c.form.prefill.maxOccurrences, 6, "18 payments, 12 made: 6 left");
+    }
+
+    // (c) A series on the 31st whose next payment is clamped (Sep 30) keeps
+    //     paying at month end, not on the 30th forever.
+    {
+      const c = convert({ startDate: "2026-01-31", amount: 100, recurrence: "monthly", lastDayOfMonth: false }, 500);
+      assert.strictEqual(c.form.start, "2026-09-30");
+      assert.strictEqual(c.form.dueDay, "31", "the series' own day, not the clamped one");
+      assert.strictEqual(c.debt.dueLastDay, true);
+      c.expand(ahead);
+      const oct = c.rowsOf((t) => t.debtId === c.debt.id).map((r) => r.date).filter((d) => d.startsWith("2026-10"));
+      assert.deepStrictEqual(oct, ["2026-10-31"]);
+      assert.strictEqual(c.rowsOf((t) => t.recurringId === c.rtId && t.debtId === undefined)
+        .filter((r) => r.date === "2026-09-30").length, 0, "Sep 30 is the debt's first payment, not also the old series'");
+    }
+
+    // (d) A first payment pulled back across the boundary by a business-day
+    //     adjustment is paid once: Sun Oct 4 lands Fri Oct 2, so the old
+    //     series must end before Oct 2, not before Oct 4.
+    {
+      const c = convert({ startDate: "2026-06-04", amount: 200, recurrence: "monthly", businessDayAdjustment: "previous" },
+        2000, { adjustment: "previous" });
+      assert.strictEqual(c.form.start, "2026-10-04", "the prefill is the SCHEDULED date");
+      assert.strictEqual(c.debt.businessDayAdjustment, "previous");
+      c.expand([[2026, 5], [2026, 6], [2026, 7], [2026, 8], [2026, 9], [2026, 10]]);
+      const oct2 = (c.s.getTransactions()["2026-10-02"] || []).filter((t) => Number(t.amount) === 200);
+      assert.strictEqual(oct2.length, 1, `Oct 2 pays once, got ${oct2.length}`);
+      assert.strictEqual(oct2[0].debtId, c.debt.id);
+      assert.strictEqual(c.rowsOf((t) => t.recurringId === c.rtId).length, 4, "June to September stay as history");
+      assert.strictEqual(c.ui.getDebtSummaries(new Date(2026, 8, 30))[0].remaining, 2000);
+    }
+
+    // (e) A series that hasn't started yet has no history: it goes, as before.
+    {
+      const c = convert({ startDate: "2026-11-10", amount: 90, recurrence: "monthly" }, 900);
+      assert.strictEqual(c.form.start, "2026-11-10");
+      assert.ok(!c.s.getRecurringTransactions().some((r) => r.id === c.rtId), "nothing to keep, so it is deleted");
+    }
+
+    // (f) A series that already ended has nothing to come: the prefill falls
+    //     back to today, and ending it again never pushes its end LATER (that
+    //     would bring back the months between).
+    {
+      const c = convert({ startDate: "2025-10-05", amount: 300, recurrence: "monthly", endDate: "2026-06-05" }, 1000);
+      assert.strictEqual(c.form.start, "2026-09-29");
+      const old = c.s.getRecurringTransactions().find((r) => r.id === c.rtId);
+      assert.strictEqual(old.endDate, "2026-06-05", "an ended series keeps its end");
+      c.expand(history);
+      assert.deepStrictEqual(c.rowsOf((t) => t.recurringId === c.rtId).map((r) => r.date).filter((d) => d > "2026-06-05"), [],
+        "nothing comes back after the series' own end");
+    }
+    console.log("✅ A converted series keeps its history, hands over its future once, and the typed balance stands");
+  } finally {
+    global.Date = RealDate;
+    global.__domFields = prevFields;
+    stores.forEach((st) => st.cancelPendingSave());
+  }
+}
+
+console.log("TEST 144: Negative Debt Money Is Refused Wherever It Arrives");
+{
+  // The debt form refuses a negative balance or minimum payment, the infusion
+  // form anything not above 0. Nothing else did: import, reload and the cloud
+  // merge (which imports its result) all kept them. A restored backup
+  // carrying minPayment -50 made the calendar book the minimum as +$50 INCOME
+  // every month, while the projection dropped it, so the floor check ran on a
+  // checking balance $50/month lower than the calendar showed. One choke
+  // point now (_normalizeDebtMoney), the way TEST 97 pins the daily floor.
+  const assert = require("assert");
+  const RealDate = Date;
+  const FIXED = new RealDate(2026, 8, 29, 12, 0, 0);
+  class FrozenDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(FIXED.getTime()); else super(...a); }
+    static now() { return FIXED.getTime(); }
+  }
+  const CASES = [
+    [-50, 0], [-0.004, 0], [-0, 0], ["-12.5", 0], [-Infinity, 0], ["-1e999", 0],
+    [0, 0], [50, 50], [12.345, 12.35], ["75", 75],
+  ];
+  const stores = [];
+  const fresh = () => {
+    localStorage.clear();
+    const s = new TransactionStore();
+    s.resetData();
+    stores.push(s);
+    return s;
+  };
+  const payload = (value) => ({
+    transactions: {}, monthlyBalances: {}, recurringTransactions: [], skippedTransactions: {},
+    movedTransactions: {}, monthlyNotes: {},
+    debts: [{ id: "d1", name: "X", balance: value, minPayment: value, dueDay: 10,
+      dueStartDate: "2026-10-10", recurrence: "monthly", interestRate: 0, _lastModified: "2026-09-01T00:00:00.000Z" }],
+    cashInfusions: [{ id: "c1", name: "Bonus", amount: value, date: "2026-10-12", targetDebtId: null,
+      _lastModified: "2026-09-01T00:00:00.000Z" }],
+    debtSnowballSettings: { dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false },
+    lastUpdated: "2026-09-01T00:00:00.000Z",
+  });
+  const check = (s, how, input, expected) => {
+    const debt = s.getDebts()[0];
+    const infusion = s.getCashInfusions()[0];
+    [["balance", debt.balance], ["minPayment", debt.minPayment], ["infusion amount", infusion.amount]]
+      .forEach(([field, got]) => {
+        if (got !== expected || Object.is(got, -0)) {
+          throw new Error(`${how} kept ${field} ${JSON.stringify(input)} as ${got}, expected ${expected}`);
+        }
+      });
+  };
+  global.Date = FrozenDate;
+  try {
+    CASES.forEach(([input, expected]) => {
+      // (a) importData
+      const s = fresh();
+      s.importData(payload(input));
+      check(s, "importData", input, expected);
+
+      // (b) loadData, from a blob an older build wrote
+      s.saveData(false);
+      localStorage.setItem("debts", JSON.stringify(payload(input).debts));
+      localStorage.setItem("cashInfusions", JSON.stringify(payload(input).cashInfusions));
+      const reloaded = new TransactionStore();
+      stores.push(reloaded);
+      check(reloaded, "loadData", input, expected);
+
+      // (c) add / update
+      const added = fresh();
+      added.addDebt({ ...payload(input).debts[0], id: undefined });
+      added.addCashInfusion({ ...payload(input).cashInfusions[0], id: undefined });
+      check(added, "addDebt/addCashInfusion", input, expected);
+      added.updateDebt(added.getDebts()[0].id, { balance: input, minPayment: input });
+      added.updateCashInfusion(added.getCashInfusions()[0].id, { amount: input });
+      check(added, "updateDebt/updateCashInfusion", input, expected);
+
+      // (d) the cloud merge, the way the push path runs it: merge, then import
+      //     the merged copy. The remote side is the one carrying the value.
+      const sync = new CloudSync(fresh(), () => {});
+      const local = fresh();
+      const remote = payload(input);
+      remote.debts[0]._lastModified = "2026-09-20T00:00:00.000Z";
+      remote.cashInfusions[0]._lastModified = "2026-09-20T00:00:00.000Z";
+      local.importData(payload(10));
+      const merged = sync._mergeData(local.exportData(), remote);
+      local.importData(merged);
+      check(local, "the cloud merge", input, expected);
+    });
+
+    // And the calendar never books a debt payment as income: the auditor's
+    // restored backup, a -50 minimum on the debt AND on its series.
+    const s = fresh();
+    const rm = new RecurringTransactionManager(s);
+    const cs = new CalculationService(s, rm);
+    const ui = new DebtSnowballUI(s, rm, () => {}, cs);
+    ui.renderPlan = () => {};
+    s.importData({
+      transactions: { "2026-09-29": [{ id: "eb", amount: 1000, type: "balance", description: "EB" }] },
+      monthlyBalances: {},
+      recurringTransactions: [{ id: "min1", startDate: "2026-10-10", amount: -50, type: "expense",
+        description: "Debt Payment: X", recurrence: "monthly", lastDayOfMonth: false, debtId: "d1",
+        debtRole: "minimum", debtName: "X" }],
+      debts: [{ id: "d1", name: "X", balance: 500, minPayment: -50, dueDay: 10, dueStartDate: "2026-10-10",
+        recurrence: "monthly", interestRate: 0, minRecurringId: "min1", dueLastDay: false }],
+      cashInfusions: [], skippedTransactions: {}, monthlyNotes: {}, movedTransactions: {},
+      debtSnowballSettings: { dailyFloor: 0, autoGenerate: false },
+    });
+    assert.strictEqual(s.getDebts()[0].minPayment, 0);
+    rm.applyRecurringTransactions(2026, 8);
+    ui.ensureSnowballPaymentsForHorizon(2026, 8);
+    cs.updateMonthlyBalances(new Date(2026, 8, 1));
+    const series = s.getRecurringTransactions().find((r) => r.id === "min1");
+    assert.ok(series.amount >= 0, `the minimum series still carries ${series.amount}`);
+    const balances = {};
+    cs.invalidateCache();
+    cs.walkDays("2026-09-29", "2026-11-11", {
+      seedBalance: 0, ensureRecurringExpansion: true,
+      onDay: (d) => { balances[d.dateString] = d.balance; },
+    });
+    assert.ok(balances["2026-10-10"] <= balances["2026-10-09"],
+      `the Oct 10 debt payment raised the balance ${balances["2026-10-09"]} -> ${balances["2026-10-10"]}`);
+    assert.ok(balances["2026-11-10"] <= balances["2026-11-09"], "and in November");
+    const rows = [];
+    Object.keys(s.getTransactions()).forEach((d) => s.getTransactions()[d].forEach((t) => {
+      if (t.debtId) rows.push(Number(t.amount));
+    }));
+    assert.ok(rows.length > 0 && rows.every((a) => a >= 0), `a debt row went negative: ${rows}`);
+    assert.strictEqual(ui.reconcileMinimumSeriesSchedules(), false, "idempotent");
+    console.log(`✅ ${CASES.length} debt/infusion money inputs normalize alike through import, load, add/update and the merge`);
+  } finally {
+    global.Date = RealDate;
+    stores.forEach((st) => st.cancelPendingSave());
+  }
+}
+
+console.log("TEST 145: Reversed Semi-Monthly Days Keep Their Cap");
+{
+  // The form lets a semi-monthly series be "the 20th and the 5th", and the
+  // expansion assumed the first day comes first: the cap's catch-up count
+  // credited a start between the two days with the whole start month, so
+  // "20 and 5" capped at 4 paid 3. The pair is now ordered wherever it is
+  // read, and the form saves it ordered.
+  const assert = require("assert");
+  const RealDate = Date;
+  const FIXED = new RealDate(2026, 0, 1, 12, 0, 0);
+  class FrozenDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(FIXED.getTime()); else super(...a); }
+    static now() { return FIXED.getTime(); }
+  }
+  const stores = [];
+  global.Date = FrozenDate;
+  const prevFields = global.__domFields;
+  try {
+    const occurrences = (fields) => {
+      localStorage.clear();
+      const s = new TransactionStore();
+      s.resetData();
+      stores.push(s);
+      const rm = new RecurringTransactionManager(s);
+      const id = s.addRecurringTransaction({ amount: 10, type: "expense", description: "x",
+        recurrence: "semi-monthly", ...fields });
+      for (let m = 0; m < 10; m++) rm.applyRecurringTransactions(2026, m);
+      const out = [];
+      Object.keys(s.getTransactions()).sort().forEach((d) =>
+        s.getTransactions()[d].forEach((t) => { if (t.recurringId === id) out.push(d); }));
+      const rt = s.getRecurringTransactions().find((r) => r.id === id);
+      return { dates: out, rt, rm };
+    };
+    let compared = 0;
+    ["2026-02-03", "2026-02-05", "2026-02-10", "2026-02-20", "2026-02-25"].forEach((startDate) => {
+      [1, 2, 3, 4, 5].forEach((maxOccurrences) => {
+        const ordered = occurrences({ semiMonthlyDays: [5, 20], startDate, maxOccurrences });
+        const reversed = occurrences({ semiMonthlyDays: [20, 5], startDate, maxOccurrences });
+        assert.strictEqual(ordered.dates.length, maxOccurrences, `[5,20] from ${startDate} cap ${maxOccurrences}`);
+        assert.deepStrictEqual(reversed.dates, ordered.dates,
+          `"20 and 5" from ${startDate} capped at ${maxOccurrences} paid ${reversed.dates}, "5 and 20" paid ${ordered.dates}`);
+        // The split's count agrees with what was expanded.
+        ["2026-03-01", "2026-03-12", "2026-04-30"].forEach((before) => {
+          const expected = reversed.dates.filter((d) => d < before).length;
+          const counted = Math.min(maxOccurrences,
+            reversed.rm.countOccurrencesBefore(reversed.rt, Utils.parseDateString(before)));
+          assert.strictEqual(counted, expected, `countOccurrencesBefore ${before}`);
+        });
+        compared++;
+      });
+    });
+    // A last-day pair is already in order and stays on the last day.
+    const last = occurrences({ semiMonthlyDays: [20, 31], semiMonthlyLastDay: true, startDate: "2026-02-10", maxOccurrences: 3 });
+    assert.deepStrictEqual(last.dates, ["2026-02-20", "2026-02-28", "2026-03-20"]);
+
+    // The form saves the pair in month order.
+    global.__domFields = { advancedRecurrenceOptions: "", semiMonthlyFirstDay: "20", semiMonthlySecondDay: "5" };
+    const fromForm = { recurrence: "semi-monthly" };
+    TransactionUI.prototype.addAdvancedRecurringOptions.call({}, fromForm);
+    assert.deepStrictEqual(fromForm.semiMonthlyDays, [5, 20]);
+    global.__domFields = { advancedRecurrenceOptions: "", semiMonthlyFirstDay: "20", semiMonthlySecondDay: "last" };
+    const lastForm = { recurrence: "semi-monthly" };
+    TransactionUI.prototype.addAdvancedRecurringOptions.call({}, lastForm);
+    assert.deepStrictEqual(lastForm.semiMonthlyDays, [20, 31]);
+    assert.strictEqual(lastForm.semiMonthlyLastDay, true);
+    console.log(`✅ ${compared} capped "20 and 5" series pay exactly what "5 and 20" pays`);
+  } finally {
+    global.Date = RealDate;
+    global.__domFields = prevFields;
+    stores.forEach((st) => st.cancelPendingSave());
+  }
+}
+
 // Run the async network tests sequentially (shared global.fetch mock): TEST 32
 // first, then TEST 30, which prints the final banner.
 async function runUnreadableGistTest() {
