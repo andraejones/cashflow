@@ -1844,6 +1844,138 @@ class RecurringTransactionManager {
   }
 
 
+  // The amount a series-scope edit ("future" / "all") writes into the series
+  // DEFINITION. A drawn recurring-allocation bucket's `amount` is its
+  // REMAINDER (debited in place), and the edit form is pre-filled with it, so
+  // a save that only renamed the bucket would otherwise write the remainder
+  // into the definition and shrink every later period. So when the clicked
+  // row is a bucket of an allocation series and the amount field was left
+  // alone, the definition keeps its own amount; a typed change is taken as
+  // the new period amount. Known edge: the floor-suggestion Apply button
+  // (transaction-ui-daydetail.js) that happens to suggest exactly the current
+  // remainder reads as "unchanged" and leaves the definition as it was.
+  _seriesAmountForEdit(transaction, recurringTransaction, updatedTransaction) {
+    const cents = (v) => Math.round((Number(v) || 0) * 100);
+    const isBucket =
+      transaction.allocated === true && recurringTransaction.allocated === true;
+    const amountUnchanged =
+      cents(updatedTransaction.amount) === cents(transaction.amount);
+    return isBucket && amountUnchanged && Number.isFinite(recurringTransaction.amount)
+      ? recurringTransaction.amount
+      : updatedTransaction.amount;
+  }
+
+
+  // Hand the per-occurrence state of `oldRt` from `cutoffStr` on to the series
+  // a "this and future" split just created. The old series is ended the day
+  // before the cutoff, and an occurrence is inside a series' window by its
+  // LANDING date, so the rows the old series stops generating are exactly
+  // those dated on/after the cutoff. Anything the old series had recorded
+  // about those occurrences has to follow them, or the new series expands the
+  // same occurrence a second time (a modified instance left behind is counted
+  // twice), a skip is lost (the skipped occurrence comes back) and a move
+  // stops suppressing the original date (the moved occurrence is paid twice).
+  //
+  // Four kinds of state, each written through the store so it is timestamped
+  // for the cloud merge:
+  //   (a) persisted rows of the old series (modified instances, id-bearing
+  //       rows), except the clicked one;
+  //   (b) skips — recorded as skip EVENTS on both ids, never spliced;
+  //   (c) move records, re-keyed to the new id;
+  //   (d) moved copies (`originalRecurringId`) of occurrences from the cutoff.
+  //
+  // Rows (a) and (d) ADOPT the new values field by field: a field still equal
+  // to the old definition's was never hand-edited, so it takes the split's
+  // value; one that differs is a hand edit and is kept. A posted row (bank
+  // status "cleared") is a fact about what the bank did and keeps every field.
+  _migrateOccurrenceState(oldRt, newId, cutoffStr, newValues, clickedDate, clickedIndex) {
+    if (!oldRt || !oldRt.id || !newId || typeof cutoffStr !== "string") {
+      return;
+    }
+    const oldId = oldRt.id;
+    const cents = (v) => Math.round((Number(v) || 0) * 100);
+    const adopt = (t, updates) => {
+      if (this.store.getBankStatus(t) !== "cleared") {
+        if (cents(t.amount) === cents(oldRt.amount)) {
+          updates.amount = newValues.amount;
+        }
+        if (t.type === oldRt.type) {
+          updates.type = newValues.type;
+        }
+        if (t.description === oldRt.description) {
+          updates.description = newValues.description;
+        }
+      }
+      const finalType = updates.type !== undefined ? updates.type : t.type;
+      if (finalType !== "expense") {
+        updates.settled = undefined;
+        updates.allocated = undefined;
+        updates.autoCloseout = undefined;
+        updates.closeoutDate = undefined;
+      }
+      return updates;
+    };
+
+    // (a) + (d): collect first, then write — updateTransaction replaces the
+    // row object in place, so positions stay valid.
+    const transactions = this.store.getTransactions();
+    const pending = [];
+    Object.keys(transactions).forEach((dateKey) => {
+      const list = transactions[dateKey];
+      if (!Array.isArray(list)) return;
+      list.forEach((t, i) => {
+        if (!t || typeof t !== "object") return;
+        if (dateKey === clickedDate && i === clickedIndex) return;
+        if (
+          t.recurringId === oldId &&
+          (t.modifiedInstance === true || t.id) &&
+          dateKey >= cutoffStr
+        ) {
+          pending.push([dateKey, i, adopt(t, { recurringId: newId })]);
+        } else if (
+          t.originalRecurringId === oldId &&
+          typeof t.movedFrom === "string" &&
+          t.movedFrom >= cutoffStr
+        ) {
+          pending.push([dateKey, i, adopt(t, { originalRecurringId: newId })]);
+        }
+      });
+    });
+    pending.forEach(([dateKey, i, updates]) => {
+      this.store.updateTransaction(dateKey, i, updates);
+    });
+
+    // (b) skips
+    const skipped = this.store.getSkippedTransactions();
+    Object.keys(skipped)
+      .filter(
+        (skipDate) =>
+          skipDate >= cutoffStr &&
+          Array.isArray(skipped[skipDate]) &&
+          skipped[skipDate].includes(oldId)
+      )
+      .forEach((skipDate) => {
+        this.store.setTransactionSkipped(skipDate, oldId, false);
+        this.store.setTransactionSkipped(skipDate, newId, true);
+      });
+
+    // (c) move records
+    const moves = this.store.movedTransactions || {};
+    Object.keys(moves)
+      .map((key) => moves[key])
+      .filter(
+        (move) =>
+          move &&
+          move.recurringId === oldId &&
+          typeof move.fromDate === "string" &&
+          move.fromDate >= cutoffStr
+      )
+      .forEach((move) => {
+        this.store.rekeyMovedTransaction(oldId, newId, move.fromDate);
+      });
+  }
+
+
   editTransaction(date, index, updatedTransaction, editScope) {
     const transactions = this.store.getTransactions();
     if (!transactions[date] || !transactions[date][index]) {
@@ -2052,6 +2184,15 @@ class RecurringTransactionManager {
         }
       }
 
+      // A drawn recurring-allocation bucket's edit form is pre-filled with its
+      // REMAINDER, not the period amount (see _seriesAmountForEdit).
+      const seriesAmount = this._seriesAmountForEdit(
+        transaction,
+        recurringTransaction,
+        updatedTransaction
+      );
+      newRecurringTransaction.amount = seriesAmount;
+
       if (recurringTransaction.maxOccurrences) {
         const occurrencesBefore = this.countOccurrencesBefore(
           recurringTransaction,
@@ -2076,6 +2217,21 @@ class RecurringTransactionManager {
         });
       }
       this.store.addRecurringTransaction(newRecurringTransaction);
+      // Everything the old series recorded about its occurrences from the
+      // cutoff on now belongs to the new one. The clicked row is handled
+      // below (or stays with the old series when edited in place).
+      this._migrateOccurrenceState(
+        recurringTransaction,
+        newRecurringId,
+        Utils.formatDateString(splitCutoff),
+        {
+          amount: seriesAmount,
+          type: updatedTransaction.type,
+          description: updatedTransaction.description,
+        },
+        date,
+        index
+      );
       // A clicked occurrence edited in place (month-end clamp, above) stays
       // with the old series; there is nothing to re-point.
       const instanceUpdates = editClickedInPlace ? null : {
@@ -2095,18 +2251,6 @@ class RecurringTransactionManager {
         }
         this.store.updateTransaction(date, index, instanceUpdates);
       }
-      const skippedTransactions = this.store.getSkippedTransactions();
-      Object.keys(skippedTransactions).forEach((skipDate) => {
-        if (Utils.parseDateString(skipDate) >= splitCutoff) {
-          const skipIndex = skippedTransactions[skipDate].indexOf(recurringId);
-          if (skipIndex > -1) {
-            skippedTransactions[skipDate].splice(skipIndex, 1);
-            if (skippedTransactions[skipDate].length === 0) {
-              delete skippedTransactions[skipDate];
-            }
-          }
-        }
-      });
 
       this.store.saveData();
       return true;
@@ -2120,8 +2264,13 @@ class RecurringTransactionManager {
         const clearAllocation =
           updatedTransaction.type !== "expense" &&
           recurringTransaction.allocated === true;
+        const seriesAmount = this._seriesAmountForEdit(
+          transaction,
+          recurringTransaction,
+          updatedTransaction
+        );
         const recurringUpdates = {
-          amount: updatedTransaction.amount,
+          amount: seriesAmount,
           type: updatedTransaction.type,
           description: updatedTransaction.description,
         };
@@ -2140,9 +2289,19 @@ class RecurringTransactionManager {
         this.store.updateRecurringTransaction(recurringId, recurringUpdates);
         Object.keys(transactions).forEach((dateKey) => {
           transactions[dateKey].forEach((t, i) => {
-            if (t.recurringId === recurringId && !t.modifiedInstance) {
+            // Other modified instances stay as they are (hand edits and
+            // posted rows are history), but the row the user actually edited
+            // takes what they typed even when it is a modified instance —
+            // which any bank-status stamp or settle makes it. Its amount is
+            // the form's own figure: for a drawn bucket that is the remainder
+            // it was pre-filled with, not the series amount.
+            const isClicked = dateKey === date && i === index;
+            if (
+              t.recurringId === recurringId &&
+              (!t.modifiedInstance || isClicked)
+            ) {
               const instanceUpdates = {
-                amount: updatedTransaction.amount,
+                amount: isClicked ? updatedTransaction.amount : seriesAmount,
                 type: updatedTransaction.type,
                 description: updatedTransaction.description,
               };
@@ -2204,18 +2363,48 @@ class RecurringTransactionManager {
             }
           }
         });
-        const skippedTransactions = this.store.getSkippedTransactions();
-        Object.keys(skippedTransactions).forEach((skipDate) => {
-          if (Utils.parseDateString(skipDate) >= currentDate) {
-            const index = skippedTransactions[skipDate].indexOf(recurringId);
-            if (index > -1) {
-              skippedTransactions[skipDate].splice(index, 1);
-              if (skippedTransactions[skipDate].length === 0) {
-                delete skippedTransactions[skipDate];
-              }
+        // Moved copies of the occurrences just deleted. A copy carries
+        // `originalRecurringId`, not `recurringId`, so the filter above never
+        // sees it, and it would keep charging the bill the user just ended on
+        // the date it was moved to. Deleted through the store so each is
+        // tombstoned and refunds any bucket it drew from; highest index first
+        // so the positions still to visit stay valid. Its move record goes
+        // with it.
+        const copies = [];
+        Object.keys(transactions).forEach((dateKey) => {
+          const list = transactions[dateKey];
+          if (!Array.isArray(list)) return;
+          list.forEach((t, i) => {
+            if (
+              t &&
+              t.originalRecurringId === recurringId &&
+              typeof t.movedFrom === "string" &&
+              t.movedFrom >= date
+            ) {
+              copies.push([dateKey, i, t.movedFrom]);
             }
-          }
+          });
         });
+        copies
+          .sort((a, b) => b[1] - a[1])
+          .forEach(([dateKey, i, movedFrom]) => {
+            this.store.deleteTransaction(dateKey, i);
+            this.store.cancelMoveTransaction(recurringId, movedFrom);
+          });
+        // Skips on/after the deleted occurrence no longer describe anything
+        // the series will generate. Cleared as skip EVENTS, so the cloud
+        // merge's union of skip lists can't bring them back.
+        const skippedTransactions = this.store.getSkippedTransactions();
+        Object.keys(skippedTransactions)
+          .filter(
+            (skipDate) =>
+              skipDate >= date &&
+              Array.isArray(skippedTransactions[skipDate]) &&
+              skippedTransactions[skipDate].includes(recurringId)
+          )
+          .forEach((skipDate) => {
+            this.store.setTransactionSkipped(skipDate, recurringId, false);
+          });
 
         this.store.debouncedSave();
       } else {

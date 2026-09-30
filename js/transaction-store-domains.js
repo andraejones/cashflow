@@ -288,6 +288,30 @@ Object.assign(TransactionStore.prototype, {
     return false;
   },
 
+  // Hand a move record to another series. A "this and future" split gives the
+  // occurrences after its cutoff a new series id, and a move record is keyed
+  // by `${recurringId}-${fromDate}`, so one left under the old id would no
+  // longer describe any occurrence the calendar expands (the "(Authorized)"
+  // label and the skip-star exemption read it by the row's own series id).
+  // The move itself — where it went and when — is unchanged.
+  rekeyMovedTransaction(oldRecurringId, newRecurringId, fromDate) {
+    if (!oldRecurringId || !newRecurringId || !fromDate) {
+      return false;
+    }
+    const oldKey = `${oldRecurringId}-${fromDate}`;
+    const move = this.movedTransactions[oldKey];
+    if (!move) {
+      return false;
+    }
+    delete this.movedTransactions[oldKey];
+    this.movedTransactions[`${newRecurringId}-${fromDate}`] = {
+      ...move,
+      recurringId: newRecurringId,
+    };
+    this.debouncedSave();
+    return true;
+  },
+
   // Return the move record for a recurring occurrence relocated FROM this date,
   // or null. Lets the UI distinguish a payment that was authorized on its
   // scheduled date but settled later (moved) from a genuinely skipped one.

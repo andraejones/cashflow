@@ -137,6 +137,11 @@ Object.assign(DebtSnowballUI.prototype, {
       updateTransaction: readOnly("updateTransaction"),
       deleteTransaction: readOnly("deleteTransaction"),
       setTransactionSkipped: readOnly("setTransactionSkipped"),
+      cancelMoveTransaction: readOnly("cancelMoveTransaction"),
+      rekeyMovedTransaction: readOnly("rekeyMovedTransaction"),
+      // A pure read (the one bank-status rule), reached only by a series
+      // split; answered by the real rule so it can never disagree.
+      getBankStatus: (t) => TransactionStore.prototype.getBankStatus.call(null, t),
     };
     const manager = new RecurringTransactionManager(dummyStore);
     manager.applyRecurringTransactions(year, month);

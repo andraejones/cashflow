@@ -11,8 +11,8 @@ CashFlow Calendar is an offline-first, single-page personal finance application 
 **No build process required.** Open `index.html` directly in a browser or serve via any static server.
 
 **Tests:** `npm test` (or run the two scripts directly with Node) — it must pass before every commit:
-- `node scripts/verify-logic.js` — 121 numbered integration tests over vm-loaded sources
-  (numbered up to TEST 127; the numbering has gaps where tests were merged or
+- `node scripts/verify-logic.js` — 124 numbered integration tests over vm-loaded sources
+  (numbered up to TEST 130; the numbering has gaps where tests were merged or
   removed along with the feature they covered).
   Six of them are SWEEPS rather than scenarios, and they are the ones worth
   extending when something new is added:
@@ -28,7 +28,8 @@ CashFlow Calendar is an offline-first, single-page personal finance application 
       saveToCloud and loadFromCloud. The failure mode there is not a bad push,
       it is the edit being destroyed in memory and on disk by the merged import.
     - TEST 96 pins the one rule five different readers have to agree on: which
-      instance of a rolling allocation series is live (see below).
+      instance of a rolling allocation series is live (see below), including
+      across a "this and future" split of the series (case d).
     - TEST 98 is a SOURCE sweep for two shapes that read as correct and are not:
       `parseDateString(a) <= parseDateString(b)` (a null coerces to 0, so the
       comparison is always true — this blanked the calendar once) and
@@ -180,6 +181,32 @@ writer (TEST 116). A "this and future" split on a month-end-CLAMPED occurrence
 edits that occurrence in place and starts the new series at the next one
 (never clamped: every month after a short month has 31 days); anchoring on the
 clamped day turned a bill due the 29th into one due the 28th (TEST 115).
+
+A "this and future" split moves every occurrence dated on/after its cutoff to
+the new series id, so everything the OLD id recorded about those occurrences
+has to move with them — `_migrateOccurrenceState` does it for four kinds of
+state: persisted rows (modified instances, id-bearing rows), skips (written as
+skip EVENTS on both ids through `setTransactionSkipped`, never spliced, so the
+cloud merge follows), move records (`rekeyMovedTransaction`) and moved copies
+(`originalRecurringId`, selected by `movedFrom`). Left behind, a hand-edited
+later occurrence was counted twice (it stayed on the old id while the new
+series expanded the same occurrence), a skipped one came back, and a moved one
+was paid on both dates. Migrated rows ADOPT the split's values field by field:
+an `amount` / `type` / `description` still equal to the old definition's was
+never hand-edited and takes the new value; one that differs is a hand edit and
+is kept; a posted row (`getBankStatus` "cleared") keeps every field (TEST 128).
+"Delete all future" removes the moved copies of the occurrences it deletes
+(through `store.deleteTransaction`, so they are tombstoned and refund their
+buckets) together with their move records (TEST 129).
+
+A series-scope edit ("future" / "all") on a drawn recurring-allocation bucket
+keeps the DEFINITION's amount unless the amount field was changed: the bucket's
+`amount` is its remainder and the form is pre-filled with it, so a rename wrote
+the remainder into the definition and shrank every later period
+(`_seriesAmountForEdit`). "Edit all occurrences" also applies the edit to the
+clicked row even when it is a modified instance (any bank stamp or settle makes
+it one); other modified instances stay as history (TEST 130, and TEST 96 (d)
+for the live bucket across a split).
 
 **CalculationService** (`calculation-service.js`) - Computes daily running balances and monthly summaries with caching. `walkDays(start, end, opts)` is THE single day-by-day balance walk (anchor resets to entered − reserves, unsettled/allocation accumulators); every balance path — monthly balances, running balance, day breakdown, 30-day minimum, and both calendar loops — steps through it. Companion helpers: `getMonthSeed`, `getCellExpense`, `getCarriedUnsettledList`. Never re-implement the walk; the parity harness fails if calendar-ui forks it.
 
@@ -456,7 +483,7 @@ local_last_sync, _backup_before_merge, calendar_view_mode
 
 - `styles.css` - CSS variables for theming (primary, accent, error colors)
 - `README.md` - Project documentation and feature overview
-- `scripts/verify-logic.js` - Standalone logic verification utility (121 tests)
+- `scripts/verify-logic.js` - Standalone logic verification utility (124 tests)
 - `scripts/verify-walk-parity.js` - Randomized balance-walk parity harness + source guard
 - `scripts/verify-ui.js` - Optional headless-Chromium UI harness (`npm run test:ui`)
 - `scripts/verify-sync.js` - Optional two-device cloud-sync harness (`npm run test:sync`)

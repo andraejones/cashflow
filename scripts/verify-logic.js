@@ -8407,7 +8407,7 @@ console.log("TEST 96: A Skipped Occurrence Ends The Period Before It");
 
   // Explicit rows rather than expansion, so the two periods under test are
   // pinned to known dates regardless of what day the suite runs on.
-  const setup = ({ drawn = false, skipToday = false } = {}) => {
+  const setup = ({ drawn = false, skipToday = false, noRender = false } = {}) => {
     localStorage.clear();
     const stamp = new Date().toISOString();
     const store = new TransactionStore();
@@ -8461,13 +8461,13 @@ console.log("TEST 96: A Skipped Occurrence Ends The Period Before It");
       calc.invalidateCache();
       calc.updateMonthlyBalances(new Date());
     };
-    render();
+    if (!noRender) render();
     return { store, manager, calc, render };
   };
-  const bucketOf = (store) => store.getAllocations().find((a) => a.recurringId === "rb");
+  const bucketOf = (store, id = "rb") => store.getAllocations().find((a) => a.recurringId === id);
   // Transcribed from js/app.js showAllocatedTransactions — the modal elects the
   // live rolling bucket itself, so it has to be checked, not assumed.
-  const modalListsDate = (store) => {
+  const modalListsDate = (store, id = "rb") => {
     const transactions = store.getTransactions();
     const live = new Map();
     Object.keys(transactions).forEach((date) => {
@@ -8479,9 +8479,9 @@ console.log("TEST 96: A Skipped Occurrence Ends The Period Before It");
         if (!cur || date > cur) live.set(t.recurringId, date);
       });
     });
-    const liveDate = live.get("rb");
+    const liveDate = live.get(id);
     if (!liveDate) return null;
-    return store.isTransactionSkipped(liveDate, "rb") ? null : liveDate;
+    return store.isTransactionSkipped(liveDate, id) ? null : liveDate;
   };
 
   // (a) Skipping this period releases what LAST period had left, even when it
@@ -8587,6 +8587,54 @@ console.log("TEST 96: A Skipped Occurrence Ends The Period Before It");
     }
     if (modalListsDate(store) !== todayStr) {
       throw new Error("the Allocated modal disagrees with the restored bucket");
+    }
+    store.cancelPendingSave();
+  }
+
+  // (d) A "this and future" split hands the live period to the new series
+  //     intact. The split ends the old series before today, and an ended
+  //     series has no live bucket, so a drawn bucket left on the old id was
+  //     forfeited (its drawer left dangling) while the new series expanded a
+  //     fresh, full-price bucket for the same period. The split migrates the
+  //     persisted bucket instead, and all the readers name it: the drawable
+  //     list, the reserve index, the Allocated modal and the sweeps.
+  {
+    const { store, manager, calc, render } = setup({ noRender: true });
+    store.addTransaction(todayStr, {
+      amount: 50, type: "expense", description: "Groceries",
+      settled: true, drawsFromAllocationId: "b2",
+    });
+    const idx = store.getTransactions()[lastPeriod].findIndex((t) => t.id === "b1");
+    manager.editTransaction(lastPeriod, idx,
+      { amount: 200, type: "expense", description: "Food Bucket" }, "future");
+    const newDef = store.getRecurringTransactions().find((rt) => rt.id !== "rb");
+    if (!newDef) throw new Error("(d) the split created no new series");
+    render();
+    render();
+    const live = bucketOf(store, newDef.id);
+    if (!live || live.id !== "b2" || live.date !== todayStr || Math.abs(live.remaining - 150) > 0.005) {
+      throw new Error(`(d) the drawn bucket must stay live under the new series at 150, got ${JSON.stringify(live)}`);
+    }
+    if (bucketOf(store, "rb")) {
+      throw new Error("(d) the ended series still offers a bucket");
+    }
+    if (Math.abs(calc.getReservedTotalOnOrBefore(todayStr) - 150) > 0.005) {
+      throw new Error(`(d) the reserve index holds ${calc.getReservedTotalOnOrBefore(todayStr)}, expected 150`);
+    }
+    if (modalListsDate(store, newDef.id) !== todayStr || modalListsDate(store, "rb") !== null) {
+      throw new Error("(d) the Allocated modal disagrees with the live bucket");
+    }
+    const liveRows = Object.keys(store.getTransactions())
+      .filter((d) => d <= todayStr)
+      .flatMap((d) => store.getTransactions()[d])
+      .filter((t) => t.allocated === true && (t.recurringId === "rb" || t.recurringId === newDef.id));
+    if (liveRows.length !== 1 || liveRows[0].id !== "b2" || liveRows[0].description !== "Food Bucket") {
+      throw new Error(`(d) exactly the migrated bucket may remain, got ${JSON.stringify(liveRows)}`);
+    }
+    // 2000 anchored - 50 spent - 150 still reserved.
+    const bal = calc.getRunningBalanceForDate(todayStr);
+    if (Math.abs(bal - 1800) > 0.005) {
+      throw new Error(`(d) balance ${bal}, expected 1800`);
     }
     store.cancelPendingSave();
   }
@@ -11152,6 +11200,388 @@ console.log("TEST 127: A Debt's Final Payment Neither Flickers Nor Outlives Its 
   } finally {
     global.Date = RealDate;
     stores.forEach((s) => s.cancelPendingSave());
+  }
+}
+
+// TransactionUI lives in companion files that only TEST 36 loads into this
+// context; the P2 tests below drive its real saveEdit. Load it here if a
+// reordering ever moves them ahead of TEST 36.
+if (typeof TransactionUI === "undefined") {
+  [
+    "transaction-ui.js",
+    "transaction-ui-forms.js",
+    "transaction-ui-daydetail.js",
+    "transaction-ui-edit.js",
+    "transaction-ui-add.js",
+  ].forEach((f) => vm.runInThisContext(fs.readFileSync(path.join(jsDir, f), "utf8")));
+}
+// A headless TransactionUI whose saveEdit reads its form from __domFields
+// (the id convention is `edit-<field>-${date}-${index}`).
+const P2_editUI = (s, rm, cs) => {
+  const ui = Object.create(TransactionUI.prototype);
+  ui.store = s;
+  ui.recurringManager = rm;
+  ui.calculationService = cs;
+  ui.onUpdate = () => {};
+  ui.cloudSync = null;
+  ui.showTransactionDetails = () => {};
+  return ui;
+};
+const P2_saveEdit = (ui, date, idx, fields) => {
+  const prev = global.__domFields;
+  global.__domFields = {
+    [`edit-amount-${date}-${idx}`]: String(fields.amount),
+    [`edit-type-${date}-${idx}`]: fields.type || "expense",
+    [`edit-description-${date}-${idx}`]: fields.description,
+    [`edit-date-${date}-${idx}`]: fields.date || date,
+    [`edit-recurrence-${date}-${idx}`]: fields.scope || "this",
+  };
+  try {
+    ui.saveEdit(date, idx, ui.store.getTransactions()[date][idx].id);
+  } finally {
+    global.__domFields = prev;
+  }
+};
+
+// TEST 128: a "this and future" split carries every later occurrence's state.
+//
+// The split ends the old series the day before its cutoff and starts a new one
+// under a new id, so everything the OLD id had recorded about the occurrences
+// from the cutoff on stopped describing anything. A hand-edited later
+// occurrence (a modified instance) stayed on the old id while the new series
+// expanded the same occurrence again: two rows, counted twice. Later skips
+// were deleted instead of carried, so a skipped occurrence came back; a move
+// record was left under the old id, so the moved occurrence was paid on its
+// original date AND on the date it moved to. The split now migrates all four
+// kinds of state (persisted rows, skips as events, move records, moved
+// copies), and each migrated row adopts the new values field by field: a
+// field still equal to the old definition's takes the split's value, a hand
+// edit is kept, and a posted (cleared) row keeps everything.
+console.log("TEST 128: A This-And-Future Split Carries Every Later Occurrence's State");
+{
+  const assert = require("assert");
+  const RealDate = Date;
+  const FIXED = new RealDate(2026, 8, 29, 12, 0, 0);
+  class FrozenDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(FIXED.getTime()); else super(...a); }
+    static now() { return FIXED.getTime(); }
+  }
+  global.Date = FrozenDate;
+  const stores = [];
+  try {
+    const make = () => {
+      localStorage.clear();
+      const s = new TransactionStore();
+      s.resetData();
+      stores.push(s);
+      const rm = new RecurringTransactionManager(s);
+      const cs = new CalculationService(s, rm);
+      return { s, rm, cs };
+    };
+    // Months 0..N from July 2026.
+    const monthOf = (k) => new Date(2026, 6 + k, 1, 12);
+    const occ = (k) => Utils.formatDateString(new Date(2026, 6 + k, 15, 12));
+    const expandAll = (rm, n) => {
+      rm.invalidateCache();
+      for (let k = 0; k <= n; k++) {
+        const d = monthOf(k);
+        rm.applyRecurringTransactions(d.getFullYear(), d.getMonth());
+      }
+    };
+    // Every row standing in for an occurrence of either series in month k:
+    // expansions and persisted rows not skipped on their date, plus moved
+    // copies.
+    const rowsIn = (s, rm, k, ids) => {
+      const d = monthOf(k);
+      const prefix = Utils.formatDateString(d).slice(0, 7);
+      const out = [];
+      Object.keys(s.getTransactions()).sort().forEach((date) => {
+        if (!date.startsWith(prefix)) return;
+        s.getTransactions()[date].forEach((t) => {
+          if (ids.includes(t.recurringId) && !rm.isTransactionSkipped(date, t.recurringId)) {
+            out.push({ date, t });
+          } else if (ids.includes(t.originalRecurringId)) {
+            out.push({ date, t });
+          }
+        });
+      });
+      return out;
+    };
+    const idxOf = (s, date, id) => s.getTransactions()[date].findIndex((t) => t.recurringId === id);
+
+    // --- The scenario ---
+    const { s, rm, cs } = make();
+    s.addTransaction("2026-06-30", { amount: 5000, type: "balance", description: "Ending Balance" });
+    s.addRecurringTransaction({ id: "gym", startDate: "2026-07-15", amount: 100, type: "expense",
+      description: "Gym", recurrence: "monthly", settled: true });
+    expandAll(rm, 11);
+    // December was $120 this once.
+    rm.editTransaction(occ(5), idxOf(s, occ(5), "gym"), { amount: 120, type: "expense", description: "Gym" }, "this");
+    // January is a hold at the bank.
+    s.setTransactionBankStatus(occ(6), idxOf(s, occ(6), "gym"), "pending");
+    // February is skipped.
+    rm.toggleSkipTransaction(occ(7), "gym");
+    // March moved to the 20th — the same store calls saveEdit makes.
+    rm.toggleSkipTransaction(occ(8), "gym");
+    s.moveTransaction("gym", occ(8), "2027-03-20");
+    s.addTransaction("2027-03-20", { amount: 100, type: "expense", description: "Gym",
+      movedFrom: occ(8), originalRecurringId: "gym", settled: true });
+    // April already shows as posted: a fact about what the bank did, which a
+    // later price change must not rewrite.
+    s.setTransactionBankStatus(occ(9), idxOf(s, occ(9), "gym"), "cleared");
+
+    // The price goes up from November on.
+    rm.editTransaction(occ(4), idxOf(s, occ(4), "gym"), { amount: 150, type: "expense", description: "Gym" }, "future");
+    const newDef = s.getRecurringTransactions().find((rt) => rt.id !== "gym");
+    assert.ok(newDef, "the split created a new series");
+    const newId = newDef.id;
+    expandAll(rm, 11);
+
+    const ids = ["gym", newId];
+    const expected = [100, 100, 100, 100, 150, 120, 150, null, 150, 100, 150, 150];
+    expected.forEach((amount, k) => {
+      const rows = rowsIn(s, rm, k, ids);
+      if (amount === null) {
+        assert.strictEqual(rows.length, 0,
+          `month ${k} was skipped and must stay skipped, got ${JSON.stringify(rows)}`);
+        return;
+      }
+      assert.strictEqual(rows.length, 1,
+        `month ${k} must hold exactly one occurrence, got ${JSON.stringify(rows.map((r) => [r.date, r.t.amount, r.t.recurringId || r.t.originalRecurringId]))}`);
+      assert.strictEqual(rows[0].t.amount, amount, `month ${k} amount`);
+      assert.strictEqual(rows[0].t.recurringId || rows[0].t.originalRecurringId,
+        k >= 4 ? newId : "gym", `month ${k} belongs to the ${k >= 4 ? "new" : "old"} series`);
+    });
+    const jan = rowsIn(s, rm, 6, ids)[0].t;
+    assert.strictEqual(jan.bankStatus, "pending", "January's hold survives the split");
+    assert.strictEqual(jan.settled, false, "and still carries forward");
+    const mar = rowsIn(s, rm, 8, ids)[0];
+    assert.strictEqual(mar.date, "2027-03-20", "March is paid on the 20th only");
+    assert.strictEqual(mar.t.originalRecurringId, newId, "the moved copy follows its occurrence");
+    assert.strictEqual(rowsIn(s, rm, 9, ids)[0].t.bankStatus, "cleared", "April stays posted");
+
+    // The move record and the skip follow the occurrence, as timestamped
+    // events the cloud merge can apply.
+    const moved = s.movedTransactions;
+    assert.strictEqual(moved[`gym-${occ(8)}`], undefined, "the old move key is gone");
+    assert.ok(moved[`${newId}-${occ(8)}`] && moved[`${newId}-${occ(8)}`].toDate === "2027-03-20",
+      "the move record is re-keyed to the new series");
+    const skipEvents = s._deletedItems.skips || [];
+    assert.ok(skipEvents.some((e) => e.date === occ(7) && e.recurringId === newId && e.skipped === true),
+      "February's skip is recorded for the new series");
+    assert.ok(skipEvents.some((e) => e.date === occ(7) && e.recurringId === "gym" && e.skipped === false),
+      "and released on the old one");
+
+    // What the calendar sums, and the same after a round trip through a
+    // backup (every piece of state has to be persisted, not just in memory).
+    const totals = (st, m) => {
+      const c = new CalculationService(st, m);
+      expandAll(m, 11);
+      c.updateMonthlyBalances(monthOf(11));
+      return expected.map((_, k) => c.calculateMonthlySummary(monthOf(k).getFullYear(), monthOf(k).getMonth()).expense);
+    };
+    const want = expected.map((a) => a || 0);
+    assert.deepStrictEqual(totals(s, rm), want, "month totals after the split");
+    const backup = JSON.parse(JSON.stringify(s.exportData()));
+    const { s: s2, rm: rm2 } = make();
+    s2.importData(backup);
+    assert.deepStrictEqual(totals(s2, rm2), want, "month totals after a backup round trip");
+
+    // Mini-sweep: split at every occurrence k with a hand edit at k+1 and a
+    // skip at k+2. One row per occurrence, the edit kept, the skip kept.
+    for (let k = 1; k <= 6; k++) {
+      const { s: sk, rm: rk } = make();
+      sk.addRecurringTransaction({ id: "sub", startDate: "2026-07-15", amount: 100, type: "expense",
+        description: "Sub", recurrence: "monthly", settled: true });
+      expandAll(rk, k + 4);
+      rk.editTransaction(occ(k + 1), idxOf(sk, occ(k + 1), "sub"),
+        { amount: 123, type: "expense", description: "Sub" }, "this");
+      rk.toggleSkipTransaction(occ(k + 2), "sub");
+      rk.editTransaction(occ(k), idxOf(sk, occ(k), "sub"),
+        { amount: 110, type: "expense", description: "Sub+" }, "future");
+      const nid = sk.getRecurringTransactions().find((rt) => rt.id !== "sub").id;
+      expandAll(rk, k + 4);
+      for (let j = 0; j <= k + 4; j++) {
+        const rows = rowsIn(sk, rk, j, ["sub", nid]);
+        const label = `split at ${k}, month ${j}`;
+        if (j === k + 2) {
+          assert.strictEqual(rows.length, 0, `${label}: the skip must be carried`);
+          continue;
+        }
+        assert.strictEqual(rows.length, 1, `${label}: one row per occurrence, got ${rows.length}`);
+        const want = j < k ? [100, "Sub"] : j === k + 1 ? [123, "Sub+"] : [110, "Sub+"];
+        assert.deepStrictEqual([rows[0].t.amount, rows[0].t.description], want, label);
+      }
+    }
+    console.log("✅ Hand edits, holds, skips and moves after a split all follow it to the new series");
+  } finally {
+    global.Date = RealDate;
+    stores.forEach((st) => st.cancelPendingSave());
+  }
+}
+
+// TEST 129: "delete all future" takes moved occurrences with it.
+//
+// A moved occurrence is a one-time copy carrying `originalRecurringId`, not
+// `recurringId`, so deleting all future occurrences of its series left it
+// standing: the membership the user just cancelled still charged on the date
+// that occurrence had been moved to. It is now deleted through the store
+// (tombstoned for sync, refunding any bucket it drew from), and its move
+// record goes with it.
+console.log("TEST 129: Delete All Future Takes Moved Occurrences With It");
+{
+  const assert = require("assert");
+  const RealDate = Date;
+  const FIXED = new RealDate(2026, 8, 29, 12, 0, 0);
+  class FrozenDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(FIXED.getTime()); else super(...a); }
+    static now() { return FIXED.getTime(); }
+  }
+  global.Date = FrozenDate;
+  let s = null;
+  try {
+    localStorage.clear();
+    s = new TransactionStore();
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    const cs = new CalculationService(s, rm);
+    s.addTransaction("2026-08-01", { amount: 1000, type: "balance", description: "Ending Balance" });
+    s.addRecurringTransaction({ id: "gym", startDate: "2026-08-25", amount: 40, type: "expense",
+      description: "Gym", recurrence: "monthly", settled: true });
+    const expand = () => { rm.invalidateCache(); for (const m of [7, 8, 9, 10, 11]) rm.applyRecurringTransactions(2026, m); };
+    expand();
+    // November's payment moved to the 27th through the real edit form.
+    const ui = P2_editUI(s, rm, cs);
+    let D = "2026-11-25";
+    P2_saveEdit(ui, D, s.getTransactions()[D].findIndex((t) => t.recurringId === "gym"),
+      { amount: 40, description: "Gym", date: "2026-11-27" });
+    const copy = s.getTransactions()["2026-11-27"].find((t) => t.originalRecurringId === "gym");
+    assert.ok(copy && copy.id, "setup: the moved copy exists");
+    assert.ok(s.getMoveForRecurring("gym", D), "setup: the move is recorded");
+
+    // Cancel the membership from October on.
+    D = "2026-10-25";
+    rm.deleteTransaction(D, s.getTransactions()[D].findIndex((t) => t.recurringId === "gym"), true);
+    expand();
+    cs.invalidateCache();
+    cs.updateMonthlyBalances(new Date(2026, 11, 1, 12));
+    assert.strictEqual(cs.calculateMonthlySummary(2026, 10).expense, 0, "nothing charges in November");
+    assert.strictEqual(cs.calculateMonthlySummary(2026, 9).expense, 0, "nothing charges in October");
+    assert.strictEqual(s.findTransactionById(copy.id), null, "the moved copy is gone");
+    assert.ok(s._deletedItems.transactions.some((e) => e && e.id === copy.id),
+      "and tombstoned, so a sync can't bring it back");
+    assert.strictEqual(s.getMoveForRecurring("gym", "2026-11-25"), null, "its move record is gone");
+    assert.ok(!s.isTransactionSkipped("2026-11-25", "gym"), "and so is its skip");
+    assert.ok((s._deletedItems.skips || []).some(
+      (e) => e.date === "2026-11-25" && e.recurringId === "gym" && e.skipped === false),
+      "the skip is released as an event the merge can apply");
+    assert.strictEqual(cs.calculateMonthlySummary(2026, 8).expense, 40, "September is untouched");
+    console.log("✅ Ending a series removes its moved occurrences and their move records");
+  } finally {
+    global.Date = RealDate;
+    if (s) s.cancelPendingSave();
+  }
+}
+
+// TEST 130: series-scope edits keep a bucket's definition and reach the
+// clicked row.
+//
+// (a) "Edit all occurrences" rewrote the definition and every UNMODIFIED
+//     instance, which skipped the row the user was actually editing whenever
+//     it was a modified instance — and any bank-status stamp or settle makes
+//     it one. The user typed 65 and the row they typed it into stayed at 50.
+// (b) A drawn recurring-allocation bucket's `amount` is its remainder, and the
+//     edit form is pre-filled with it, so a series-scope save that only
+//     renamed the bucket wrote the remainder into the definition: every later
+//     period shrank to what was left of this one. The definition now keeps its
+//     own amount unless the amount field was changed; the clicked bucket keeps
+//     its remainder.
+console.log("TEST 130: Series-Scope Edits Keep A Bucket's Definition And Reach The Clicked Row");
+{
+  const assert = require("assert");
+  const RealDate = Date;
+  const FIXED = new RealDate(2026, 8, 29, 12, 0, 0);
+  class FrozenDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(FIXED.getTime()); else super(...a); }
+    static now() { return FIXED.getTime(); }
+  }
+  global.Date = FrozenDate;
+  const stores = [];
+  try {
+    const make = () => {
+      localStorage.clear();
+      const s = new TransactionStore();
+      s.resetData();
+      stores.push(s);
+      const rm = new RecurringTransactionManager(s);
+      const cs = new CalculationService(s, rm);
+      return { s, rm, cs, ui: P2_editUI(s, rm, cs) };
+    };
+
+    // (a) "all" on a bank-stamped occurrence.
+    {
+      const { s, rm, ui } = make();
+      s.addTransaction("2026-09-20", { amount: 1000, type: "balance", description: "Ending Balance" });
+      const rid = s.addRecurringTransaction({ startDate: "2026-08-25", amount: 50, type: "expense",
+        description: "Phone", recurrence: "monthly", settled: true });
+      rm.applyRecurringTransactions(2026, 8);
+      rm.applyRecurringTransactions(2026, 9);
+      const D = "2026-09-25";
+      s.setTransactionBankStatus(D, s.getTransactions()[D].findIndex((t) => t.recurringId === rid), "cleared");
+      const idx = s.getTransactions()[D].findIndex((t) => t.recurringId === rid);
+      assert.strictEqual(s.getTransactions()[D][idx].modifiedInstance, true, "setup: the stamp made it a modified instance");
+      P2_saveEdit(ui, D, idx, { amount: 65, description: "Phone", scope: "all" });
+      rm.invalidateCache();
+      rm.applyRecurringTransactions(2026, 8);
+      rm.applyRecurringTransactions(2026, 9);
+      assert.strictEqual(s.getRecurringTransactions()[0].amount, 65, "(a) the definition takes 65");
+      const edited = s.getTransactions()[D].find((t) => t.recurringId === rid);
+      assert.strictEqual(edited.amount, 65, "(a) the row the user edited takes 65");
+      assert.strictEqual(edited.bankStatus, "cleared", "(a) and keeps its bank status");
+      assert.strictEqual(s.getTransactions()["2026-10-25"].find((t) => t.recurringId === rid).amount, 65,
+        "(a) later occurrences take 65");
+    }
+
+    // (b) A rename-only save on a drawn bucket, in both series scopes.
+    for (const scope of ["all", "future"]) {
+      const { s, rm, ui } = make();
+      s.addTransaction("2026-08-31", { amount: 2000, type: "balance", description: "Ending Balance" });
+      const rid = s.addRecurringTransaction({ startDate: "2026-09-01", amount: 400, type: "expense",
+        description: "Groceries", recurrence: "monthly", allocated: true, settled: true });
+      rm.applyRecurringTransactions(2026, 8);
+      const bucket = s.getAllocations("2026-09-29").find((a) => a.recurringId === rid);
+      s.addTransaction("2026-09-20", { amount: 150, type: "expense", description: "Publix",
+        settled: true, allocationDraws: [{ allocationId: bucket.id, amount: null }] });
+      const D = "2026-09-01";
+      const idx = s.getTransactions()[D].findIndex((t) => t.recurringId === rid);
+      const row = s.getTransactions()[D][idx];
+      assert.strictEqual(row.amount, 250, "setup: the bucket holds its remainder");
+      const bucketRowId = row.id;
+      // The edit form is pre-filled with the row's amount (the remainder).
+      P2_saveEdit(ui, D, idx, { amount: row.amount, description: "Food", scope });
+      rm.invalidateCache();
+      rm.applyRecurringTransactions(2026, 8);
+      rm.applyRecurringTransactions(2026, 9);
+      const live = s.getRecurringTransactions().find((rt) => rt.description === "Food");
+      assert.ok(live, `(b ${scope}) the renamed definition exists`);
+      assert.strictEqual(live.amount, 400, `(b ${scope}) the definition keeps its period amount`);
+      const oct = s.getTransactions()["2026-10-01"].filter((t) => t.allocated === true);
+      assert.deepStrictEqual(oct.map((t) => [t.description, t.amount]), [["Food", 400]],
+        `(b ${scope}) October's bucket is a full period`);
+      const sep = s.getTransactions()[D].find((t) => t.allocated === true);
+      assert.deepStrictEqual([sep.id, sep.description, sep.amount], [bucketRowId, "Food", 250],
+        `(b ${scope}) the clicked bucket keeps its id and remainder`);
+
+      // A typed change is still a change: it becomes the period amount.
+      const idx2 = s.getTransactions()[D].findIndex((t) => t.allocated === true);
+      P2_saveEdit(ui, D, idx2, { amount: 300, description: "Food", scope: "all" });
+      assert.strictEqual(s.getRecurringTransactions().find((rt) => rt.description === "Food").amount, 300,
+        `(b ${scope}) a typed amount still sets the series amount`);
+    }
+    console.log("✅ Series edits reach the clicked row and never shrink a bucket's periods to one remainder");
+  } finally {
+    global.Date = RealDate;
+    stores.forEach((st) => st.cancelPendingSave());
   }
 }
 
