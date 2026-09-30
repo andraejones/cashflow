@@ -11,8 +11,8 @@ CashFlow Calendar is an offline-first, single-page personal finance application 
 **No build process required.** Open `index.html` directly in a browser or serve via any static server.
 
 **Tests:** `npm test` (or run the two scripts directly with Node) — it must pass before every commit:
-- `node scripts/verify-logic.js` — 130 numbered integration tests over vm-loaded sources
-  (numbered up to TEST 136; the numbering has gaps where tests were merged or
+- `node scripts/verify-logic.js` — 132 numbered integration tests over vm-loaded sources
+  (numbered up to TEST 138; the numbering has gaps where tests were merged or
   removed along with the feature they covered).
   Six of them are SWEEPS rather than scenarios, and they are the ones worth
   extending when something new is added:
@@ -390,7 +390,7 @@ it to the viewed day, both as cleared. The add form's matching checkbox is
 
 **DebtSnowballUI** (`debt-snowball.js`) - Debt entry management, snowball payment generation, and plan timeline.
 
-Two ordering rules the shared transactions map depends on. (1)
+Three ordering rules the shared transactions map depends on. (1)
 `ensureSnowballPaymentsForHorizon` sweeps orphaned minimums, THEN projects, THEN
 tightens each minimum series' `endDate` to its projected payoff — so it must
 sweep **again** after that tightening, or a due-date edit leaves phantom
@@ -414,6 +414,20 @@ via `_endGate`, and only the post-adjustment `<= endDate` check on the landing
 date decides. Without the slack, a final payment adjusted BACKWARD onto the end
 date (due Sun Nov 1, "previous" → Fri Oct 30) was never generated. TESTs 126
 (sweep) and 127.
+(3) `ensureSnowballPaymentsForHorizon` iterates projection → `endDate` sync →
+re-expand the window (from the month before it) → re-project until the end
+dates are stable, at most three projections, and only then adjusts and
+materializes each month. The projection expanded the horizon, and seeded its
+starting snapshot, under the OLD end dates; a payoff that moved LATER found no
+row in its new final month to trim, so `updateMonthlyBalances` expanded it at
+the full minimum and the plan and the first render disagreed until a second
+render (TEST 137). The loop runs only when a sync changed something. And the
+horizon projection renders the plan list **only when auto-generate is on**:
+with it off that projection is minimums-only, while the hero, the infusion list
+and the plan list belong to `refresh()`'s advisory `includeExtra = true`
+projection, which every path that changes the panel's inputs already calls. A
+calendar render re-drawing the list put a minimums-only plan under the
+snowball hero (TEST 138).
 
 The projection must pay exactly the debt payments the calendar pays.
 `getDayFlow` excludes only the rows the sim schedules itself — recurring
@@ -523,7 +537,7 @@ local_last_sync, _backup_before_merge, calendar_view_mode
 
 - `styles.css` - CSS variables for theming (primary, accent, error colors)
 - `README.md` - Project documentation and feature overview
-- `scripts/verify-logic.js` - Standalone logic verification utility (130 tests)
+- `scripts/verify-logic.js` - Standalone logic verification utility (132 tests)
 - `scripts/verify-walk-parity.js` - Randomized balance-walk parity harness + source guard
 - `scripts/verify-ui.js` - Optional headless-Chromium UI harness (`npm run test:ui`)
 - `scripts/verify-sync.js` - Optional two-device cloud-sync harness (`npm run test:sync`)

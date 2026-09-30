@@ -12460,6 +12460,189 @@ console.log("TEST 136: A Reconciled Pre-Anchor Entry Can't Steal This Week's Lin
   }
 }
 
+// TEST 137: a payoff that moves LATER settles in the render that moved it.
+console.log("TEST 137: A Later Payoff Doesn't Need A Second Render");
+{
+  // $250 debt, $100 minimum on the 15th: Oct 100, Nov 100, Dec 50. Skipping
+  // November moves the payoff to January, so the render after the skip
+  // extends the series' endDate to Jan 15. That render's projection had
+  // already expanded January under the OLD endDate, so the per-month adjust
+  // found no January row to trim, and updateMonthlyBalances then expanded it
+  // at the full $100: the plan paid $50, the calendar $100 (Jan 16 balance
+  // 700), and only the NEXT render wrote $50 (750).
+  const assert = require("assert");
+  const RealDate = Date;
+  const FIXED = new RealDate(2026, 8, 29, 12, 0, 0);
+  class FrozenDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(FIXED.getTime()); else super(...a); }
+    static now() { return FIXED.getTime(); }
+  }
+  global.Date = FrozenDate;
+  const stores = [];
+  try {
+    localStorage.clear();
+    const s = new TransactionStore();
+    s.resetData();
+    stores.push(s);
+    const rm = new RecurringTransactionManager(s);
+    const cs = new CalculationService(s, rm);
+    const ui = new DebtSnowballUI(s, rm, () => {}, cs);
+    s.addTransaction("2026-09-29", { amount: 1000, type: "balance", description: "Ending Balance" });
+    s.setDebtSnowballSettings({ dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false });
+    const debtId = s.addDebt({
+      name: "Card", balance: 250, minPayment: 100, dueDay: 15, dueStartDate: "2026-10-15",
+      recurrence: "monthly", interestRate: 0, dueLastDay: false,
+    });
+    ui.ensureMinimumPaymentRecurring(s.getDebts().find((d) => d.id === debtId));
+    const debt = () => s.getDebts().find((d) => d.id === debtId);
+    const series = () => s.getRecurringTransactions().find((r) => r.id === debt().minRecurringId);
+    // What CalendarUI.generateCalendar does for the viewed month.
+    const render = () => {
+      rm.applyRecurringTransactions(2026, 8);
+      ui.ensureSnowballPaymentsForHorizon(2026, 8);
+      cs.updateMonthlyBalances(new Date(2026, 8, 1));
+    };
+    const rows = () => {
+      const tx = s.getTransactions();
+      return Object.keys(tx).sort().flatMap((d) => tx[d]
+        .filter((t) => t.debtId === debtId && !(t.recurringId && s.isTransactionSkipped(d, t.recurringId)) && Number(t.amount) > 0)
+        .map((t) => `${d}:${t.amount}`)).join(" ");
+    };
+    const balanceOn = (date) => {
+      cs.invalidateCache();
+      return cs.getRunningBalanceForDate(date);
+    };
+    render();
+    render();
+    assert.strictEqual(rows(), "2026-10-15:100 2026-11-15:100 2026-12-15:50", "setup: the steady state pays $50 in December");
+    assert.strictEqual(series().endDate, "2026-12-15");
+
+    rm.toggleSkipTransaction("2026-11-15", debt().minRecurringId);
+    render();
+    const rows1 = rows();
+    const bal1 = balanceOn("2027-01-16");
+    // Vacuity guard: this render really did move the endDate later.
+    assert.strictEqual(series().endDate, "2027-01-15", "the skip moved the payoff to January");
+    const plan = ui.calculateSnowballProjection(2026, 8, false);
+    const janPlan = plan.monthTargets["2027-01"].minPaidByDebtId[debtId];
+    render();
+    const rows2 = rows();
+    const bal2 = balanceOn("2027-01-16");
+    assert.strictEqual(rows1, rows2, "the render that moved the payoff writes what the next render keeps");
+    assert.strictEqual(bal1, bal2, "the Jan 16 balance is settled by the first render");
+    assert.strictEqual(rows1, "2026-10-15:100 2026-12-15:100 2027-01-15:50",
+      "the calendar pays the plan's partial final minimum, not the full one");
+    assert.strictEqual(janPlan, 50, "the plan's January minimum");
+    assert.strictEqual(bal1, 750, "1000 - 100 - 100 - 50");
+    console.log("✅ A payoff that moves later is written right by the render that moved it");
+  } finally {
+    global.Date = RealDate;
+    stores.forEach((st) => st.cancelPendingSave());
+  }
+}
+
+// TEST 138: with auto-generate off, the plan list stays on the hero's plan.
+console.log("TEST 138: With Auto-Generate Off The Plan List Matches The Hero");
+{
+  // refresh() renders the hero, the infusion list and the plan list from ONE
+  // advisory projection (includeExtra = true). Every calendar render re-drew
+  // the plan list from the horizon projection, which with auto-generate off is
+  // minimums-only — and saveDebt / settings / infusions / sync all call
+  // refresh() and then the calendar render, so the list the user was looking
+  // at said "Card March 15, 2029, 0% paid" under a hero saying "debt-free
+  // December 2026".
+  const assert = require("assert");
+  const RealDate = Date;
+  const FIXED = new RealDate(2026, 8, 29, 12, 0, 0);
+  class FrozenDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(FIXED.getTime()); else super(...a); }
+    static now() { return FIXED.getTime(); }
+  }
+  // Just enough DOM for the snowball panel's render methods, read back as text.
+  class El {
+    constructor(tag) {
+      this.tag = tag; this.children = []; this.className = ""; this._text = "";
+      this.style = {}; this.dataset = {}; this.options = [];
+      this.classList = { add: (c) => { this.className += " " + c; } };
+    }
+    appendChild(c) { this.children.push(c); return c; }
+    set textContent(v) { this._text = String(v); this.children = []; }
+    get textContent() { return this._text + this.children.map((c) => c.textContent).join(" | "); }
+    set innerHTML(v) { this._text = ""; this.children = []; }
+    get innerHTML() { return ""; }
+    setAttribute() {} focus() {} addEventListener() {} remove() {}
+    querySelector() { return null; }
+  }
+  const els = {};
+  ["snowballHero", "snowballPlanSummary", "snowballPlanList", "debtList", "cashInfusionList"]
+    .forEach((id) => { els[id] = new El("div"); });
+  const prevGetById = global.document.getElementById;
+  const prevCreate = global.document.createElement;
+  global.document.getElementById = (id) => els[id] || prevGetById(id);
+  global.document.createElement = (tag) => new El(tag);
+  global.Date = FrozenDate;
+  const stores = [];
+  try {
+    localStorage.clear();
+    const s = new TransactionStore();
+    s.resetData();
+    stores.push(s);
+    const rm = new RecurringTransactionManager(s);
+    const cs = new CalculationService(s, rm);
+    const ui = new DebtSnowballUI(s, rm, () => {}, cs);
+    const render = () => {
+      rm.applyRecurringTransactions(2026, 8);
+      ui.ensureSnowballPaymentsForHorizon(2026, 8);
+      cs.updateMonthlyBalances(new Date(2026, 8, 1));
+    };
+    ui.onUpdate = render;
+    s.addTransaction("2026-09-29", { amount: 3000, type: "balance", description: "Ending Balance" });
+    s.addRecurringTransaction({ startDate: "2026-10-01", amount: 2000, type: "income", description: "Pay", recurrence: "monthly" });
+    s.setDebtSnowballSettings({ dailyFloor: 500, extraPaymentStartMonth: "", autoGenerate: false });
+    [["Card", 1500, 50, 15], ["Loan", 6000, 100, 20]].forEach(([name, balance, minPayment, dueDay]) => {
+      const id = s.addDebt({
+        name, balance, minPayment, dueDay, dueStartDate: `2026-10-${dueDay}`,
+        recurrence: "monthly", interestRate: 0, dueLastDay: false,
+      });
+      ui.ensureMinimumPaymentRecurring(s.getDebts().find((d) => d.id === id));
+    });
+    render();
+
+    ui.refresh();
+    const hero = els.snowballHero.textContent;
+    const plan = els.snowballPlanList.textContent;
+    // Vacuity guard: the advisory plan and the minimums-only one must differ,
+    // or a list re-drawn from the wrong one would read the same.
+    const minimumsOnly = ui.calculateSnowballProjection(2026, 8, false).payoffByDebtId;
+    const advisory = ui.calculateSnowballProjection(2026, 8, true).payoffByDebtId;
+    assert.notDeepStrictEqual(minimumsOnly, advisory, "setup: the two projections disagree");
+    assert.ok(/September 30, 2026/.test(plan), `setup: the advisory plan clears the Card this month (${plan})`);
+    ui.onUpdate();
+    assert.strictEqual(els.snowballHero.textContent, hero, "a calendar render leaves the hero alone");
+    assert.strictEqual(els.snowballPlanList.textContent, plan,
+      "a calendar render leaves the plan list on the hero's projection");
+    render();
+    assert.strictEqual(els.snowballPlanList.textContent, plan, "and so does the next one");
+
+    // With auto-generate ON the horizon projection IS the plan, and the
+    // calendar render still draws the list from it.
+    s.setDebtSnowballSettings({ dailyFloor: 500, extraPaymentStartMonth: "", autoGenerate: true });
+    els.snowballPlanList.textContent = "";
+    render();
+    const onPlan = els.snowballPlanList.textContent;
+    assert.ok(/September 30, 2026/.test(onPlan), `with auto-generate on the render draws the snowball plan (${onPlan})`);
+    ui.refresh();
+    assert.strictEqual(els.snowballPlanList.textContent, onPlan, "and it agrees with refresh()");
+    console.log("✅ The plan list only ever shows the plan the hero shows");
+  } finally {
+    global.Date = RealDate;
+    global.document.getElementById = prevGetById;
+    if (prevCreate === undefined) delete global.document.createElement;
+    else global.document.createElement = prevCreate;
+    stores.forEach((st) => st.cancelPendingSave());
+  }
+}
+
 // Run the async network tests sequentially (shared global.fetch mock): TEST 32
 // first, then TEST 30, which prints the final banner.
 async function runUnreadableGistTest() {

@@ -1102,18 +1102,29 @@ class DebtSnowballUI {
       this.recurringManager.invalidateCache();
       this.store.saveData(false);
     }
-    const projection = this.calculateSnowballProjection(
-      viewYear,
-      viewMonth,
-      includeExtra,
-      { captureThroughIndex: endIndex }
-    );
-    // Capture the exact payoff days from this projection so the calendar can
-    // flag them at a glance.
-    this._payoffDates = this.buildPayoffDateSet(projection.payoffByDebtId);
-    // Sync minimum-payment end dates once for the whole window before
-    // materializing individual months (each month then skips the redundant sync).
-    if (this.syncMinimumPaymentEndDates(projection.payoffByDebtId)) {
+    const project = () =>
+      this.calculateSnowballProjection(viewYear, viewMonth, includeExtra, {
+        captureThroughIndex: endIndex,
+      });
+    let projection = project();
+    // Sync minimum-payment end dates for the whole window before materializing
+    // individual months (each month then skips the redundant sync), and iterate
+    // until they are stable. The projection expanded the horizon under the OLD
+    // endDates, and it seeds itself from the rows those endDates admit (a
+    // later endDate can re-admit a past minimum), so a sync that MOVES an
+    // endDate leaves the projection describing a calendar that no longer
+    // exists: a payoff that moved later found no row in its new final month
+    // to trim, and updateMonthlyBalances then expanded it at the FULL minimum
+    // — the plan paid a partial one, the first render a full one, and only the
+    // next render agreed. So each sync that changes something re-expands the
+    // window and re-projects. Bounded at three projections: the loop only runs
+    // at all when an endDate moved, and a sync after the last projection is
+    // kept (and swept) exactly as before, so the worst case is today's.
+    const MAX_PROJECTIONS = 3;
+    let endDatesChanged = false;
+    for (let pass = 1; ; pass++) {
+      if (!this.syncMinimumPaymentEndDates(projection.payoffByDebtId)) break;
+      endDatesChanged = true;
       // Sweep AGAIN, because that sync just moved the goalposts. The cleanup
       // above ran against the PREVIOUS endDates; tightening a series to its
       // projected payoff puts every already-materialized instance beyond the
@@ -1123,8 +1134,24 @@ class DebtSnowballUI {
       if (this.cleanupOrphanedDebtMinimums()) {
         this.recurringManager.invalidateCache();
       }
+      if (pass >= MAX_PROJECTIONS) break;
+      this.recurringManager.invalidateCache();
+      // From the month BEFORE the window: an occurrence scheduled there can
+      // land inside it after a business-day adjustment.
+      for (let idx = startIndex - 1; idx <= endIndex; idx++) {
+        this.recurringManager.applyRecurringTransactions(
+          Math.floor(idx / 12),
+          idx % 12
+        );
+      }
+      projection = project();
+    }
+    if (endDatesChanged) {
       this.store.saveData(false);
     }
+    // Capture the exact payoff days from the final projection so the calendar
+    // can flag them at a glance.
+    this._payoffDates = this.buildPayoffDateSet(projection.payoffByDebtId);
 
     let snowballAdded = false;
     for (let idx = startIndex; idx <= endIndex; idx++) {
@@ -1140,8 +1167,17 @@ class DebtSnowballUI {
       }
     }
 
-    // Render the plan once, for the viewed month, from the shared projection.
-    this.renderPlan(projection);
+    // Render the plan once, for the viewed month, from the shared projection —
+    // but only when that projection IS the plan. With auto-generate off it is
+    // the minimums-only projection (includeExtra = false), while the hero, the
+    // infusion list and the plan list all belong to refresh()'s advisory
+    // full-snowball projection (includeExtra = true). refresh() already runs
+    // on every path that changes the panel's inputs (showView, saveDebt,
+    // settings, infusions, cloud sync), so re-rendering the list here only
+    // overwrote it with a plan that contradicted the hero above it.
+    if (includeExtra) {
+      this.renderPlan(projection);
+    }
     return snowballAdded;
   }
 }
