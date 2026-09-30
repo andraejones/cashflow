@@ -905,7 +905,8 @@ class BankReconcileUI {
 
   // Pair bank lines to app entries of the exact same signed amount. Every
   // eligible pair across the statement is ranked before any is assigned — by
-  // name coherence first, then closest date, then earlier bank line, then
+  // whether it crosses the latest anchor (below), then name coherence, then
+  // closest date, then earlier bank line, then
   // earlier app entry — so a line can't claim an entry that another line fits
   // better. Assigning line by line in date order let an older posted line
   // take a newer entry whose own hold was further down the statement: a 9/21
@@ -919,8 +920,23 @@ class BankReconcileUI {
   // are assigned by date alone and can cross-match unrelated merchants — a
   // "VISIBLE" hold pairing with a "Publix" entry while the real "Visible -
   // Sofia" entry is left to land on the unrelated "Publix" ATM line.
+  //
+  // One key outranks even name: whether the pair reaches back across the
+  // latest Ending Balance. An entry on or before that anchor was already
+  // absorbed by it (the previous statement reconciled it), so for a line
+  // posted after the anchor it is only a FALLBACK, taken when no entry after
+  // the anchor is left to claim the line. Without that, the coherence stretch
+  // let this week's "RVT*Sallie Jones" $75 claim last week's reconciled entry
+  // of the same name over this week's own "Pounce" $75: Pounce was stamped
+  // Not in bank, and the anchor-crossing Move then put a second $75 on the
+  // posted day. The anchor-crossing match itself (a posting lag across the
+  // anchor, re-dated to the posted day) still happens whenever no in-window
+  // entry takes the line.
   _exactMatchPass(sortedBank, appItems) {
     const candidates = [];
+    const anchorDate = this.store.getLatestAnchorDate(
+      Utils.formatDateString(new Date())
+    );
     sortedBank.forEach((bankRow, bankIndex) => {
       appItems.forEach((cand, appIndex) => {
         if (this._blockMatch(bankRow, cand)) return;
@@ -938,10 +954,24 @@ class BankReconcileUI {
             ? Math.max(this._toleranceFor(cand), this.unsettledToleranceDays)
             : this._toleranceFor(cand);
         if (gap > tol) return;
-        candidates.push({ bank: bankRow, app: cand, coh, gap, bankIndex, appIndex });
+        const posted = bankRow.postedDate || bankRow.date;
+        const crossed =
+          anchorDate !== null && cand.date <= anchorDate && posted > anchorDate
+            ? 1
+            : 0;
+        candidates.push({
+          bank: bankRow,
+          app: cand,
+          crossed,
+          coh,
+          gap,
+          bankIndex,
+          appIndex,
+        });
       });
     });
     candidates.sort((a, b) =>
+      a.crossed - b.crossed ||
       b.coh - a.coh ||
       a.gap - b.gap ||
       a.bankIndex - b.bankIndex ||

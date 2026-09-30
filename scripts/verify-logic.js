@@ -12368,6 +12368,98 @@ console.log("TEST 135: An Over-Drawn Merge Never Refunds More Than The Bucket He
   }
 }
 
+console.log("TEST 136: A Reconciled Pre-Anchor Entry Can't Steal This Week's Line");
+{
+  // Pass 1's same-payee stretch (7 days) reached back across the latest Ending
+  // Balance: this week's 9/28 "RVT*Sallie Jones" $75 claimed LAST week's 9/21
+  // entry of that name, which the 9/24 anchor had already absorbed, over this
+  // week's own 9/28 "Pounce" $75. Pounce was then stamped Not in bank (posted
+  // read 891, bank 816) and the anchor-crossing Move put a second $75 on 9/28.
+  // A pre-anchor entry is only a fallback for a line posted after the anchor.
+  const assert = require("assert");
+  const RealDate = Date;
+  const FIXED = new RealDate(2026, 8, 29, 12, 0, 0);
+  class FrozenDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(FIXED.getTime()); else super(...a); }
+    static now() { return FIXED.getTime(); }
+  }
+  global.Date = FrozenDate;
+  const stores = [];
+  const csv =
+    "Posted Date,Transaction Date,Description,Deposit,Withdrawal,Balance\n" +
+    "9/28/2026,9/28/2026,Withdrawal Debit Card RVT*Sallie Jones Elemen 941-5755440 FL Card 2565,,($75.00),$816.00\n" +
+    "9/25/2026,9/25/2026,Withdrawal Debit Card COFFEE HOUSE,,($9.00),$891.00\n";
+  const setup = (withPounce) => {
+    localStorage.clear();
+    const s = new TransactionStore();
+    s.resetData();
+    stores.push(s);
+    const rm = new RecurringTransactionManager(s);
+    const cs = new CalculationService(s, rm);
+    const br = new BankReconcileUI(s, rm, () => {}, () => {});
+    br._renderReport = () => {};
+    // Last week's, cleared on the previous statement and absorbed by the anchor.
+    s.addTransaction("2026-09-21", { amount: 75, type: "expense", description: "RVT*Sallie Jones", settled: true });
+    s.addTransaction("2026-09-24", { amount: 900, type: "balance", description: "Ending Balance" });
+    s.addTransaction("2026-09-25", { amount: 9, type: "expense", description: "Coffee", settled: true });
+    if (withPounce) {
+      s.addTransaction("2026-09-28", { amount: 75, type: "expense", description: "Pounce", settled: true });
+    }
+    const parsed = br._parseSuncoastCsv(csv);
+    if (parsed.error) throw new Error("Parse error: " + parsed.error);
+    br._run(parsed.rows);
+    const line = parsed.rows.find((b) => Math.abs(b.signed + 75) < 0.005);
+    const posted = () => {
+      cs.invalidateCache();
+      return cs.getBankView("2026-09-29").posted;
+    };
+    return { s, cs, br, parsed, line, posted };
+  };
+  try {
+    // This week's own entry wins over the reconciled one of the same name.
+    const A = setup(true);
+    assert.strictEqual(A.line._match && A.line._match.date, "2026-09-28",
+      "the 9/28 line pairs with this week's entry, not the one the 9/24 anchor absorbed");
+    assert.strictEqual(A.line._match.description, "Pounce");
+    assert.deepStrictEqual(A.br.result.dateDrifted, [], "no anchor-crossing Move is offered");
+    assert.deepStrictEqual(A.br.result.appOnlyExpected.map((a) => a.date + " " + a.description), [],
+      "nothing in the window is left Not in bank");
+    const pounce = A.s.getTransactions()["2026-09-28"].find((t) => t.description === "Pounce");
+    assert.strictEqual(A.s.getBankStatus(pounce), "cleared");
+    assert.strictEqual(pounce.settled, true);
+    const old = A.s.getTransactions()["2026-09-21"].find((t) => t.description === "RVT*Sallie Jones");
+    assert.strictEqual(old.bankStatus, undefined, "the reconciled pre-anchor entry is left alone");
+    assert.strictEqual(A.posted(), 816, "posted = 900 - 9 - 75, as the bank shows");
+    // A re-run writes nothing.
+    const before = JSON.stringify(A.s.getTransactions());
+    let changes = 0;
+    A.br.onChange = () => { changes++; };
+    A.br._run(A.parsed.rows);
+    assert.strictEqual(changes, 0, "a re-run stamps nothing");
+    assert.strictEqual(JSON.stringify(A.s.getTransactions()), before);
+    assert.strictEqual(A.line._match && A.line._match.description, "Pounce", "a re-run pairs the same way");
+
+    // Control: with no entry after the anchor, the pre-anchor one is still the
+    // fallback, and the anchor-crossing Move (TEST 59) is still offered.
+    const B = setup(false);
+    assert.strictEqual(B.line._match && B.line._match.date, "2026-09-21",
+      "a pre-anchor entry still matches when nothing after the anchor fits");
+    assert.strictEqual(B.br.result.dateDrifted.length, 1);
+    const drift = B.br.result.dateDrifted[0];
+    assert.strictEqual(drift.crossedAnchor, "2026-09-24");
+    assert.strictEqual(drift.targetDate, "2026-09-28");
+    assert.strictEqual(B.posted(), 891, "before the Move the anchor has written the charge off");
+    B.br._fixDate(drift);
+    const on928 = (B.s.getTransactions()["2026-09-28"] || []).filter((t) => t.amount === 75);
+    assert.strictEqual(on928.length, 1, "the Move re-dates the one charge, it does not add one");
+    assert.strictEqual(B.posted(), 816, "after the Move the posted figure matches the bank");
+    console.log("✅ A line posted after the anchor prefers an entry after it; a pre-anchor one is only a fallback");
+  } finally {
+    global.Date = RealDate;
+    stores.forEach((st) => st.cancelPendingSave());
+  }
+}
+
 // Run the async network tests sequentially (shared global.fetch mock): TEST 32
 // first, then TEST 30, which prints the final banner.
 async function runUnreadableGistTest() {
