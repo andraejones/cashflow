@@ -709,6 +709,92 @@ class CloudSync {
     return deduped;
   }
 
+  // Elect one row per recurring occurrence and per moved copy.
+  //
+  // A recurring occurrence is a pure expansion (no id) until something
+  // promotes it to a persisted modified instance — the bank-status chip, a
+  // reconcile stamp, settling, autoSettle — and the promotion MINTS a random
+  // id. So when two devices promote the same occurrence between syncs, the
+  // id-keyed merge keeps both rows and the bill is counted twice on every
+  // device. "Settle" on a carried-forward occurrence has the same shape one
+  // step removed: each device writes its own moved copy of that occurrence.
+  //
+  // Keys: `R|recurringId|occurrence` for promoted instances (the occurrence is
+  // the scheduled date, `originalDate || date`, the same key the expansion
+  // dedupes on) and `M|originalRecurringId|movedFrom` for moved copies. The
+  // keeper is the newest `_lastModified`, ties to the smallest id — a pure
+  // function of the rows, so both merge directions (and every device) elect
+  // the same one. Allocation buckets are left to _reconcileAllocationRemainders,
+  // whose step 1 collapses them with their draws in mind.
+  //
+  // Runs BEFORE the remainder re-derivation, so a losing row's allocation
+  // draws drop out of the merged totals and its bucket is refunded. Mutates
+  // `mergedTxns` (removing losers from its lists); returns the losers' ids for
+  // the caller to tombstone, so the losing device's copy cannot come back.
+  _collapseDuplicateOccurrences(mergedTxns) {
+    const keyOf = (t, date) => {
+      if (!t || typeof t !== "object" || !t.id) return null;
+      if (t.allocated === true && t.type === "expense") return null;
+      if (typeof t.recurringId === "string" && t.recurringId) {
+        const occurrence =
+          typeof t.originalDate === "string" && t.originalDate
+            ? t.originalDate
+            : date;
+        return `R|${t.recurringId}|${occurrence}`;
+      }
+      if (
+        typeof t.originalRecurringId === "string" &&
+        t.originalRecurringId &&
+        typeof t.movedFrom === "string" &&
+        t.movedFrom
+      ) {
+        return `M|${t.originalRecurringId}|${t.movedFrom}`;
+      }
+      return null;
+    };
+    const timeOf = (t) => {
+      const time = new Date(t._lastModified || 0).getTime();
+      return Number.isFinite(time) ? time : 0;
+    };
+    // Negative when `a` should be kept over `b`. Explicit 0 on equal keys
+    // (TEST 98): the same row compared with itself must not claim to win.
+    const prefer = (a, b) => {
+      const ta = timeOf(a);
+      const tb = timeOf(b);
+      if (ta !== tb) return tb - ta;
+      const ia = String(a.id);
+      const ib = String(b.id);
+      return ia < ib ? -1 : ia > ib ? 1 : 0;
+    };
+
+    const keeperByKey = new Map();
+    Object.keys(mergedTxns).forEach((date) => {
+      const list = mergedTxns[date];
+      if (!Array.isArray(list)) return;
+      list.forEach((t) => {
+        const key = keyOf(t, date);
+        if (!key) return;
+        const keeper = keeperByKey.get(key);
+        if (!keeper || prefer(t, keeper) < 0) keeperByKey.set(key, t);
+      });
+    });
+
+    const losers = [];
+    Object.keys(mergedTxns).forEach((date) => {
+      const list = mergedTxns[date];
+      if (!Array.isArray(list)) return;
+      for (let i = list.length - 1; i >= 0; i--) {
+        const key = keyOf(list[i], date);
+        if (key && keeperByKey.get(key) !== list[i]) {
+          losers.push(list[i].id);
+          list.splice(i, 1);
+        }
+      }
+      if (list.length === 0) delete mergedTxns[date];
+    });
+    return losers;
+  }
+
   // Re-derive every allocation bucket's remainder after the per-row merge.
   //
   // A bucket's `amount` IS its remaining balance, debited in place by each
@@ -808,13 +894,16 @@ class CloudSync {
     });
 
     // 3. Re-derive each bucket's remainder from the draws that reference it.
-    const scan = (txns) => {
+    // `drawers` (bucket id -> [date, index] of each expense drawing from it)
+    // is collected only when asked, for the merged map's over-draw trim.
+    const scan = (txns, withDrawers = false) => {
       const drawnByBucket = new Map();
       const buckets = new Map();
+      const drawers = new Map();
       Object.keys(txns).forEach((date) => {
         const list = txns[date];
         if (!Array.isArray(list)) return;
-        list.forEach((t) => {
+        list.forEach((t, index) => {
           if (!t || typeof t !== "object") return;
           if (t.allocated === true && t.type === "expense") {
             if (t.id) buckets.set(t.id, t);
@@ -827,14 +916,63 @@ class CloudSync {
               row.allocationId,
               round((drawnByBucket.get(row.allocationId) || 0) + row.drawn)
             );
+            if (withDrawers) {
+              if (!drawers.has(row.allocationId)) drawers.set(row.allocationId, []);
+              drawers.get(row.allocationId).push([date, index]);
+            }
           });
         });
       });
-      return { drawnByBucket, buckets };
+      return { drawnByBucket, buckets, drawers };
     };
     const local = scan(localTxns);
     const remote = scan(remoteTxns);
-    const merged = scan(mergedTxns);
+    const merged = scan(mergedTxns, true);
+
+    // Two devices can draw more between syncs than the bucket held. Clamping
+    // the bucket at 0 alone left every drawer's `drawn` whole, so the bucket
+    // was owed more than it ever held: a later refund (deleting or editing a
+    // drawer) credited it back past its original. Trim the overflow off the
+    // drawers instead, newest draw first — the one a single device would have
+    // capped, since it would have found the bucket already spent. The trimmed
+    // part stays ordinary spending on its expense. Written on copies with a
+    // fresh _lastModified (the step-2 pattern), so the trim wins the next merge.
+    const timeOf = (t) => {
+      const time = new Date((t && t._lastModified) || 0).getTime();
+      return Number.isFinite(time) ? time : 0;
+    };
+    const trimOverdraw = (bucketId, overflow) => {
+      const spots = (merged.drawers.get(bucketId) || []).map(([date, index]) => ({
+        date,
+        index,
+        t: mergedTxns[date][index],
+      }));
+      // Newest drawer first; ties to the larger id first. Explicit 0 on equal
+      // keys (TEST 98).
+      spots.sort((a, b) => {
+        const ta = timeOf(a.t);
+        const tb = timeOf(b.t);
+        if (ta !== tb) return tb - ta;
+        const ia = String(a.t.id || "");
+        const ib = String(b.t.id || "");
+        return ia > ib ? -1 : ia < ib ? 1 : 0;
+      });
+      let left = overflow;
+      spots.forEach(({ date, index }) => {
+        if (left < 0.005) return;
+        // Re-read: a drawer on two over-drawn buckets was already copied once.
+        const current = mergedTxns[date][index];
+        const rows = store._normalizeAllocationDraws(current);
+        const row = rows.find((r) => r.allocationId === bucketId);
+        if (!row || !row.drawn) return;
+        const cut = round(Math.min(row.drawn, left));
+        row.drawn = round(row.drawn - cut);
+        left = round(left - cut);
+        const copy = { ...current, _lastModified: now };
+        store._writeAllocationDraws(copy, rows);
+        mergedTxns[date][index] = copy;
+      });
+    };
 
     Object.keys(mergedTxns).forEach((date) => {
       const list = mergedTxns[date];
@@ -859,10 +997,11 @@ class CloudSync {
         const original = round(
           Number(bucket.amount) + (side.drawnByBucket.get(bucket.id) || 0)
         );
-        const remaining = Math.max(
-          0,
-          round(original - (merged.drawnByBucket.get(bucket.id) || 0))
+        const unclamped = round(
+          original - (merged.drawnByBucket.get(bucket.id) || 0)
         );
+        if (unclamped <= -0.005) trimOverdraw(bucket.id, -unclamped);
+        const remaining = Math.max(0, unclamped);
         if (Math.abs(remaining - (Number(bucket.amount) || 0)) >= 0.005) {
           list[i] = { ...bucket, amount: remaining };
         }
@@ -1076,14 +1215,19 @@ class CloudSync {
       asMap(remoteData.transactions),
       deletedTransactionIds
     );
+    // One row per occurrence first, so the remainder re-derivation below sees
+    // only the rows that survive (a losing row's draws are refunded).
+    const collapsedOccurrenceIds =
+      this._collapseDuplicateOccurrences(mergedTransactions);
     const collapsedBucketIds = this._reconcileAllocationRemainders(
       asMap(localData.transactions),
       asMap(remoteData.transactions),
       mergedTransactions
     );
-    if (collapsedBucketIds.length > 0) {
+    const collapsedIds = [...collapsedOccurrenceIds, ...collapsedBucketIds];
+    if (collapsedIds.length > 0) {
       const tombstoned = new Set(deletedItems.transactions.map(idOf));
-      collapsedBucketIds.forEach((id) => {
+      collapsedIds.forEach((id) => {
         if (!tombstoned.has(id)) {
           deletedItems.transactions.push({ id, deletedAt: Date.now() });
         }

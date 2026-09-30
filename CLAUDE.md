@@ -11,8 +11,8 @@ CashFlow Calendar is an offline-first, single-page personal finance application 
 **No build process required.** Open `index.html` directly in a browser or serve via any static server.
 
 **Tests:** `npm test` (or run the two scripts directly with Node) — it must pass before every commit:
-- `node scripts/verify-logic.js` — 127 numbered integration tests over vm-loaded sources
-  (numbered up to TEST 133; the numbering has gaps where tests were merged or
+- `node scripts/verify-logic.js` — 129 numbered integration tests over vm-loaded sources
+  (numbered up to TEST 135; the numbering has gaps where tests were merged or
   removed along with the feature they covered).
   Six of them are SWEEPS rather than scenarios, and they are the ones worth
   extending when something new is added:
@@ -459,6 +459,19 @@ merge (winning copy's amount + its own side's draws = the original; minus every
 merged draw), collapses two devices' first-draw materializations of one
 recurring period onto the smallest id (tombstoning the other), and re-points
 draws at a vanished bucket through their series/period provenance (TEST 117).
+When two devices over-draw a bucket between syncs, clamping it at 0 is not
+enough: the overflow is trimmed off the drawers' `drawn`, newest draw first
+(the one a single device would have capped), or a later refund credits the
+bucket past what it ever held (TEST 135).
+
+The same race exists for ordinary rows. Promoting a recurring occurrence to a
+modified instance (bank chip, reconcile stamp, settle, autoSettle) MINTS an id,
+so two devices promoting one occurrence left two rows and the bill paid twice.
+`_collapseDuplicateOccurrences` runs right after the per-row merge, before the
+remainder pass, and elects one keeper per `recurringId|originalDate||date` and
+per moved copy (`originalRecurringId|movedFrom`) — newest `_lastModified`, ties
+to the smallest id, so both merge directions agree — and tombstones the rest.
+Buckets are left to the remainder pass's own collapse (TEST 134).
 
 **PinProtection** (`pin-protection.js`) - PIN setup/verification, XOR encryption of the TransactionStore data (transactions, debts, etc.) keyed by the current PIN, and session inactivity monitoring (120s timeout). It does **not** read or write `github_token_encrypted` — that is CloudSync's, encrypted separately via `_device_id`.
 
@@ -507,7 +520,7 @@ local_last_sync, _backup_before_merge, calendar_view_mode
 
 - `styles.css` - CSS variables for theming (primary, accent, error colors)
 - `README.md` - Project documentation and feature overview
-- `scripts/verify-logic.js` - Standalone logic verification utility (127 tests)
+- `scripts/verify-logic.js` - Standalone logic verification utility (129 tests)
 - `scripts/verify-walk-parity.js` - Randomized balance-walk parity harness + source guard
 - `scripts/verify-ui.js` - Optional headless-Chromium UI harness (`npm run test:ui`)
 - `scripts/verify-sync.js` - Optional two-device cloud-sync harness (`npm run test:sync`)

@@ -12148,6 +12148,226 @@ async function runUndoBucketDeleteTest() {
   }
 }
 
+// TEST 134: one occurrence promoted on two devices merges to one row.
+//
+// Promoting a recurring occurrence to a persisted modified instance (the bank
+// chip, a reconcile stamp, settling) mints a random id, so when the phone and
+// the laptop each promoted the same occurrence between syncs the id-keyed merge
+// kept both rows and the bill was paid twice on every device. Settling one
+// carried-forward occurrence on both devices is the same race one step removed
+// (two moved copies). The merge now elects one keeper per occurrence and per
+// moved copy, deterministically, and tombstones the other.
+console.log("TEST 134: One Occurrence Promoted On Two Devices Merges To One Row");
+{
+  const assert = require("assert");
+  const RealDate = Date;
+  let T = new RealDate(2026, 8, 29, 12, 0, 0).getTime();
+  class FrozenDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(T); else super(...a); }
+    static now() { return T; }
+  }
+  global.Date = FrozenDate;
+  const clone = (x) => JSON.parse(JSON.stringify(x));
+  const stores = [];
+  const fresh = (data) => {
+    localStorage.clear();
+    const s = new TransactionStore();
+    s.resetData();
+    if (data) s.importData(clone(data));
+    stores.push(s);
+    const rm = new RecurringTransactionManager(s);
+    return { s, rm, cs: new CalculationService(s, rm) };
+  };
+  const rowsOf = (data) =>
+    Object.keys(data.transactions).flatMap((d) => data.transactions[d].map((t) => ({ d, t })));
+  const tombstoned = (data, id) => data._deletedItems.transactions.some((x) => x.id === id);
+  try {
+    // (a) The same occurrence stamped Cleared on both devices.
+    const base = fresh();
+    base.s.addTransaction("2026-09-20", { amount: 1000, type: "balance", description: "EB" });
+    base.s.addRecurringTransaction({ id: "phone", startDate: "2026-08-25", amount: 50,
+      type: "expense", description: "Phone", recurrence: "monthly", settled: true });
+    const baseData = clone(base.s.exportData());
+    const promote = (data) => {
+      const dev = fresh(data);
+      dev.rm.applyRecurringTransactions(2026, 8);
+      const i = dev.s.getTransactions()["2026-09-25"].findIndex((t) => t.recurringId === "phone");
+      dev.s.setTransactionBankStatus("2026-09-25", i, "cleared");
+      return clone(dev.s.exportData());
+    };
+    T += 60000;
+    const aData = promote(baseData);
+    T += 60000;
+    const bData = promote(baseData);
+    const idA = aData.transactions["2026-09-25"][0].id;
+    const idB = bData.transactions["2026-09-25"][0].id;
+    assert.notStrictEqual(idA, idB, "setup: each device minted its own id");
+
+    const sync = new CloudSync(base.s, () => {});
+    const phoneRows = (m) => rowsOf(m).filter(({ t }) => t.recurringId === "phone");
+    const ab = sync._mergeData(clone(aData), clone(bData));
+    const ba = sync._mergeData(clone(bData), clone(aData));
+    for (const m of [ab, ba]) {
+      assert.deepStrictEqual(phoneRows(m).map(({ t }) => t.id), [idB],
+        "one row survives for the 9/25 occurrence, the newer promotion");
+      assert.ok(tombstoned(m, idA), "the losing promotion is tombstoned");
+    }
+    // A tie on _lastModified falls to the smallest id, in both directions.
+    const tieA = clone(aData);
+    tieA.transactions["2026-09-25"][0]._lastModified =
+      bData.transactions["2026-09-25"][0]._lastModified;
+    const small = [idA, idB].sort()[0];
+    for (const m of [sync._mergeData(clone(tieA), clone(bData)), sync._mergeData(clone(bData), clone(tieA))]) {
+      assert.deepStrictEqual(phoneRows(m).map(({ t }) => t.id), [small],
+        "a tie elects the smallest id whichever side merges");
+    }
+    // A second merge changes nothing: the merged copy against either side.
+    for (const again of [sync._mergeData(clone(ab), clone(aData)), sync._mergeData(clone(bData), clone(ab))]) {
+      assert.deepStrictEqual(phoneRows(again).map(({ t }) => t.id), [idB], "a re-merge keeps the same keeper");
+      assert.deepStrictEqual(again.transactions, ab.transactions, "a re-merge rewrites no row");
+    }
+    // The calendar pays the bill once.
+    const C = fresh(ab);
+    C.rm.applyRecurringTransactions(2026, 8);
+    C.cs.updateMonthlyBalances(new Date(2026, 8, 29, 12));
+    assert.strictEqual(C.s.getTransactions()["2026-09-25"].filter((t) => t.recurringId === "phone").length, 1,
+      "one 9/25 row after import and expansion");
+    assert.strictEqual(C.cs.calculateDailyTotals("2026-09-25").expense, 50, "9/25 expense is one bill");
+    assert.strictEqual(C.cs.getRunningBalanceForDate("2026-09-29"), 950, "the balance pays it once");
+
+    // (b) The same carried-forward occurrence settled on both devices: each
+    // device moves it to the day it settled (the day-detail Settle path).
+    const ubase = fresh();
+    ubase.s.addTransaction("2026-09-20", { amount: 1000, type: "balance", description: "EB" });
+    ubase.s.addRecurringTransaction({ id: "gym", startDate: "2026-08-24", amount: 40,
+      type: "expense", description: "Gym", recurrence: "monthly", settled: false });
+    const ubaseData = clone(ubase.s.exportData());
+    const settle = (data, onDate) => {
+      const dev = fresh(data);
+      dev.rm.applyRecurringTransactions(2026, 8);
+      const list = dev.s.getTransactions()["2026-09-24"];
+      const i = list.findIndex((t) => t.recurringId === "gym");
+      dev.s.deleteTransaction("2026-09-24", i);
+      if (!dev.rm.isTransactionSkipped("2026-09-24", "gym")) dev.rm.toggleSkipTransaction("2026-09-24", "gym");
+      dev.s.moveTransaction("gym", "2026-09-24", onDate);
+      const id = dev.s.addTransaction(onDate, { amount: 40, type: "expense", description: "Gym",
+        settled: true, bankStatus: "cleared", movedFrom: "2026-09-24", originalRecurringId: "gym" });
+      return { data: clone(dev.s.exportData()), id };
+    };
+    T += 60000;
+    const sa = settle(ubaseData, "2026-09-28");
+    T += 60000;
+    const sb = settle(ubaseData, "2026-09-29");
+    const copies = (m) => rowsOf(m).filter(({ t }) => t.originalRecurringId === "gym");
+    for (const m of [sync._mergeData(clone(sa.data), clone(sb.data)), sync._mergeData(clone(sb.data), clone(sa.data))]) {
+      assert.deepStrictEqual(copies(m).map(({ d, t }) => [d, t.id]), [["2026-09-29", sb.id]],
+        "one settled copy of the carried occurrence survives");
+      assert.ok(tombstoned(m, sa.id), "the other settled copy is tombstoned");
+      const U = fresh(m);
+      U.rm.applyRecurringTransactions(2026, 8);
+      U.cs.updateMonthlyBalances(new Date(2026, 8, 29, 12));
+      assert.strictEqual(U.cs.getRunningBalanceForDate("2026-09-29"), 960, "the gym is paid once");
+    }
+    console.log("✅ Two devices' promotions and settled copies of one occurrence merge to one row, the same on both sides");
+  } finally {
+    global.Date = RealDate;
+    stores.forEach((st) => st.cancelPendingSave());
+  }
+}
+
+// TEST 135: an over-drawn merge never refunds more than the bucket held.
+//
+// Two devices drawing $70 each from a $100 bucket between syncs: the merge
+// clamped the bucket at 0 but left both drawers' `drawn` at 70, so the bucket
+// was owed 140. Deleting both drawers then "refunded" it to 140 — a reserve of
+// money that was never set aside. The merge now trims the overflow off the
+// newest draw (the one a single device would have capped).
+console.log("TEST 135: An Over-Drawn Merge Never Refunds More Than The Bucket Held");
+{
+  const assert = require("assert");
+  const RealDate = Date;
+  let T = new RealDate(2026, 8, 29, 12, 0, 0).getTime();
+  class FrozenDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(T); else super(...a); }
+    static now() { return T; }
+  }
+  global.Date = FrozenDate;
+  const clone = (x) => JSON.parse(JSON.stringify(x));
+  const stores = [];
+  const fresh = (data) => {
+    localStorage.clear();
+    const s = new TransactionStore();
+    s.resetData();
+    if (data) s.importData(clone(data));
+    stores.push(s);
+    const rm = new RecurringTransactionManager(s);
+    return { s, rm, cs: new CalculationService(s, rm) };
+  };
+  const rowsOf = (data) => Object.keys(data.transactions).flatMap((d) => data.transactions[d]);
+  try {
+    const base = fresh();
+    base.s.addTransaction("2026-09-20", { amount: 1000, type: "balance", description: "EB" });
+    const KID = base.s.addTransaction("2026-09-21", { amount: 100, type: "expense",
+      description: "Groceries", allocated: true, settled: true });
+    const baseData = clone(base.s.exportData());
+    const drawOn = (desc, date) => {
+      const dev = fresh(baseData);
+      dev.s.addTransaction(date, { amount: 70, type: "expense", description: desc, settled: true,
+        allocationDraws: [{ allocationId: KID, amount: null }] });
+      return clone(dev.s.exportData());
+    };
+    T += 60000;
+    const aData = drawOn("Publix", "2026-09-22");
+    T += 60000;
+    const bData = drawOn("Aldi", "2026-09-23");
+
+    const sync = new CloudSync(stores[0], () => {});
+    const summary = (m) => {
+      const byDesc = {};
+      rowsOf(m).forEach((t) => {
+        if (t.description === "Publix" || t.description === "Aldi") {
+          byDesc[t.description] = stores[0].getAllocationDrawnTotal(t);
+        }
+      });
+      return { bucket: rowsOf(m).find((t) => t.id === KID).amount, ...byDesc };
+    };
+    const ab = sync._mergeData(clone(aData), clone(bData));
+    const ba = sync._mergeData(clone(bData), clone(aData));
+    for (const m of [ab, ba]) {
+      const got = summary(m);
+      assert.strictEqual(got.bucket, 0, "the over-drawn bucket is empty");
+      assert.strictEqual(got.Publix + got.Aldi, 100, `the drawers hold exactly what the bucket held: ${JSON.stringify(got)}`);
+      assert.deepStrictEqual(got, { bucket: 0, Publix: 70, Aldi: 30 }, "the newer draw is the one capped");
+    }
+    // A re-merge with either stale side is a no-op on the draws.
+    for (const again of [sync._mergeData(clone(ab), clone(aData)), sync._mergeData(clone(bData), clone(ab))]) {
+      assert.deepStrictEqual(summary(again), summary(ab), "a re-merge leaves the trimmed draws alone");
+    }
+
+    const C = fresh(ab);
+    const balance = () => {
+      C.cs.invalidateCache();
+      C.cs.updateMonthlyBalances(new Date(2026, 8, 29, 12));
+      return C.cs.getRunningBalanceForDate("2026-09-29");
+    };
+    const K = () => C.s.findTransactionById(KID).transaction.amount;
+    const del = (desc) => {
+      const d = Object.keys(C.s.getTransactions()).find((k) =>
+        C.s.getTransactions()[k].some((t) => t.description === desc));
+      C.s.deleteTransaction(d, C.s.getTransactions()[d].findIndex((t) => t.description === desc));
+    };
+    assert.strictEqual(balance(), 860, "1000 - 140 spent");
+    del("Publix");
+    del("Aldi");
+    assert.strictEqual(K(), 100, "deleting both drawers restores the bucket to what it held, not 140");
+    assert.strictEqual(balance(), 900, "1000 - 100 reserved");
+    console.log("✅ An over-drawn merge trims the newest draw, so refunds never exceed the bucket");
+  } finally {
+    global.Date = RealDate;
+    stores.forEach((st) => st.cancelPendingSave());
+  }
+}
+
 // Run the async network tests sequentially (shared global.fetch mock): TEST 32
 // first, then TEST 30, which prints the final banner.
 async function runUnreadableGistTest() {
