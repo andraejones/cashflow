@@ -13379,6 +13379,84 @@ console.log("TEST 145: Reversed Semi-Monthly Days Keep Their Cap");
   }
 }
 
+console.log("TEST 146: The Auto-Settle Sweep Leaves A Bank-Stamped Row Alone");
+{
+  // Only Cleared is settled; Pending and Not in bank carry forward until they
+  // clear. autoSettleExpiredRecurring (every updateUI) settled any unsettled
+  // recurring expense once a later occurrence had arrived, without looking at
+  // its bank status — so reconcile stamped an unmatched weekly occurrence Not
+  // in bank (settled:false), the next render settled it, the next reconcile
+  // un-settled it: a user-grade write and a cloud push on every run, and in
+  // between the bank view listed it as Not in bank while the carried-forward
+  // list had dropped it. A row with an explicit bankStatus is now skipped.
+  const assert = require("assert");
+  const RealDate = Date;
+  const FIXED = new RealDate(2026, 8, 29, 12, 0, 0);
+  class FrozenDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(FIXED.getTime()); else super(...a); }
+    static now() { return FIXED.getTime(); }
+  }
+  global.Date = FrozenDate;
+  let s = null;
+  try {
+    localStorage.clear();
+    s = new TransactionStore();
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    const cs = new CalculationService(s, rm);
+    s.addTransaction("2026-09-20", { amount: 1000, type: "balance", description: "Ending Balance" });
+    s.addRecurringTransaction({ id: "pounce", startDate: "2026-09-21", amount: 75, type: "expense",
+      description: "Pounce", recurrence: "weekly", settled: true });
+    s.addRecurringTransaction({ id: "hold", startDate: "2026-09-15", amount: 30, type: "expense",
+      description: "Holdco", recurrence: "weekly", settled: true });
+    s.addRecurringTransaction({ id: "plain", startDate: "2026-09-15", amount: 20, type: "expense",
+      description: "Plain", recurrence: "weekly", settled: false });
+    s.addTransaction("2026-09-24", { amount: 12, type: "expense", description: "Coffee", settled: true });
+    rm.applyRecurringTransactions(2026, 8);
+    let writes = 0;
+    const br = new BankReconcileUI(s, rm, () => { writes++; }, () => {});
+    br._renderReport = () => {};
+    const bank = (date, signed, description, pending) =>
+      ({ date, postedDate: date, signed, description, pending, matched: false });
+    // No line for the 9/21 Pounce (its 9/28 sibling posted); Holdco's 9/22 is a hold.
+    const rows = [
+      bank("2026-09-21", -3.5, "PARKING", false),
+      bank("2026-09-22", -30, "HOLDCO", true),
+      bank("2026-09-24", -12, "COFFEE", false),
+      bank("2026-09-28", -75, "POUNCE", false),
+    ];
+    const occ = (d, id) => s.getTransactions()[d].find((t) => t.recurringId === id);
+    for (let cycle = 0; cycle < 3; cycle++) {
+      br._run(rows);
+      // What every updateUI does, twice (before and after the calendar render).
+      const settledSome = s.autoSettleExpiredRecurring();
+      s.autoSettleExpiredRecurring();
+      cs.invalidateCache();
+      const p = occ("2026-09-21", "pounce");
+      assert.strictEqual(p.bankStatus, "expected", `cycle ${cycle}: stamped Not in bank`);
+      assert.strictEqual(p.settled, false, `cycle ${cycle}: Not in bank stays unsettled through a render`);
+      const h = occ("2026-09-22", "hold");
+      assert.strictEqual(h.bankStatus, "pending", `cycle ${cycle}: stamped Pending`);
+      assert.strictEqual(h.settled, false, `cycle ${cycle}: a Pending hold stays unsettled through a render`);
+      const carried = cs.getCarriedUnsettledList("2026-09-29").map((u) => u.transaction.description);
+      assert.ok(carried.includes("Pounce") && carried.includes("Holdco"),
+        `cycle ${cycle}: both carry forward (carried: ${carried})`);
+      const view = cs.getBankView("2026-09-29");
+      assert.ok(view.expected.some((e) => e.description === "Pounce"), "the bank view agrees: Not in bank");
+      if (cycle > 0) assert.strictEqual(settledSome, false, `cycle ${cycle}: the sweep had nothing to do`);
+    }
+    assert.strictEqual(writes, 1, `only the first reconcile writes (${writes} writes over 3 runs)`);
+    // An unsettled occurrence with NO stamp is still settled by the sweep once
+    // a later one has arrived — unchanged behaviour.
+    assert.strictEqual(occ("2026-09-15", "plain").settled, true, "an unstamped past occurrence still auto-settles");
+    assert.strictEqual(occ("2026-09-29", "plain").settled, false, "today's occurrence has no later sibling yet");
+    console.log("✅ Reconcile → render → reconcile is a no-op on a Not-in-bank or Pending recurring row");
+  } finally {
+    global.Date = RealDate;
+    if (s) s.cancelPendingSave();
+  }
+}
+
 // Run the async network tests sequentially (shared global.fetch mock): TEST 32
 // first, then TEST 30, which prints the final banner.
 async function runUnreadableGistTest() {

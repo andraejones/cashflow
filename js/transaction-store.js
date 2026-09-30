@@ -539,6 +539,14 @@ class TransactionStore {
         if (t.settled === false && t.recurringId && t.type === "expense") {
           const skippedIds = this.skippedTransactions[date];
           if (skippedIds && skippedIds.includes(t.recurringId)) return;
+          // A row with an explicit bank status is the bank's (or the user's)
+          // word on it, not a guess: only Cleared is settled, and Pending or
+          // Not in bank carries forward until it clears. Settling it here
+          // without touching the status left a "Not in bank" row settled —
+          // off the carried list while the bank view still listed it — and
+          // the next reconcile un-settled it again, so every run wrote and
+          // pushed (TEST 146).
+          if (TransactionStore.BANK_STATUSES.includes(t.bankStatus)) return;
           const dates = recurringDates[t.recurringId] || [];
           // Check if a later occurrence exists on or before today
           const hasLaterOccurrence = dates.some((d) => d > date && d <= todayStr);

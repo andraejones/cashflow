@@ -11,8 +11,8 @@ CashFlow Calendar is an offline-first, single-page personal finance application 
 **No build process required.** Open `index.html` directly in a browser or serve via any static server.
 
 **Tests:** `npm test` (or run the two scripts directly with Node) — it must pass before every commit:
-- `node scripts/verify-logic.js` — 139 numbered integration tests over vm-loaded sources
-  (numbered up to TEST 145; the numbering has gaps where tests were merged or
+- `node scripts/verify-logic.js` — 140 numbered integration tests over vm-loaded sources
+  (numbered up to TEST 146; the numbering has gaps where tests were merged or
   removed along with the feature they covered).
   Seven of them are SWEEPS rather than scenarios, and they are the ones worth
   extending when something new is added:
@@ -389,7 +389,11 @@ Mark Settled/Unsettled toggle. All of them go through
 modified instance with an id, the same way settling does, AND keeps an
 expense's `settled` in step: **only a cleared expense is settled** — Pending
 (a hold) and Not in bank (nothing on the statement) both carry forward until
-it clears. A cleared entry lives on the day it cleared, so reconcile never
+it clears. The `autoSettleExpiredRecurring` sweep, which settles an unsettled
+recurring expense once a later occurrence has arrived, leaves any row with an
+explicit `bankStatus` alone for the same reason; settling a stamped Not-in-bank
+row behind reconcile's back made every reconcile re-run write and push
+(TEST 146). A cleared entry lives on the day it cleared, so reconcile never
 clears an UNSETTLED expense in place: its "Cleared at bank — still unsettled"
 Mark settled moves it to the posted date, and the carried-forward Settle moves
 it to the viewed day, both as cleared. The add form's matching checkbox is
@@ -577,7 +581,7 @@ local_last_sync, _backup_before_merge, calendar_view_mode
 
 - `styles.css` - CSS variables for theming (primary, accent, error colors)
 - `README.md` - Project documentation and feature overview
-- `scripts/verify-logic.js` - Standalone logic verification utility (139 tests)
+- `scripts/verify-logic.js` - Standalone logic verification utility (140 tests)
 - `scripts/verify-walk-parity.js` - Randomized balance-walk parity harness + source guard
 - `scripts/verify-ui.js` - Optional headless-Chromium UI harness (`npm run test:ui`)
 - `scripts/verify-sync.js` - Optional two-device cloud-sync harness (`npm run test:sync`)
