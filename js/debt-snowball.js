@@ -32,6 +32,12 @@ class DebtSnowballUI {
     this.debtFormTitle = document.getElementById("debtFormTitle");
     this.debtNameInput = document.getElementById("debtName");
     this.debtBalanceInput = document.getElementById("debtBalance");
+    this.debtBalanceAsOfInput = document.getElementById("debtBalanceAsOf");
+    // "Balance as of" follows the balance (see _expectedBalanceAsOf) until the
+    // user sets the date themselves.
+    this._balanceAsOfTouched = false;
+    // The form's default balance date when it is not today (Convert to Debt).
+    this._balanceAsOfDefault = null;
     this.debtMinPaymentInput = document.getElementById("debtMinPayment");
     this.debtRecurrenceInput = document.getElementById("debtRecurrence");
     this.debtStartDateInput = document.getElementById("debtStartDate");
@@ -112,6 +118,21 @@ class DebtSnowballUI {
       this.debtStartDateInput.addEventListener("change", () =>
         this.syncDueDayFromStartDate()
       );
+    }
+    if (this.debtBalanceInput) {
+      this.debtBalanceInput.addEventListener("input", () => {
+        if (this._balanceAsOfTouched || !this.debtBalanceAsOfInput) return;
+        this.debtBalanceAsOfInput.value = this._expectedBalanceAsOf(
+          parseFloat(this.debtBalanceInput.value || "0")
+        );
+      });
+    }
+    if (this.debtBalanceAsOfInput) {
+      const touched = () => {
+        this._balanceAsOfTouched = true;
+      };
+      this.debtBalanceAsOfInput.addEventListener("input", touched);
+      this.debtBalanceAsOfInput.addEventListener("change", touched);
     }
     if (this.debtDueDayInput) {
       this.debtDueDayInput.addEventListener("change", () =>
@@ -289,9 +310,20 @@ class DebtSnowballUI {
       );
     }
 
+    // The balance typed here is today's, and the first due date's payment
+    // comes off it — so the balance date is today, or yesterday when that
+    // first payment is due today (the old series still pays everything
+    // before it, as plain history).
+    const dayBeforeFirstDue = this.getDateFromString(dueStartDate);
+    dayBeforeFirstDue.setDate(dayBeforeFirstDue.getDate() - 1);
+    const dayBeforeFirstDueString = Utils.formatDateString(dayBeforeFirstDue);
+    const balanceAsOf =
+      dayBeforeFirstDueString < today ? dayBeforeFirstDueString : today;
+
     const debtFromRecurring = {
       name: recurringTransaction.description || "",
       balance: "", // User must fill this in
+      balanceAsOf,
       minPayment: recurringTransaction.amount || 0,
       recurrence: recurringTransaction.recurrence || "monthly",
       dueDay: this.extractDayFromDate(dueStartDate) || 1,
@@ -693,6 +725,19 @@ class DebtSnowballUI {
       this.debtBalanceInput.value =
         debt && typeof debt.balance === "number" ? debt.balance : "";
     }
+    // A prefilled debt that is not saved yet (Convert to Debt) brings its own
+    // default balance date; everything else defaults to today.
+    this._balanceAsOfTouched = false;
+    this._balanceAsOfDefault =
+      debt && !debt.id && this._strictDayString(debt.balanceAsOf)
+        ? debt.balanceAsOf
+        : null;
+    if (this.debtBalanceAsOfInput) {
+      this.debtBalanceAsOfInput.max = Utils.formatDateString(new Date());
+      this.debtBalanceAsOfInput.value = this._expectedBalanceAsOf(
+        debt && typeof debt.balance === "number" ? debt.balance : NaN
+      );
+    }
     if (this.debtMinPaymentInput) {
       this.debtMinPaymentInput.value =
         debt && typeof debt.minPayment === "number" ? debt.minPayment : "";
@@ -746,6 +791,9 @@ class DebtSnowballUI {
     this.convertingFromRecurringId = null; // Clear conversion tracking
     if (this.debtNameInput) this.debtNameInput.value = "";
     if (this.debtBalanceInput) this.debtBalanceInput.value = "";
+    if (this.debtBalanceAsOfInput) this.debtBalanceAsOfInput.value = "";
+    this._balanceAsOfTouched = false;
+    this._balanceAsOfDefault = null;
     if (this.debtMinPaymentInput) this.debtMinPaymentInput.value = "";
     if (this.debtRecurrenceInput) this.debtRecurrenceInput.value = "monthly";
     if (this.debtStartDateInput) this.debtStartDateInput.value = "";
@@ -761,6 +809,38 @@ class DebtSnowballUI {
       this.debtEndConditionOptions.innerHTML = "";
       this.debtEndConditionOptions.style.display = "none";
     }
+  }
+
+  // A strict "YYYY-MM-DD" naming a real day, or null (the store's rule; the
+  // snapshot compares these as strings).
+  _strictDayString(value) {
+    return typeof value === "string" &&
+      /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+      this.isValidDateString(value)
+      ? value
+      : null;
+  }
+
+  // What "Balance as of" reads when the user has not set it: the debt's own
+  // date while the balance is the stored one — blank for a debt saved before
+  // the field, which keeps that debt's meaning — and otherwise the form's
+  // default, today (Convert to Debt: see showDebtFormFromRecurring). So
+  // changing the balance re-stamps the date, and changing it back restores
+  // it. Derived from the stored debt, not from form state, so saveDebt applies
+  // the same rule with or without the live listener.
+  _expectedBalanceAsOf(balance) {
+    const today = Utils.formatDateString(new Date());
+    const preset = this._strictDayString(this._balanceAsOfDefault);
+    const fallback = preset && preset <= today ? preset : today;
+    const stored = this.editingDebtId
+      ? this.store.getDebts().find((d) => d.id === this.editingDebtId)
+      : null;
+    if (!stored) return fallback;
+    const cents = (value) => Math.round(Number(value) * 100) / 100;
+    if (!Number.isFinite(balance) || cents(balance) !== cents(stored.balance)) {
+      return fallback;
+    }
+    return this._strictDayString(stored.balanceAsOf) || "";
   }
 
   saveDebt() {
@@ -828,6 +908,37 @@ class DebtSnowballUI {
       Utils.showNotification("Please enter a valid minimum payment", "error");
       return;
     }
+    // The balance date: what the form would show for this balance unless the
+    // user set it (see _expectedBalanceAsOf). null = a debt saved before the
+    // field whose balance was not changed.
+    // The input still showing what the form opened with (no live listener ran)
+    // is not the user's choice either.
+    const expectedAsOf = this._expectedBalanceAsOf(balance);
+    const storedDebt = this.editingDebtId
+      ? this.store.getDebts().find((d) => d.id === this.editingDebtId)
+      : null;
+    const openedAsOf = this._expectedBalanceAsOf(
+      storedDebt ? Number(storedDebt.balance) : NaN
+    );
+    const typedAsOf = this.debtBalanceAsOfInput
+      ? String(this.debtBalanceAsOfInput.value || "").trim()
+      : null;
+    let balanceAsOf = expectedAsOf || null;
+    if (
+      typedAsOf !== null &&
+      (this._balanceAsOfTouched === true ||
+        (typedAsOf !== expectedAsOf && typedAsOf !== openedAsOf))
+    ) {
+      if (!this._strictDayString(typedAsOf)) {
+        Utils.showNotification("Please enter the date this balance is from", "error");
+        return;
+      }
+      if (typedAsOf > Utils.formatDateString(new Date())) {
+        Utils.showNotification("The balance date can't be after today", "error");
+        return;
+      }
+      balanceAsOf = typedAsOf;
+    }
     // A semi-monthly pair that shares a date in a 28-day February pays once
     // there (RecurringTransactionManager.semiMonthlyDaysError). A debt saved
     // before the rule keeps its pair until the days themselves are edited, so
@@ -872,6 +983,7 @@ class DebtSnowballUI {
       this.store.updateDebt(this.editingDebtId, {
         name,
         balance,
+        balanceAsOf,
         minPayment,
         dueDay,
         dueDayPattern,
@@ -886,6 +998,7 @@ class DebtSnowballUI {
         ...debt,
         name,
         balance,
+        balanceAsOf,
         minPayment,
         dueDay,
         dueDayPattern,
@@ -902,6 +1015,7 @@ class DebtSnowballUI {
       const debt = {
         name,
         balance,
+        balanceAsOf,
         minPayment,
         dueDay,
         dueDayPattern,

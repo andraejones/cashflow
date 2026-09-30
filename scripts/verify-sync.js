@@ -191,7 +191,14 @@ const descriptionsOf = (page) =>
       window.app.store.addTransaction(today, {
         amount: 100, type: "income", description: "A-Income",
       });
-      window.app.store.addDebt({ name: "A-Debt", balance: 500, minPayment: 25 });
+      // Dated, and a second one saved before balanceAsOf (stamped with the
+      // day its interest started): both fields must reach the other device.
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      window.app.store.addDebt({ name: "A-Debt", balance: 500, minPayment: 25,
+        balanceAsOf: Utils.formatDateString(yesterday) });
+      window.app.store.addDebt({ name: "A-Legacy", balance: 300, minPayment: 0,
+        interestFrom: "2026-01-01" });
       window.app.store.flushPendingSave();
     });
     await deviceA.page.evaluate(() => window.app.cloudSync.saveToCloud(true));
@@ -207,6 +214,21 @@ const descriptionsOf = (page) =>
         .some((t) => t.description === "A-Income")));
     check("B's pull applies A's debt", await deviceB.page.evaluate(() =>
       window.app.store.getDebts().some((d) => d.name === "A-Debt")));
+    const pulledDates = await deviceB.page.evaluate(() => {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const debts = window.app.store.getDebts();
+      const dated = debts.find((d) => d.name === "A-Debt");
+      const legacy = debts.find((d) => d.name === "A-Legacy");
+      return {
+        ok: !!dated && dated.balanceAsOf === Utils.formatDateString(yesterday) &&
+          !!legacy && legacy.balanceAsOf === null && legacy.interestFrom === "2026-01-01",
+        dated: dated && [dated.balanceAsOf, dated.interestFrom],
+        legacy: legacy && [legacy.balanceAsOf, legacy.interestFrom],
+      };
+    });
+    check("B's pull keeps each debt's balance date and interest stamp", pulledDates.ok,
+      JSON.stringify(pulledDates));
 
     // ---- B edits and pushes ---------------------------------------------
     await deviceB.page.evaluate(() => {

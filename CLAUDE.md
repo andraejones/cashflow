@@ -11,8 +11,8 @@ CashFlow Calendar is an offline-first, single-page personal finance application 
 **No build process required.** Open `index.html` directly in a browser or serve via any static server.
 
 **Tests:** `npm test` (or run the two scripts directly with Node) — it must pass before every commit:
-- `node scripts/verify-logic.js` — 143 numbered integration tests over vm-loaded sources
-  (numbered up to TEST 149; the numbering has gaps where tests were merged or
+- `node scripts/verify-logic.js` — 149 numbered integration tests over vm-loaded sources
+  (numbered up to TEST 155; the numbering has gaps where tests were merged or
   removed along with the feature they covered).
   Seven of them are SWEEPS rather than scenarios, and they are the ones worth
   extending when something new is added:
@@ -506,7 +506,52 @@ same path as "delete all future"), not deleted, before the earlier of the new
 series' first scheduled and landing dates, so past payments stay on the
 calendar as plain, un-linked history and a payment pulled back across the
 boundary is paid once. A series with nothing before that point is deleted as
-before (TEST 143).
+before (TEST 143). The balance it asks for is dated today, or yesterday when
+the first payment is due today, so that payment still comes off it (TEST 152).
+
+A debt's `balance` has a DATE, and one reader decides what it means:
+`_debtBalanceBasis` (engine companion). With `balanceAsOf` (YYYY-MM-DD) the
+balance is the one at the END of that day: `getHistoricalDebtSnapshot` takes
+off only debt payments and infusions dated AFTER it (an infusion dated on/before
+it is already in the balance — a targeted one is not applied at all, an
+untargeted one goes to the other debts), adds back the payments between an
+earlier cutoff and the date, and accrues interest from the day after it: that
+month's `(bal*rate)/1200` posts on the day after the date, every later month's
+on its 1st, before the day's infusions and payments. The projection posts
+interest on exactly those days (`accrualStartById`; the first projected day
+posts only for a debt whose interest starts that day), and it seeds from the
+snapshot at its start, so every posting before the projection start is the
+snapshot's and every later one the walk's. Everything else that reads a debt
+balance — inline "Remaining", the hero and plan, the infusion breakdown, the
+payoff-driven `endDate`, Convert to Debt — reads one of those two, so none of
+them may seed from `debt.balance` directly. The old model accrued only from
+TOMORROW, so the current month's interest vanished overnight at every month end
+(TEST 150). A date after today (a skewed clock; the form refuses one) reads as
+today.
+
+A debt saved before the field (`balanceAsOf: null`) keeps the OLD meaning — the
+balance before every recorded payment — and carries `interestFrom`, the day its
+interest has been accrued from, stamped ONCE by `_normalizeDebtBalanceBasis` to
+tomorrow: exactly what the old model accrued from that day, so every figure is
+unchanged the day it ships (on the real export: every Remaining, payoff date
+and amount, calendar balance and the 30-day minimum), and the day never slides
+again. The stamp has to STAY put, so: `loadData` persists it and dates the row
+(the next sync carries it instead of each device stamping its own later day),
+`importData` keeps the stamp already in memory for the same debt (a
+replace-import of a never-stamped cloud copy), and the cloud merge keeps the
+EARLIEST stamp of either copy whichever row wins (`_keepEarliestInterestFrom`).
+A debt with `balanceAsOf` has `interestFrom: null`. Treating null as "the old
+semantics" without the stamp would have kept the month-end drop for every
+existing debt; rebasing the balance to today's remaining would have rewritten
+what the user typed and zeroed "Paid" and the plan's "% paid" (TEST 153).
+The form's "Balance as of" defaults to today on a new debt and follows the
+balance: change it and it becomes today, change it back and the saved date
+returns, unless the user set the date themselves (`_expectedBalanceAsOf`,
+applied both by the live listener and, from the stored debt, by `saveDebt`). A
+legacy debt shows it blank and stays legacy until its balance changes
+(TEST 154; the live half is `test:ui`'s). Both fields are normalized to a strict
+real date or null on every way in; TEST 93 sweeps them, TEST 155 pins import,
+export and the merge.
 
 Payoff ORDER is one rule with one implementation: `makePayoffOrder()` (engine
 companion) — a debt's optional `payoffPriority` (whole 1–99, lower first;
@@ -610,7 +655,7 @@ local_last_sync, _backup_before_merge, calendar_view_mode
 
 - `styles.css` - CSS variables for theming (primary, accent, error colors)
 - `README.md` - Project documentation and feature overview
-- `scripts/verify-logic.js` - Standalone logic verification utility (143 tests)
+- `scripts/verify-logic.js` - Standalone logic verification utility (149 tests)
 - `scripts/verify-walk-parity.js` - Randomized balance-walk parity harness + source guard
 - `scripts/verify-ui.js` - Optional headless-Chromium UI harness (`npm run test:ui`)
 - `scripts/verify-sync.js` - Optional two-device cloud-sync harness (`npm run test:sync`)

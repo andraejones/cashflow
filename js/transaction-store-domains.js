@@ -83,7 +83,7 @@ Object.assign(TransactionStore.prototype, {
     return repaired;
   },
 
-  _normalizeDebt(debt) {
+  _normalizeDebt(debt, inheritFrom = null) {
     return {
       ...debt,
       id: debt.id || Utils.generateUniqueId(),
@@ -132,7 +132,65 @@ Object.assign(TransactionStore.prototype, {
       maxOccurrences: this._finiteNumber(debt.maxOccurrences) || null,
       interestRate: this._finiteNumber(debt.interestRate),
       payoffPriority: this._normalizePayoffPriority(debt.payoffPriority),
+      ...this._normalizeDebtBalanceBasis(debt, inheritFrom),
     };
+  },
+
+  // A strict "YYYY-MM-DD" that names a real day, or null. Strict because the
+  // snapshot compares these as strings against transaction date keys, so an
+  // unpadded "2026-9-5" would order wrongly.
+  _validDayString(value) {
+    if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      return null;
+    }
+    const parsed = Utils.parseDateString(value);
+    return parsed && Utils.formatDateString(parsed) === value ? value : null;
+  },
+
+  // What a debt's `balance` means (see DebtSnowballUI._debtBalanceBasis, the
+  // one reader). Two fields, never both set:
+  //
+  //   balanceAsOf  — the balance is the one at the END of this day. Payments
+  //                  and infusions dated on/before it are already in it;
+  //                  interest accrues from the next day. Set by the debt form.
+  //   interestFrom — a debt with no balanceAsOf, saved before the field
+  //                  existed: its balance is the one before every recorded
+  //                  payment (the old meaning, unchanged), and interest has
+  //                  been accrued from this day. It is stamped ONCE, the first
+  //                  time this build sees the debt, to tomorrow — exactly the
+  //                  day the old forward-only model accrued from — so every
+  //                  figure is unchanged the day the field ships, and the day
+  //                  can no longer slide forward and drop a month's interest at
+  //                  each month end. `inheritFrom` (the copy of this debt
+  //                  already in memory, on an import) keeps an earlier stamp.
+  _normalizeDebtBalanceBasis(debt, inheritFrom = null) {
+    const balanceAsOf = this._validDayString(debt.balanceAsOf);
+    if (balanceAsOf) return { balanceAsOf, interestFrom: null };
+    let interestFrom = this._validDayString(debt.interestFrom);
+    const inherited =
+      inheritFrom && !this._validDayString(inheritFrom.balanceAsOf)
+        ? this._validDayString(inheritFrom.interestFrom)
+        : null;
+    if (inherited && (!interestFrom || inherited < interestFrom)) {
+      interestFrom = inherited;
+    }
+    if (!interestFrom) {
+      const now = new Date();
+      interestFrom = Utils.formatDateString(
+        new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 12, 0, 0)
+      );
+    }
+    return { balanceAsOf: null, interestFrom };
+  },
+
+  // True when normalizing this stored debt will have to stamp interestFrom —
+  // loadData persists (and dates) the stamp so it holds across reloads.
+  _debtNeedsInterestStamp(debt) {
+    return (
+      !!debt &&
+      !this._validDayString(debt.balanceAsOf) &&
+      !this._validDayString(debt.interestFrom)
+    );
   },
 
   // A debt's explicit snowball payoff priority: a whole number 1–99 (1 = paid

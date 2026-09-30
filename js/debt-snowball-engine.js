@@ -260,6 +260,45 @@ Object.assign(DebtSnowballUI.prototype, {
     }
   },
 
+  // THE rule for what a debt's typed balance means, read by the historical
+  // snapshot and by the projection's interest schedule (the projection seeds
+  // itself from the snapshot, and the "Remaining" labels, the hero, the plan,
+  // the infusion breakdown and the payoff-driven endDate all read one of the
+  // two). Returns:
+  //
+  //   asOf         — debt payments and infusions dated on/before this day are
+  //                  already in the balance; only later ones come off it. null
+  //                  for a debt saved before balanceAsOf, whose balance is the
+  //                  one before every recorded payment.
+  //   accrualStart — the first day a month's interest posts. The month it falls
+  //                  in posts on it; every later month posts on its 1st — the
+  //                  timing the projection has always used from its first day.
+  //
+  // A balanceAsOf after today (a clock-skewed device; the form refuses one)
+  // reads as today. A legacy debt's interestFrom stamp is never later than the
+  // projection start, which is what the old model accrued from every day.
+  _debtBalanceBasis(debt, todayString, projectionStartString) {
+    const valid = (value) =>
+      typeof value === "string" &&
+      /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+      this.isValidDateString(value)
+        ? value
+        : null;
+    const stated = valid(debt ? debt.balanceAsOf : null);
+    if (stated) {
+      const asOf = stated > todayString ? todayString : stated;
+      const next = this.getDateFromString(asOf);
+      next.setDate(next.getDate() + 1);
+      return { asOf, accrualStart: Utils.formatDateString(next) };
+    }
+    const stamp = valid(debt ? debt.interestFrom : null);
+    return {
+      asOf: null,
+      accrualStart:
+        stamp && stamp < projectionStartString ? stamp : projectionStartString,
+    };
+  },
+
   getHistoricalDebtSnapshot(cutoffDate = null) {
     const debts = this.store.getDebts();
     const byPayoffOrder = this.makePayoffOrder();
@@ -294,13 +333,43 @@ Object.assign(DebtSnowballUI.prototype, {
       return eventsByDate.get(dateString);
     };
 
+    // What each debt's typed balance means (_debtBalanceBasis): which
+    // payments it already reflects, and when its interest starts.
+    const todayNow = new Date();
+    const todayString = Utils.formatDateString(todayNow);
+    const projectionStartString = Utils.formatDateString(
+      new Date(todayNow.getFullYear(), todayNow.getMonth(), todayNow.getDate() + 1)
+    );
+    const basisById = {};
     debts.forEach((debt) => {
       remainingByDebtId[debt.id] = roundToCents(Number(debt.balance) || 0);
       paidByDebtId[debt.id] = 0;
+      basisById[debt.id] = this._debtBalanceBasis(
+        debt,
+        todayString,
+        projectionStartString
+      );
+    });
+    // May this debt take an infusion dated `dateKey`? Not one dated on/before
+    // its balance date: that money is already in the balance.
+    const takesEventsOn = (debtId, dateKey) => {
+      const asOf = basisById[debtId] ? basisById[debtId].asOf : null;
+      return !asOf || dateKey > asOf;
+    };
+
+    // The latest balance date: a day on/after the cutoff matters only up to it.
+    let latestAsOf = null;
+    Object.keys(basisById).forEach((debtId) => {
+      const asOf = basisById[debtId].asOf;
+      if (asOf && (!latestAsOf || asOf > latestAsOf)) latestAsOf = asOf;
     });
 
     Object.keys(transactions).forEach((dateKey) => {
-      if (cutoffDateString && dateKey >= cutoffDateString) {
+      if (
+        cutoffDateString &&
+        dateKey >= cutoffDateString &&
+        (!latestAsOf || dateKey > latestAsOf)
+      ) {
         return;
       }
       transactions[dateKey].forEach((t) => {
@@ -315,6 +384,23 @@ Object.assign(DebtSnowballUI.prototype, {
           this.recurringManager &&
           this.recurringManager.isTransactionSkipped(dateKey, t.recurringId)
         ) {
+          return;
+        }
+        if (!takesEventsOn(t.debtId, dateKey)) {
+          // Already in the typed balance. A cutoff before the balance date
+          // reads the balance as it stood then, so a payment made between the
+          // two is added back.
+          if (cutoffDateString && dateKey >= cutoffDateString) {
+            const amount = roundToCents(Number(t.amount) || 0);
+            if (amount > 0) {
+              remainingByDebtId[t.debtId] = roundToCents(
+                remainingByDebtId[t.debtId] + amount
+              );
+            }
+          }
+          return;
+        }
+        if (cutoffDateString && dateKey >= cutoffDateString) {
           return;
         }
         ensureDateBucket(dateKey).transactions.push(t);
@@ -333,6 +419,11 @@ Object.assign(DebtSnowballUI.prototype, {
           remainingByDebtId,
           infusion.targetDebtId
         );
+      // Aimed at a debt whose balance date is on/after it: the payment is
+      // already in that balance, all of it.
+      if (targeted && !takesEventsOn(infusion.targetDebtId, infusion.date)) {
+        return;
+      }
       ensureDateBucket(infusion.date).infusions.push({
         id: infusion.id,
         debtId: targeted ? infusion.targetDebtId : null,
@@ -340,48 +431,48 @@ Object.assign(DebtSnowballUI.prototype, {
       });
     });
 
-    // Forward interest accrual — keeps this snapshot consistent with the
-    // daily-floor projection (calculateSnowballProjection), which accrues each
-    // debt's monthly interest from the projection start. Interest is never
-    // materialized as a transaction, so without this the inline "Remaining"
-    // (principal only) would not reconcile with the interest-inclusive
-    // snowball payoff amounts. Accrual only begins at the projection start
-    // (tomorrow) and only when a cutoff beyond it is requested, so past/today
-    // figures and null-cutoff callers are unchanged.
-    const todayNow = new Date();
-    const projectionStart = new Date(
-      todayNow.getFullYear(),
-      todayNow.getMonth(),
-      todayNow.getDate() + 1
-    );
-    const projectionStartString = Utils.formatDateString(projectionStart);
-    const monthIndexOf = (date) => date.getFullYear() * 12 + date.getMonth();
-    const firstAccrualMonthIndex = monthIndexOf(projectionStart);
-    let accruedThroughIndex = firstAccrualMonthIndex - 1;
-    // The day a month's interest posts: the projection start for the partial
-    // first month, otherwise the first of the month (matching the projection,
-    // which accrues on the first projected day it sees in each month).
-    const accrualDayString = (monthIndex) => {
-      const firstOfMonth = new Date(
-        Math.floor(monthIndex / 12),
-        monthIndex % 12,
-        1
-      );
-      const day = firstOfMonth > projectionStart ? firstOfMonth : projectionStart;
-      return Utils.formatDateString(day);
+    // Interest accrual, per debt, from its accrualStart (_debtBalanceBasis):
+    // that month's interest posts on the accrual start, every later month's on
+    // its 1st, before the day's infusions and payments — exactly the day and
+    // order the projection (calculateSnowballProjection) posts it, which seeds
+    // itself from this snapshot at its start. So every posting day before the
+    // projection start is counted here, every later one there, and none moves
+    // when "today" does (a balance date is fixed; it used to be tomorrow, so
+    // the current month's interest vanished overnight at every month end).
+    // Interest is never materialized as a transaction, so without this the
+    // inline "Remaining" would not reconcile with the interest-inclusive
+    // payoff amounts. A null cutoff accrues nothing, as before.
+    const monthIndexOfString = (dateString) =>
+      Number(dateString.slice(0, 4)) * 12 + Number(dateString.slice(5, 7)) - 1;
+    const accruedThroughIndex = {};
+    debts.forEach((debt) => {
+      accruedThroughIndex[debt.id] =
+        monthIndexOfString(basisById[debt.id].accrualStart) - 1;
+    });
+    const postingDayString = (debtId, monthIndex) => {
+      const firstOfMonth = `${Math.floor(monthIndex / 12)}-${String(
+        (monthIndex % 12) + 1
+      ).padStart(2, "0")}-01`;
+      const start = basisById[debtId].accrualStart;
+      return firstOfMonth > start ? firstOfMonth : start;
     };
-    const accrueForwardThroughMonth = (targetMonthIndex) => {
-      while (accruedThroughIndex < targetMonthIndex) {
-        accruedThroughIndex += 1;
-        debts.forEach((debt) => {
+    // Post every month whose posting day is on/before `limit` (inclusive) or
+    // strictly before it.
+    const accrueThrough = (limit, inclusive) => {
+      debts.forEach((debt) => {
+        for (;;) {
+          const next = accruedThroughIndex[debt.id] + 1;
+          const posting = postingDayString(debt.id, next);
+          if (inclusive ? posting > limit : posting >= limit) break;
+          accruedThroughIndex[debt.id] = next;
           const balance = Number(remainingByDebtId[debt.id]) || 0;
           const rate = Number(debt.interestRate) || 0;
-          if (balance <= 0 || rate <= 0) return;
+          if (balance <= 0 || rate <= 0) continue;
           const interest = roundToCents((balance * rate) / 1200);
-          if (interest <= 0) return;
+          if (interest <= 0) continue;
           remainingByDebtId[debt.id] = roundToCents(balance + interest);
-        });
-      }
+        }
+      });
     };
 
     // Apply up to `amount` of one infusion to one debt; returns what it took.
@@ -407,13 +498,16 @@ Object.assign(DebtSnowballUI.prototype, {
     // the excess of one larger than its target's balance — the projection's
     // daily walk redistributes both to the surviving debts, so this snapshot
     // must do the same.
-    const distributeAuto = (infusionId, amount) => {
+    const distributeAuto = (infusionId, amount, dateKey) => {
       let remainingInfusion = roundToCents(Number(amount) || 0);
       if (remainingInfusion <= 0) {
         return;
       }
       const debtOrder = Object.keys(remainingByDebtId)
-        .filter((debtId) => remainingByDebtId[debtId] > 0)
+        .filter(
+          (debtId) =>
+            remainingByDebtId[debtId] > 0 && takesEventsOn(debtId, dateKey)
+        )
         .sort(byPayoffOrder(remainingByDebtId));
 
       debtOrder.forEach((debtId) => {
@@ -428,12 +522,9 @@ Object.assign(DebtSnowballUI.prototype, {
 
     const sortedDates = Array.from(eventsByDate.keys()).sort();
     sortedDates.forEach((dateKey) => {
-      // Post each forward month's interest before that month's payments.
-      if (cutoffDateString && dateKey >= projectionStartString) {
-        const parsed = Utils.parseDateString(dateKey);
-        if (parsed) {
-          accrueForwardThroughMonth(monthIndexOf(parsed));
-        }
+      // Post the interest due by this day before the day's events.
+      if (cutoffDateString) {
+        accrueThrough(dateKey, true);
       }
       const bucket = eventsByDate.get(dateKey);
       // Infusions FIRST, then the day's payments — the projection walk's
@@ -447,7 +538,7 @@ Object.assign(DebtSnowballUI.prototype, {
             rest - applyInfusion(infusion.id, infusion.debtId, rest)
           );
         }
-        distributeAuto(infusion.id, rest);
+        distributeAuto(infusion.id, rest, dateKey);
       });
 
       bucket.transactions.forEach((transaction) => {
@@ -463,18 +554,11 @@ Object.assign(DebtSnowballUI.prototype, {
       });
     });
 
-    // Top up interest through the cutoff for months with no events of their own
-    // (e.g. a mid-month cutoff after a quiet month). Accrue the cutoff month only
-    // if its interest posts before the cutoff; earlier forward months always do.
-    if (cutoffDateString && projectionStartString < cutoffDateString) {
-      const cutoffMonthIndex = monthIndexOf(cutoffDate);
-      const target =
-        accrualDayString(cutoffMonthIndex) < cutoffDateString
-          ? cutoffMonthIndex
-          : cutoffMonthIndex - 1;
-      if (target >= firstAccrualMonthIndex) {
-        accrueForwardThroughMonth(target);
-      }
+    // Top up interest through the cutoff for months with no events of their
+    // own (a mid-month cutoff after a quiet month): every month whose interest
+    // posts before the cutoff.
+    if (cutoffDateString) {
+      accrueThrough(cutoffDateString, false);
     }
 
     return { paidByDebtId, remainingByDebtId, infusionAllocations };
@@ -566,6 +650,18 @@ Object.assign(DebtSnowballUI.prototype, {
       template.id =
         template.id || debt.minRecurringId || debt.id || Utils.generateUniqueId();
       recurringTemplates[debt.id] = template;
+    });
+
+    // The day each debt's interest starts (_debtBalanceBasis): the snapshot
+    // above posted every month due before the projection start; the walk
+    // posts the rest on the same days.
+    const accrualStartById = {};
+    debts.forEach((debt) => {
+      accrualStartById[debt.id] = this._debtBalanceBasis(
+        debt,
+        Utils.formatDateString(today),
+        projectionStartDateString
+      ).accrualStart;
     });
 
     const payoffByDebtId = {};
@@ -912,7 +1008,6 @@ Object.assign(DebtSnowballUI.prototype, {
 
     // --- Forward daily walk --------------------------------------------------
     let checking = startingChecking;
-    const monthAccrued = new Set();
     let curMonthKey = null;
     let curMonthInfo = null;
     const flushMonthInfo = () => {
@@ -942,14 +1037,16 @@ Object.assign(DebtSnowballUI.prototype, {
         };
       }
 
-      // Interest accrues once per calendar month (including the first, partial
-      // month).
-      if (!monthAccrued.has(monthKey)) {
-        Object.keys(balances).forEach((debtId) =>
-          accrueInterest(balances, debtId)
-        );
-        monthAccrued.add(monthKey);
-      }
+      // Interest posts once per calendar month per debt: on the 1st, or on
+      // the debt's accrual start in its first month. A start before the
+      // projection start was posted by the snapshot this walk seeded from, so
+      // the first day posts only for a debt whose interest starts today.
+      Object.keys(balances).forEach((debtId) => {
+        const start = accrualStartById[debtId];
+        if (day === 1 || ds === start || (start === undefined && i === 0)) {
+          accrueInterest(balances, debtId);
+        }
+      });
 
       ensureMinimumsForMonth(year, month);
       const scheduledThisMonth = monthlyScheduledByKey[monthKey] || {};

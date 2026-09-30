@@ -7875,8 +7875,10 @@ console.log("TEST 93: Every Stored Field Survives Every Wrong Shape");
       debts: [
         { id: "d0", name: "Card", balance: 120, minPayment: 60, dueDay: 8, recurrence: "monthly",
           dueStartDate: ds(Y, M - 1, 8), interestRate: 18, minRecurringId: "rd", _lastModified: stamp },
+        // Dated, so the sweep walks the balanceAsOf reading of a balance too.
         { id: "d1", name: "Loan", balance: 100, minPayment: 40, dueDay: 15, recurrence: "monthly",
-          dueStartDate: ds(Y, M - 1, 15), interestRate: 9, _lastModified: stamp },
+          dueStartDate: ds(Y, M - 1, 15), interestRate: 9, balanceAsOf: ds(Y, M - 1, 20),
+          _lastModified: stamp },
         // Two debts IDENTICAL apart from their id, so nothing can make their
         // balances diverge and the smallest-first ordering MUST fall through to
         // the name tiebreak. Without a guaranteed tie this sweep never reaches
@@ -7958,7 +7960,7 @@ console.log("TEST 93: Every Stored Field Survives Every Wrong Shape");
     ["debt", ["name", "balance", "minPayment", "dueDay", "dueDayPattern", "recurrence",
       "dueStartDate", "businessDayAdjustment", "semiMonthlyDays", "semiMonthlyLastDay",
       "customInterval", "endDate", "maxOccurrences", "interestRate", "payoffPriority", "dueLastDay", "minRecurringId",
-      "_lastModified", "id"],
+      "balanceAsOf", "interestFrom", "_lastModified", "id"],
       (p, f, v) => p.debts.forEach((d) => { d[f] = v; })],
     ["infusion", ["name", "amount", "date", "targetDebtId", "_lastModified", "id"],
       (p, f, v) => p.cashInfusions.forEach((i) => { i[f] = v; })],
@@ -13783,6 +13785,594 @@ console.log("TEST 149: Semi-Monthly Days That Share A February Date Are Refused"
     global.Date = RealDate;
     global.__domFields = prevFields;
     Utils.showNotification = realNotify;
+    stores.forEach((st) => st.cancelPendingSave());
+  }
+}
+
+// Shared by TESTs 150-155: a clock that each test can move.
+function __balanceAsOfClock() {
+  const RealDate = Date;
+  const clock = { now: null };
+  class FrozenDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(clock.now.getTime()); else super(...a); }
+    static now() { return clock.now.getTime(); }
+  }
+  return {
+    RealDate,
+    at(y, m0, d) { clock.now = new RealDate(y, m0, d, 12, 0, 0); global.Date = FrozenDate; },
+    restore() { global.Date = RealDate; },
+  };
+}
+
+console.log("TEST 150: A Month's Interest No Longer Vanishes At Month End");
+{
+  // D9 of the 2026-09-29 audit (probe p11). The projection charged the current
+  // month's interest on its first day (tomorrow) and the snapshot never kept
+  // interest for a month once it was past, so moving from Sep 29 to Sep 30 —
+  // no data change at all — took September's interest off every plan figure:
+  // the Jan 1 payoff went from $5,230.08 to $5,117.02. A debt's balance now has
+  // a date (balanceAsOf), and its interest posts from the day after it, on the
+  // same days in the snapshot and the projection, so "today" moving changes
+  // nothing. A debt saved before the field is stamped with the day its
+  // interest started (interestFrom) the first time it is seen, which keeps
+  // that day's figures and then holds them.
+  const assert = require("assert");
+  const clock = __balanceAsOfClock();
+  const stores = [];
+  try {
+    // Probe p11's data. `fresh` builds it on today's clock; otherwise the
+    // store loads whatever the previous day saved.
+    const figures = (y, m0, d, debtFields, { fresh = true, keep = false } = {}) => {
+      clock.at(y, m0, d);
+      let s;
+      if (fresh) {
+        localStorage.clear();
+        s = new TransactionStore();
+        s.resetData();
+      } else {
+        s = new TransactionStore();
+      }
+      stores.push(s);
+      const rm = new RecurringTransactionManager(s);
+      const cs = new CalculationService(s, rm);
+      const ui = new DebtSnowballUI(s, rm, () => {}, cs);
+      if (fresh) {
+        s.addTransaction("2026-09-01", { amount: 1000, type: "balance", description: "Ending Balance" });
+        s.addRecurringTransaction({ startDate: "2026-10-01", amount: 1500, type: "income", description: "Pay", recurrence: "monthly" });
+        s.setDebtSnowballSettings({ dailyFloor: 500, extraPaymentStartMonth: "", autoGenerate: true });
+        const id = s.addDebt({ id: "card", recurrence: "monthly", interestRate: 24.99, dueLastDay: false,
+          name: "Card", balance: 5000, minPayment: 100, dueDay: 15, dueStartDate: "2026-10-15", ...debtFields });
+        ui.ensureMinimumPaymentRecurring(s.getDebts().find((x) => x.id === id));
+      }
+      for (let r = 0; r < 3; r++) {
+        rm.applyRecurringTransactions(y, m0);
+        ui.ensureSnowballPaymentsForHorizon(y, m0);
+        cs.updateMonthlyBalances(new Date(y, m0, 1));
+      }
+      const p = ui.calculateSnowballProjection(y, m0, true);
+      const pay = p.payoffByDebtId.card;
+      const mk = `${pay.year}-${String(pay.month + 1).padStart(2, "0")}`;
+      const result = {
+        payoff: `${pay.year}-${pay.month + 1}-${pay.day}`,
+        lump: p.monthTargets[mk].lumpSumPaidByDebtId.card,
+        dec1: ui.getHistoricalDebtSnapshot(new Date(2026, 11, 1)).remainingByDebtId.card,
+      };
+      if (keep) s.saveData(false);
+      s.cancelPendingSave();
+      return result;
+    };
+    const SEP29 = { payoff: "2027-1-1", lump: 5230.08, dec1: 5116.83 };
+
+    // (a) A debt saved before the field: its first day reads exactly what it
+    //     always did (these are the pre-change figures)...
+    assert.deepStrictEqual(figures(2026, 8, 29, {}, { keep: true }), SEP29);
+    // (b) ...and the next day, loaded from what the first day saved, the same
+    //     — the stamp holds September's interest across the month end.
+    assert.deepStrictEqual(figures(2026, 8, 30, {}, { fresh: false }), SEP29,
+      "a legacy debt keeps September's interest on Sep 30");
+    // (c) A dated balance reads the same on every day after its date.
+    for (const [m0, d] of [[8, 29], [8, 30], [9, 1], [9, 16]]) {
+      assert.deepStrictEqual(figures(2026, m0, d, { balanceAsOf: "2026-09-29" }), SEP29,
+        `balance as of Sep 29, viewed 2026-${m0 + 1}-${d}`);
+    }
+    // (d) So does one dated mid-month: September's interest posts once, on
+    //     Sep 16, whether today is before or after the month end.
+    for (const [m0, d] of [[8, 20], [8, 29], [8, 30], [9, 1]]) {
+      assert.deepStrictEqual(figures(2026, m0, d, { balanceAsOf: "2026-09-15" }), SEP29,
+        `balance as of Sep 15, viewed 2026-${m0 + 1}-${d}`);
+    }
+    console.log("✅ The same data gives the same payoff and remaining on either side of a month end");
+  } finally {
+    clock.restore();
+    stores.forEach((st) => st.cancelPendingSave());
+  }
+}
+
+console.log("TEST 151: A Dated Balance Counts Only The Payments After Its Date");
+{
+  // The typed balance is the balance at the END of balanceAsOf's day, so the
+  // snapshot takes off only debt payments and infusions dated after it, and
+  // accrues interest from the next day. A cutoff before the date reads the
+  // balance as it stood then: the payments made in between are added back.
+  // The projection seeds from the snapshot, so its forward figures follow.
+  const assert = require("assert");
+  const clock = __balanceAsOfClock();
+  const stores = [];
+  try {
+    clock.at(2026, 8, 20);
+    const make = () => {
+      localStorage.clear();
+      const s = new TransactionStore();
+      s.resetData();
+      stores.push(s);
+      const rm = new RecurringTransactionManager(s);
+      const cs = new CalculationService(s, rm);
+      const ui = new DebtSnowballUI(s, rm, () => {}, cs);
+      s.setDebtSnowballSettings({ dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false });
+      return { s, rm, cs, ui };
+    };
+    const summary = (c, ds) => {
+      const x = c.ui.getDebtSummaries(Utils.parseDateString(ds))[0];
+      return [x.paid, x.remaining];
+    };
+
+    // (a) $100 on the 5th since June; balance $1,000 as of Aug 10. Of the
+    //     four past payments only Sep 5 comes off it.
+    {
+      const c = make();
+      const id = c.s.addDebt({ name: "Loan", balance: 1000, balanceAsOf: "2026-08-10", minPayment: 100,
+        recurrence: "monthly", dueDay: 5, dueStartDate: "2026-06-05", interestRate: 0 });
+      c.ui.ensureMinimumPaymentRecurring(c.s.getDebts().find((x) => x.id === id));
+      assert.deepStrictEqual(summary(c, "2026-09-21"), [100, 900], "only the payment after Aug 10");
+      assert.deepStrictEqual(summary(c, "2026-08-11"), [0, 1000], "the balance on its own date");
+      assert.deepStrictEqual(summary(c, "2026-08-06"), [0, 1000], "after Aug 5: nothing between it and Aug 10");
+      assert.deepStrictEqual(summary(c, "2026-07-06"), [0, 1100], "before Aug 5 the Aug 5 payment is added back");
+      // The day-detail "Remaining" on the Sep 5 payment reads the snapshot
+      // through that day.
+      assert.strictEqual(c.ui.getHistoricalDebtSnapshot(new Date(2026, 8, 6)).remainingByDebtId[id], 900);
+      // The same debt with no date (saved before the field) still subtracts
+      // every payment since its first due date.
+      c.s.updateDebt(id, { balanceAsOf: null });
+      assert.deepStrictEqual(summary(c, "2026-09-21"), [400, 600], "legacy: every payment");
+    }
+
+    // (b) With interest (12%/yr = 1%/mo): August's posts Aug 11, September's
+    //     Sep 1, before that day's payment; the projection carries on from
+    //     there on the same days, and the snapshot agrees with it.
+    {
+      const c = make();
+      const id = c.s.addDebt({ name: "Loan", balance: 1000, balanceAsOf: "2026-08-10", minPayment: 100,
+        recurrence: "monthly", dueDay: 5, dueStartDate: "2026-06-05", interestRate: 12 });
+      c.ui.ensureMinimumPaymentRecurring(c.s.getDebts().find((x) => x.id === id));
+      // 1000 -> 1010 (Aug 11) -> 1020.10 (Sep 1) -> 920.10 (Sep 5)
+      assert.deepStrictEqual(summary(c, "2026-09-21"), [100, 920.1]);
+      assert.deepStrictEqual(summary(c, "2026-08-11"), [0, 1000], "interest starts the day after the date");
+      assert.deepStrictEqual(summary(c, "2026-08-12"), [0, 1010]);
+      // 920.10 -> 929.30 (Oct 1) -> 829.30 (Oct 5)
+      const october = c.ui.calculateSnowballProjection(2026, 9, false).viewBalances[id];
+      assert.strictEqual(october, 829.3, "the projection seeds from the dated balance");
+      c.rm.applyRecurringTransactions(2026, 9);
+      assert.strictEqual(c.ui.getHistoricalDebtSnapshot(new Date(2026, 10, 1)).remainingByDebtId[id], october,
+        "the snapshot of October agrees with the projection");
+    }
+
+    // (c) Infusions: one dated on/before a debt's balance date is already in
+    //     that balance — an untargeted one goes to the other debts, a targeted
+    //     one is not applied at all — and a later one applies as usual.
+    {
+      const c = make();
+      const x = c.s.addDebt({ id: "X", name: "X", balance: 300, balanceAsOf: "2026-08-10", minPayment: 0,
+        recurrence: "monthly", dueDay: 1, dueStartDate: "2026-06-01", interestRate: 0 });
+      const y = c.s.addDebt({ id: "Y", name: "Y", balance: 600, minPayment: 0,
+        recurrence: "monthly", dueDay: 1, dueStartDate: "2026-06-01", interestRate: 0 });
+      c.s.addCashInfusion({ id: "i1", name: "a", amount: 200, date: "2026-08-01", targetDebtId: null });
+      c.s.addCashInfusion({ id: "i2", name: "b", amount: 100, date: "2026-08-05", targetDebtId: x });
+      c.s.addCashInfusion({ id: "i3", name: "c", amount: 50, date: "2026-09-10", targetDebtId: null });
+      const rem = c.ui.getHistoricalDebtSnapshot(new Date(2026, 8, 21)).remainingByDebtId;
+      assert.deepStrictEqual([rem[x], rem[y]], [250, 400]);
+      assert.deepStrictEqual(c.ui.calculateInfusionAllocations(), {
+        i1: { Y: 200 }, i2: {}, i3: { X: 50 },
+      });
+    }
+
+    // (d) A date after today (a device with a skewed clock; the form refuses
+    //     one) reads as today: nothing so far comes off, the future does.
+    {
+      const c = make();
+      c.s.importData({ ...c.s.exportData(), debts: [{ id: "Z", name: "Z", balance: 800, balanceAsOf: "2026-12-01",
+        minPayment: 100, recurrence: "monthly", dueDay: 5, dueStartDate: "2026-06-05", interestRate: 0 }] });
+      c.ui.ensureMinimumPaymentRecurring(c.s.getDebts()[0]);
+      assert.strictEqual(c.s.getDebts()[0].balanceAsOf, "2026-12-01", "stored as given");
+      assert.deepStrictEqual(summary(c, "2026-09-21"), [0, 800]);
+      assert.strictEqual(c.ui.calculateSnowballProjection(2026, 9, false).viewBalances.Z, 700);
+    }
+    console.log("✅ A dated balance takes off only later payments and infusions, and accrues from the next day");
+  } finally {
+    clock.restore();
+    stores.forEach((st) => st.cancelPendingSave());
+  }
+}
+
+console.log("TEST 152: Convert To Debt Dates The Balance It Asks For");
+{
+  // The convert form asks for TODAY's balance and makes the series' next
+  // payment the debt's first. So the balance is dated today — or yesterday
+  // when that first payment is due today, so today's payment still comes off
+  // it (the old series keeps every earlier payment as plain history). Typing
+  // the balance does not move the date to today.
+  const assert = require("assert");
+  const clock = __balanceAsOfClock();
+  const stores = [];
+  try {
+    clock.at(2026, 8, 29);
+    const convert = (series, balance) => {
+      localStorage.clear();
+      const s = new TransactionStore();
+      s.resetData();
+      stores.push(s);
+      const rm = new RecurringTransactionManager(s);
+      const cs = new CalculationService(s, rm);
+      const ui = new DebtSnowballUI(s, rm, () => {}, cs);
+      const input = (value) => ({ value, focus() {}, style: {} });
+      Object.assign(ui, {
+        debtForm: { style: {} }, debtFormTitle: null,
+        debtNameInput: input(""), debtBalanceInput: input(""), debtBalanceAsOfInput: input(""),
+        debtMinPaymentInput: input(""), debtRecurrenceInput: input("monthly"), debtStartDateInput: input(""),
+        debtDueDayInput: input("1"), debtDueDayPatternInput: null, debtInterestInput: input(""),
+        debtPayoffPriorityInput: input(""), debtAdvancedOptions: null,
+      });
+      ui.populateDebtAdvancedOptions = () => {};
+      ui.showView = () => {};
+      ui.refresh = () => {};
+      ui.onUpdate = () => {};
+      s.addTransaction("2026-09-01", { amount: 2000, type: "balance", description: "Ending Balance" });
+      s.setDebtSnowballSettings({ dailyFloor: 1e9, extraPaymentStartMonth: "", autoGenerate: false });
+      const rtId = s.addRecurringTransaction({ type: "expense", description: "Car Loan", ...series });
+      ui.showDebtFormFromRecurring(s.getRecurringTransactions().find((r) => r.id === rtId));
+      const shown = ui.debtBalanceAsOfInput.value;
+      ui.debtBalanceInput.value = String(balance);
+      const afterTyping = ui._expectedBalanceAsOf(balance);
+      ui.saveDebt();
+      const debt = s.getDebts()[0];
+      return { s, ui, debt, shown, afterTyping };
+    };
+
+    // (a) The next payment is Oct 5: the balance is today's.
+    {
+      const c = convert({ startDate: "2025-10-05", amount: 300, recurrence: "monthly" }, 4000);
+      assert.strictEqual(c.shown, "2026-09-29");
+      assert.strictEqual(c.afterTyping, "2026-09-29");
+      assert.strictEqual(c.debt.balanceAsOf, "2026-09-29");
+      assert.strictEqual(c.debt.interestFrom, null);
+      assert.strictEqual(c.ui.getDebtSummaries(new Date(2026, 8, 30))[0].remaining, 4000);
+      const payoff = c.ui.calculateSnowballProjection(2026, 8, false).payoffByDebtId[c.debt.id];
+      assert.deepStrictEqual([payoff.year, payoff.month], [2027, 10], "fourteen payments, Oct 2026 - Nov 2027");
+    }
+    // (b) The next payment is today: the balance is yesterday's, so today's
+    //     $300 comes off it, and typing the balance keeps that date.
+    {
+      const c = convert({ startDate: "2026-03-29", amount: 300, recurrence: "monthly" }, 4000);
+      assert.strictEqual(c.debt.dueStartDate, "2026-09-29");
+      assert.strictEqual(c.shown, "2026-09-28");
+      assert.strictEqual(c.afterTyping, "2026-09-28", "typing the balance does not re-stamp it to today");
+      assert.strictEqual(c.debt.balanceAsOf, "2026-09-28");
+      assert.deepStrictEqual(
+        (({ paid, remaining }) => [paid, remaining])(c.ui.getDebtSummaries(new Date(2026, 8, 30))[0]),
+        [300, 3700], "today's payment comes off the balance");
+    }
+    console.log("✅ Convert to Debt dates the typed balance today, or yesterday when the first payment is today");
+  } finally {
+    clock.restore();
+    stores.forEach((st) => st.cancelPendingSave());
+  }
+}
+
+console.log("TEST 153: A Debt Saved Before balanceAsOf Reads Exactly As Before");
+{
+  // The user's real debts have no balanceAsOf. They keep their meaning — the
+  // balance before every recorded payment — and are stamped once with the day
+  // the old model accrued interest from (tomorrow), so nothing they show moves
+  // on the day this ships. Every figure below was produced by the previous
+  // build (b5a4b29) on this exact dataset: payments since June, a skipped
+  // minimum, targeted and untargeted infusions on both sides of today.
+  const assert = require("assert");
+  const clock = __balanceAsOfClock();
+  const stores = [];
+  try {
+    clock.at(2026, 8, 30);
+    localStorage.clear();
+    const s = new TransactionStore();
+    s.resetData();
+    stores.push(s);
+    const rm = new RecurringTransactionManager(s);
+    const cs = new CalculationService(s, rm);
+    const ui = new DebtSnowballUI(s, rm, () => {}, cs);
+    s.addTransaction("2026-06-01", { amount: 3000, type: "balance", description: "Ending Balance" });
+    s.addRecurringTransaction({ startDate: "2026-06-03", amount: 1400, type: "income", description: "Pay", recurrence: "monthly" });
+    s.addRecurringTransaction({ startDate: "2026-06-10", amount: 600, type: "expense", description: "Rent", recurrence: "monthly" });
+    s.setDebtSnowballSettings({ dailyFloor: 800, extraPaymentStartMonth: "", autoGenerate: true });
+    const add = (fields) => {
+      const id = s.addDebt({ recurrence: "monthly", dueLastDay: false, ...fields });
+      ui.ensureMinimumPaymentRecurring(s.getDebts().find((d) => d.id === id));
+      return id;
+    };
+    const a = add({ id: "legA", name: "Card A", balance: 2400, minPayment: 90, dueDay: 12, dueStartDate: "2026-06-12", interestRate: 21.5 });
+    const b = add({ id: "legB", name: "Loan B", balance: 5200, minPayment: 160, dueDay: 25, dueStartDate: "2026-05-25", interestRate: 7.25 });
+    s.addCashInfusion({ id: "infPastT", name: "Refund", amount: 300, date: "2026-07-20", targetDebtId: b });
+    s.addCashInfusion({ id: "infPastA", name: "Gift", amount: 150, date: "2026-08-15", targetDebtId: null });
+    s.addCashInfusion({ id: "infNext", name: "Bonus", amount: 700, date: "2026-11-20", targetDebtId: null });
+    rm.applyRecurringTransactions(2026, 7);
+    rm.toggleSkipTransaction("2026-08-12", s.getDebts().find((d) => d.id === a).minRecurringId);
+    for (let r = 0; r < 3; r++) {
+      rm.applyRecurringTransactions(2026, 8);
+      ui.ensureSnowballPaymentsForHorizon(2026, 8);
+      cs.updateMonthlyBalances(new Date(2026, 8, 1));
+    }
+    assert.deepStrictEqual(s.getDebts().map((d) => [d.balanceAsOf, d.interestFrom]),
+      [[null, "2026-10-01"], [null, "2026-10-01"]], "stamped with tomorrow, no balance date");
+
+    const got = { summaries: {}, proj: {}, inline: {} };
+    for (const c of ["2026-06-01", "2026-07-13", "2026-09-01", "2026-10-01", "2026-11-15", "2027-01-01"]) {
+      got.summaries[c] = ui.getDebtSummaries(Utils.parseDateString(c)).map((x) => [x.debt.id, x.paid, x.remaining]);
+    }
+    for (const [vy, vm] of [[2026, 8], [2026, 10], [2027, 1]]) {
+      const p = ui.calculateSnowballProjection(vy, vm, true);
+      got.proj[`${vy}-${vm}`] = { view: p.viewBalances, pay: Object.fromEntries(Object.entries(p.payoffByDebtId).map(([k, q]) => {
+        const mk = `${q.year}-${String(q.month + 1).padStart(2, "0")}`;
+        return [k, [q.year, q.month, q.day, p.monthTargets[mk] ? p.monthTargets[mk].lumpSumPaidByDebtId[k] : null]];
+      })) };
+      if (vm === 8) got.infusions = ui.calculateInfusionAllocations(p);
+    }
+    for (const d of ["2026-08-25", "2026-09-12", "2026-10-12", "2026-10-25"]) {
+      const c = Utils.parseDateString(d);
+      c.setDate(c.getDate() + 1);
+      got.inline[d] = ui.getHistoricalDebtSnapshot(c).remainingByDebtId;
+    }
+    got.min30 = cs.calculateMinimum();
+    const pay = { legA: [2026, 9, 1, 2015.48], legB: [2026, 10, 20, 3288.72] };
+    assert.deepStrictEqual(got, {
+      summaries: {
+        "2026-06-01": [["legA", 0, 2400], ["legB", 160, 5040]],
+        "2026-07-13": [["legA", 180, 2220], ["legB", 320, 4880]],
+        "2026-09-01": [["legA", 330, 2070], ["legB", 940, 4260]],
+        "2026-10-01": [["legA", 420, 1980], ["legB", 1100, 4100]],
+        "2026-11-15": [["legA", 2435.48, 0], ["legB", 1260, 3988.72]],
+        "2027-01-01": [["legA", 2435.48, 0], ["legB", 5248.72, 0]],
+      },
+      proj: {
+        "2026-8": { view: { legA: 1980, legB: 4100 }, pay },
+        "2026-10": { view: { legA: 0, legB: 0 }, pay },
+        "2027-1": { view: { legA: 0, legB: 0 }, pay },
+      },
+      inline: {
+        "2026-08-25": { legA: 2070, legB: 4260 },
+        "2026-09-12": { legA: 1980, legB: 4260 },
+        "2026-10-12": { legA: 0, legB: 4124.77 },
+        "2026-10-25": { legA: 0, legB: 3964.77 },
+      },
+      infusions: { infPastT: { legB: 300 }, infPastA: { legA: 150 }, infNext: { legB: 700 } },
+      min30: 3274.52,
+    }, "every figure matches the previous build");
+
+    // The stamp is made ONCE: loadData persists it, dated, and a later load
+    // (or an import of a copy nobody stamped) keeps it.
+    const legacy = { id: "old", name: "Old", balance: 900, minPayment: 30, recurrence: "monthly", dueDay: 3,
+      dueStartDate: "2026-04-03", interestRate: 18, _lastModified: "2026-01-01T00:00:00.000Z" };
+    localStorage.clear();
+    localStorage.setItem("debts", JSON.stringify([legacy]));
+    const loaded = new TransactionStore();
+    stores.push(loaded);
+    loaded.cancelPendingSave();
+    assert.strictEqual(loaded.getDebts()[0].interestFrom, "2026-10-01");
+    assert.ok(loaded.getDebts()[0]._lastModified > legacy._lastModified,
+      "the stamp is dated, so the next sync carries it");
+    assert.strictEqual(JSON.parse(localStorage.getItem("debts"))[0].interestFrom, "2026-10-01", "and persisted");
+    const stampedAt = loaded.getDebts()[0]._lastModified;
+    clock.at(2026, 10, 15);
+    const later = new TransactionStore();
+    stores.push(later);
+    later.cancelPendingSave();
+    assert.strictEqual(later.getDebts()[0].interestFrom, "2026-10-01", "a later load does not move it");
+    assert.strictEqual(later.getDebts()[0]._lastModified, stampedAt, "nor re-date it");
+    later.importData({ ...later.exportData(), debts: [legacy] });
+    assert.strictEqual(later.getDebts()[0].interestFrom, "2026-10-01",
+      "importing an unstamped copy of the same debt keeps this device's stamp");
+    console.log("✅ Legacy debts read exactly as before, and their interest start is pinned once");
+  } finally {
+    clock.restore();
+    stores.forEach((st) => st.cancelPendingSave());
+  }
+}
+
+console.log("TEST 154: The Debt Form Dates The Balance, And Re-Dates It When It Changes");
+{
+  // "Balance as of" defaults to today on a new debt and follows the balance:
+  // change the balance and it becomes today, change it back and the saved
+  // date returns — unless the user set the date themselves. A debt saved
+  // before the field shows it blank and keeps its meaning until its balance
+  // changes. The live listener is the browser harness's (test:ui); this
+  // drives saveDebt, which applies the same rule from the stored debt.
+  const assert = require("assert");
+  const clock = __balanceAsOfClock();
+  const stores = [];
+  const realNotify = Utils.showNotification;
+  const errors = [];
+  Utils.showNotification = (message, type) => { if (type === "error") errors.push(message); };
+  try {
+    clock.at(2026, 8, 30);
+    localStorage.clear();
+    const s = new TransactionStore();
+    s.resetData();
+    stores.push(s);
+    const input = (value) => ({ value, focus() {}, style: {} });
+    const form = () => {
+      const ui = Object.create(DebtSnowballUI.prototype);
+      Object.assign(ui, {
+        store: s, recurringManager: new RecurringTransactionManager(s),
+        editingDebtId: null, convertingFromRecurringId: null,
+        debtForm: { style: {} }, debtFormTitle: null,
+        debtNameInput: input(""), debtBalanceInput: input(""), debtBalanceAsOfInput: input(""),
+        debtMinPaymentInput: input(""), debtRecurrenceInput: input("monthly"), debtStartDateInput: input(""),
+        debtDueDayInput: input("1"), debtDueDayPatternInput: input(""), debtInterestInput: input(""),
+        debtPayoffPriorityInput: input(""), debtAdvancedOptions: null,
+        daySpecificOptions: [],
+      });
+      ui.populateDueDayPatternOptions = () => {};
+      ui.updateDebtRecurrenceOptions = () => {};
+      ui.populateDebtAdvancedOptions = () => {};
+      ui.hideDebtForm = () => {};
+      ui.refresh = () => {};
+      ui.onUpdate = () => {};
+      return ui;
+    };
+    const open = (debtId) => {
+      const ui = form();
+      ui.showDebtForm(debtId ? s.getDebts().find((d) => d.id === debtId) : null);
+      return ui;
+    };
+    const save = (ui, { balance, asOf, touched } = {}) => {
+      if (balance !== undefined) ui.debtBalanceInput.value = String(balance);
+      if (asOf !== undefined) ui.debtBalanceAsOfInput.value = asOf;
+      if (touched) ui._balanceAsOfTouched = true;
+      if (!ui.debtNameInput.value) ui.debtNameInput.value = "Card";
+      if (!ui.debtStartDateInput.value) ui.debtStartDateInput.value = "2026-10-01";
+      errors.length = 0;
+      ui.saveDebt();
+      return errors[0] || null;
+    };
+    const debt = (id) => s.getDebts().find((d) => d.id === id);
+
+    // A new debt: today, shown and saved.
+    let ui = open(null);
+    assert.strictEqual(ui.debtBalanceAsOfInput.value, "2026-09-30");
+    assert.strictEqual(ui.debtBalanceAsOfInput.max, "2026-09-30");
+    assert.strictEqual(save(ui, { balance: 1200 }), null);
+    const id = s.getDebts()[0].id;
+    assert.strictEqual(debt(id).balanceAsOf, "2026-09-30");
+
+    // Dated Aug 1 by the user.
+    ui = open(id);
+    assert.strictEqual(save(ui, { asOf: "2026-08-01", touched: true }), null);
+    assert.strictEqual(debt(id).balanceAsOf, "2026-08-01");
+    // Reopened: the form shows it; an unrelated save keeps it.
+    ui = open(id);
+    assert.strictEqual(ui.debtBalanceAsOfInput.value, "2026-08-01");
+    assert.strictEqual(save(ui, {}), null);
+    assert.strictEqual(debt(id).balanceAsOf, "2026-08-01", "unchanged balance, unchanged date");
+    // The balance changes and the date is left alone: re-dated today.
+    ui = open(id);
+    assert.strictEqual(ui._expectedBalanceAsOf(1100), "2026-09-30", "what the live form shows on typing");
+    assert.strictEqual(ui._expectedBalanceAsOf(1200), "2026-08-01", "and on typing the old balance back");
+    assert.strictEqual(save(ui, { balance: 1100 }), null);
+    assert.deepStrictEqual([debt(id).balance, debt(id).balanceAsOf], [1100, "2026-09-30"]);
+    // The balance changes and the user sets the date: theirs wins.
+    ui = open(id);
+    assert.strictEqual(save(ui, { balance: 1050, asOf: "2026-09-15", touched: true }), null);
+    assert.deepStrictEqual([debt(id).balance, debt(id).balanceAsOf], [1050, "2026-09-15"]);
+    // Refusals: a future date, a cleared date, a malformed one.
+    for (const bad of ["2026-10-01", "", "2026-9-15"]) {
+      ui = open(id);
+      assert.ok(save(ui, { asOf: bad, touched: true }), `refuses ${JSON.stringify(bad)}`);
+      assert.strictEqual(debt(id).balanceAsOf, "2026-09-15");
+    }
+
+    // A debt saved before the field: blank, and an unrelated edit keeps it
+    // (and its interest stamp); a new balance dates it today.
+    const legacyId = s.addDebt({ name: "Old", balance: 700, minPayment: 20, recurrence: "monthly",
+      dueDay: 1, dueStartDate: "2026-06-01", interestRate: 10 });
+    assert.strictEqual(debt(legacyId).interestFrom, "2026-10-01");
+    ui = open(legacyId);
+    assert.strictEqual(ui.debtBalanceAsOfInput.value, "", "shown blank");
+    assert.strictEqual(save(ui, { asOf: "" }), null);
+    assert.deepStrictEqual([debt(legacyId).balanceAsOf, debt(legacyId).interestFrom], [null, "2026-10-01"]);
+    ui = open(legacyId);
+    assert.strictEqual(save(ui, { balance: 650 }), null);
+    assert.deepStrictEqual([debt(legacyId).balanceAsOf, debt(legacyId).interestFrom], ["2026-09-30", null]);
+
+    // The form's stub-free path (TESTs 49 and 149 build the form without the
+    // input): a new debt is dated today, an edit keeps its date.
+    ui = form();
+    ui.debtBalanceAsOfInput = null;
+    assert.strictEqual(save(ui, { balance: 300 }), null);
+    assert.strictEqual(s.getDebts()[s.getDebts().length - 1].balanceAsOf, "2026-09-30");
+    console.log("✅ The balance date defaults to today, follows the balance, and yields to the user");
+  } finally {
+    clock.restore();
+    Utils.showNotification = realNotify;
+    stores.forEach((st) => st.cancelPendingSave());
+  }
+}
+
+console.log("TEST 155: The Balance Date Survives Storage, Import And The Cloud Merge");
+{
+  // balanceAsOf and the legacy interestFrom stamp are normalized on every way
+  // in (a wrong shape becomes null — TEST 93 walks every surface with them),
+  // ride export/import untouched, and survive a cloud merge. Two devices that
+  // stamped a legacy debt on different days keep the EARLIER stamp, whichever
+  // copy of the row wins: a later one would drop the months in between.
+  const assert = require("assert");
+  const clock = __balanceAsOfClock();
+  const stores = [];
+  try {
+    clock.at(2026, 8, 30);
+    localStorage.clear();
+    const s = new TransactionStore();
+    s.resetData();
+    stores.push(s);
+    const norm = (fields) => {
+      const d = s._normalizeDebt({ name: "D", balance: 10, ...fields });
+      return [d.balanceAsOf, d.interestFrom];
+    };
+    assert.deepStrictEqual(norm({ balanceAsOf: "2026-08-01" }), ["2026-08-01", null]);
+    assert.deepStrictEqual(norm({ balanceAsOf: "2026-08-01", interestFrom: "2026-07-01" }), ["2026-08-01", null]);
+    for (const bad of [42, {}, [], "2026-8-1", "2026-02-30", "yesterday", "", true]) {
+      assert.deepStrictEqual(norm({ balanceAsOf: bad }), [null, "2026-10-01"], `balanceAsOf ${JSON.stringify(bad)}`);
+      assert.deepStrictEqual(norm({ interestFrom: bad }), [null, "2026-10-01"], `interestFrom ${JSON.stringify(bad)}`);
+    }
+    assert.deepStrictEqual(norm({ interestFrom: "2026-07-01" }), [null, "2026-07-01"]);
+
+    // Export -> import round trip.
+    s.addDebt({ id: "dated", name: "Dated", balance: 500, balanceAsOf: "2026-09-12", recurrence: "monthly" });
+    s.addDebt({ id: "old", name: "Old", balance: 400, interestFrom: "2026-09-02", recurrence: "monthly" });
+    const exported = JSON.parse(JSON.stringify(s.exportData()));
+    const t = new TransactionStore();
+    t.resetData();
+    stores.push(t);
+    t.importData(exported);
+    assert.deepStrictEqual(t.getDebts().map((d) => [d.id, d.balanceAsOf, d.interestFrom]),
+      [["dated", "2026-09-12", null], ["old", null, "2026-09-02"]]);
+
+    // The cloud merge.
+    const sync = new CloudSync(t, () => {});
+    const row = (fields) => ({ name: "X", balance: 100, recurrence: "monthly", ...fields });
+    const local = { debts: [
+      row({ id: "old", interestFrom: "2026-10-16", _lastModified: "2026-10-15T12:00:00.000Z" }),
+      row({ id: "dated", balanceAsOf: "2026-10-02", interestFrom: null, _lastModified: "2026-10-03T12:00:00.000Z" }),
+    ] };
+    const remote = { debts: [
+      row({ id: "old", interestFrom: "2026-10-01", _lastModified: "2026-09-30T12:00:00.000Z" }),
+      row({ id: "dated", balanceAsOf: "2026-09-12", interestFrom: null, _lastModified: "2026-09-12T12:00:00.000Z" }),
+      row({ id: "remoteOnly", interestFrom: "2026-09-20", _lastModified: "2026-09-20T12:00:00.000Z" }),
+    ] };
+    const before = JSON.stringify([local, remote]);
+    const merged = sync._mergeData(local, remote).debts;
+    const byId = Object.fromEntries(merged.map((d) => [d.id, d]));
+    assert.strictEqual(byId.old.interestFrom, "2026-10-01", "the earlier stamp wins over the newer row's");
+    assert.strictEqual(byId.old._lastModified, "2026-10-15T12:00:00.000Z", "the newer row still wins otherwise");
+    assert.deepStrictEqual([byId.dated.balanceAsOf, byId.dated.interestFrom], ["2026-10-02", null],
+      "a dated balance merges last-write-wins");
+    assert.strictEqual(byId.remoteOnly.interestFrom, "2026-09-20");
+    assert.strictEqual(JSON.stringify([local, remote]), before, "neither side is mutated");
+    // And the merged copy imports as merged.
+    const u = new TransactionStore();
+    u.resetData();
+    stores.push(u);
+    u.importData({ ...u.exportData(), debts: merged });
+    assert.deepStrictEqual(u.getDebts().map((d) => [d.id, d.balanceAsOf, d.interestFrom]).sort(),
+      [["dated", "2026-10-02", null], ["old", null, "2026-10-01"], ["remoteOnly", null, "2026-09-20"]]);
+    console.log("✅ balanceAsOf and the interest stamp survive normalization, import/export and the merge");
+  } finally {
+    clock.restore();
     stores.forEach((st) => st.cancelPendingSave());
   }
 }

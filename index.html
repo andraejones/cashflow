@@ -294,6 +294,9 @@
             <input type="text" id="debtName" />
             <label for="debtBalance">Balance</label>
             <input type="number" id="debtBalance" step="0.01" min="0" />
+            <label for="debtBalanceAsOf">Balance as of</label>
+            <input type="date" id="debtBalanceAsOf"
+              title="The day this balance is from. Payments after it come off the balance, and interest accrues from the next day. Blank on a debt saved before this field: payments since the first due date come off it." />
             <label for="debtMinPayment">Min Payment</label>
             <input type="number" id="debtMinPayment" step="0.01" min="0" />
             <label for="debtInterestRate">Interest Rate (%)</label>

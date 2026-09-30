@@ -55,7 +55,11 @@ Object.assign(DebtSnowballUI.prototype, {
       const priority = this._debtPayoffRank(debt);
       const priorityLabel =
         priority !== UNRANKED_PAYOFF ? ` • Priority ${priority}` : "";
-      meta.textContent = `Balance $${Utils.formatAmount(balance)} • Paid $${Utils.formatAmount(paid)} • Min $${Utils.formatAmount(minPayment)} • Due ${scheduleLabel}${interest}${priorityLabel}`;
+      const asOf =
+        typeof debt.balanceAsOf === "string" && debt.balanceAsOf
+          ? ` as of ${Utils.formatDisplayDate(debt.balanceAsOf)}`
+          : "";
+      meta.textContent = `Balance $${Utils.formatAmount(balance)}${asOf} • Paid $${Utils.formatAmount(paid)} • Min $${Utils.formatAmount(minPayment)} • Due ${scheduleLabel}${interest}${priorityLabel}`;
       details.appendChild(meta);
 
       row.appendChild(details);

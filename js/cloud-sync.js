@@ -1250,10 +1250,13 @@ class CloudSync {
         asMap(localData.movedTransactions),
         asMap(remoteData.movedTransactions)
       ),
-      debts: this._mergeById(
-        asItems(localData.debts),
-        asItems(remoteData.debts),
-        deletedDebtIds
+      debts: this._keepEarliestInterestFrom(
+        this._mergeById(
+          asItems(localData.debts),
+          asItems(remoteData.debts),
+          deletedDebtIds
+        ),
+        [...asItems(localData.debts), ...asItems(remoteData.debts)]
       ),
       cashInfusions: this._mergeById(
         asItems(localData.cashInfusions),
@@ -1279,6 +1282,32 @@ class CloudSync {
     };
 
     return merged;
+  }
+
+  // A debt saved before balanceAsOf carries an interestFrom stamp: the day
+  // its interest has been accrued from, pinned the first time a device running
+  // this build saw it (TransactionStore._normalizeDebtBalanceBasis). Two
+  // devices can each stamp their own day before they first sync, and
+  // last-write-wins would keep the LATER one, silently dropping the months in
+  // between. The stamp is a fact about the past, so the earliest one wins,
+  // whichever copy of the row does. Winning rows are copied, never mutated:
+  // they are the local and remote objects themselves.
+  _keepEarliestInterestFrom(mergedDebts, allCopies) {
+    const valid = (value) =>
+      typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
+    const earliest = new Map();
+    allCopies.forEach((debt) => {
+      const stamp = valid(debt.interestFrom);
+      if (!stamp || typeof debt.id !== "string") return;
+      const known = earliest.get(debt.id);
+      if (!known || stamp < known) earliest.set(debt.id, stamp);
+    });
+    return mergedDebts.map((debt) => {
+      if (valid(debt.balanceAsOf) || typeof debt.id !== "string") return debt;
+      const stamp = earliest.get(debt.id);
+      if (!stamp || stamp === debt.interestFrom) return debt;
+      return { ...debt, interestFrom: stamp };
+    });
   }
 
   async _fetchGist(token, gistId, etag = null) {

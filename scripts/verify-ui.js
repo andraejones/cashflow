@@ -1065,6 +1065,107 @@ async function dismissAlert(page) {
     check("reopening the form shows the saved priority",
       (await page.evaluate(() => window.__prioShownOnEdit)) === "1");
 
+    // ---- "Balance as of" through the real debt form ------------------------
+    // The vm harness (TEST 154) drives saveDebt's rule; only a browser proves
+    // the live half: the date follows the balance as the user TYPES (real
+    // input events), comes back when the balance does, and stops following
+    // once the user sets the date themselves.
+    const asOfDays = await page.evaluate(() => {
+      const day = (offset) => {
+        const d = new Date();
+        d.setDate(d.getDate() + offset);
+        return Utils.formatDateString(d);
+      };
+      return { today: day(0), earlier: day(-20), chosen: day(-5) };
+    });
+    const asOfField = () => page.evaluate(() => {
+      const el = document.getElementById("debtBalanceAsOf");
+      return { value: el.value, max: el.max };
+    });
+    const retype = async (selector, text) => {
+      await page.click(selector, { clickCount: 3 });
+      await page.keyboard.press("Backspace");
+      await page.type(selector, text);
+    };
+    await page.evaluate(() => document.getElementById("addDebtButton").click());
+    await sleep(200);
+    const onAdd = await asOfField();
+    await retype("#debtBalance", "750");
+    const afterTypingNew = await asOfField();
+    await page.evaluate(() => {
+      document.getElementById("debtName").value = "UI AsOf New";
+      document.getElementById("debtStartDate").value = Utils.formatDateString(new Date());
+      document.getElementById("saveDebtButton").click();
+    });
+    await sleep(300);
+    const newStored = await page.evaluate(() =>
+      window.app.store.getDebts().find((d) => d.name === "UI AsOf New")?.balanceAsOf ?? "missing");
+    check("a new debt's balance date defaults to today",
+      onAdd.value === asOfDays.today && onAdd.max === asOfDays.today &&
+        afterTypingNew.value === asOfDays.today && newStored === asOfDays.today,
+      JSON.stringify({ onAdd, afterTypingNew, newStored }));
+
+    const datedId = await page.evaluate((earlier) => {
+      const id = window.app.store.addDebt({ name: "UI AsOf Dated", balance: 400, balanceAsOf: earlier,
+        minPayment: 0, recurrence: "monthly", dueStartDate: earlier, interestRate: 0 });
+      window.app.debtSnowball.refresh();
+      return id;
+    }, asOfDays.earlier);
+    await sleep(200);
+    await page.evaluate((id) => {
+      [...document.querySelectorAll("#debtList button")].find(
+        (b) => b.dataset.action === "edit" && b.dataset.debtId === id).click();
+    }, datedId);
+    await sleep(200);
+    const onEdit = await asOfField();
+    await retype("#debtBalance", "380");
+    const afterChange = await asOfField();
+    await retype("#debtBalance", "400");
+    const afterRevert = await asOfField();
+    await page.evaluate((chosen) => {
+      const el = document.getElementById("debtBalanceAsOf");
+      el.value = chosen;
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    }, asOfDays.chosen);
+    await retype("#debtBalance", "360");
+    const afterUserDate = await asOfField();
+    await page.evaluate(() => document.getElementById("saveDebtButton").click());
+    await sleep(300);
+    const datedStored = await page.evaluate((id) => {
+      const debt = window.app.store.getDebts().find((d) => d.id === id);
+      const row = [...document.querySelectorAll("#debtList .debt-item")]
+        .find((r) => r.textContent.includes("UI AsOf Dated"));
+      return { balance: debt.balance, asOf: debt.balanceAsOf, listed: !!row && row.textContent.includes(" as of ") };
+    }, datedId);
+    check("editing shows the saved balance date",
+      onEdit.value === asOfDays.earlier, JSON.stringify(onEdit));
+    check("typing a new balance re-dates it today, typing the old one back restores it",
+      afterChange.value === asOfDays.today && afterRevert.value === asOfDays.earlier,
+      JSON.stringify({ afterChange, afterRevert }));
+    check("a date the user set is kept when the balance changes",
+      afterUserDate.value === asOfDays.chosen && datedStored.balance === 360 &&
+        datedStored.asOf === asOfDays.chosen && datedStored.listed,
+      JSON.stringify({ afterUserDate, datedStored }));
+
+    const legacyShown = await page.evaluate(async () => {
+      const store = window.app.store;
+      const id = store.addDebt({ name: "UI AsOf Legacy", balance: 300, minPayment: 0,
+        recurrence: "monthly", dueStartDate: Utils.formatDateString(new Date()), interestRate: 0 });
+      window.app.debtSnowball.editDebt(id);
+      await new Promise((r) => setTimeout(r, 100));
+      const shown = document.getElementById("debtBalanceAsOf").value;
+      window.app.debtSnowball.hideDebtForm();
+      store.getDebts().filter((d) => d.name.startsWith("UI AsOf")).forEach((d) => {
+        if (d.minRecurringId) store.deleteRecurringTransaction(d.minRecurringId);
+        store.deleteDebt(d.id);
+      });
+      window.app.recurringManager.invalidateCache();
+      window.app.debtSnowball.refresh();
+      return shown;
+    });
+    check("a debt saved before the field shows no balance date", legacyShown === "",
+      JSON.stringify(legacyShown));
+
     // ---- Search round trip ------------------------------------------------
     await page.evaluate(() => {
       window.app.debtSnowball.hideView();

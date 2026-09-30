@@ -327,9 +327,22 @@ Object.assign(TransactionStore.prototype, {
 
       if (storedDebts) {
         const parsedDebts = this._storedArray(JSON.parse(storedDebts), "debts") || [];
+        const loadStamp = new Date().toISOString();
         this.debts = parsedDebts
           .filter((debt) => debt && typeof debt === "object" && !Array.isArray(debt))
-          .map((debt) => this._normalizeDebt(debt));
+          .map((debt) => {
+            const stamping = this._debtNeedsInterestStamp(debt);
+            const normalized = this._normalizeDebt(debt);
+            if (stamping) {
+              // A debt saved before balanceAsOf: pin the day its interest
+              // is accrued from (see _normalizeDebtBalanceBasis). Persisted
+              // now, and dated, so the next sync carries the stamp to the
+              // other devices instead of each one stamping its own later day.
+              normalized._lastModified = loadStamp;
+              this._needsMigrationSave = true;
+            }
+            return normalized;
+          });
       }
 
       if (storedCashInfusions) {
@@ -761,8 +774,18 @@ Object.assign(TransactionStore.prototype, {
         (this._storedArray(value, label) || []).filter(
           (item) => item && typeof item === "object" && !Array.isArray(item)
         );
+      // A debt with no balanceAsOf keeps the interestFrom this device already
+      // stamped (the earlier of the two): a replace-import of a cloud copy
+      // that was never stamped must not move it to a later day.
+      const debtsBefore = new Map();
+      (Array.isArray(this.debts) ? this.debts : []).forEach((debt) => {
+        if (debt && typeof debt.id === "string") debtsBefore.set(debt.id, debt);
+      });
       this.debts = importedList(data.debts, "imported debts").map((debt) =>
-        this._normalizeDebt(debt)
+        this._normalizeDebt(
+          debt,
+          typeof debt.id === "string" ? debtsBefore.get(debt.id) : null
+        )
       );
       this.cashInfusions = importedList(
         data.cashInfusions, "imported cashInfusions"
