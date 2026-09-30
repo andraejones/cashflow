@@ -11,8 +11,8 @@ CashFlow Calendar is an offline-first, single-page personal finance application 
 **No build process required.** Open `index.html` directly in a browser or serve via any static server.
 
 **Tests:** `npm test` (or run the two scripts directly with Node) — it must pass before every commit:
-- `node scripts/verify-logic.js` — 140 numbered integration tests over vm-loaded sources
-  (numbered up to TEST 146; the numbering has gaps where tests were merged or
+- `node scripts/verify-logic.js` — 141 numbered integration tests over vm-loaded sources
+  (numbered up to TEST 147; the numbering has gaps where tests were merged or
   removed along with the feature they covered).
   Seven of them are SWEEPS rather than scenarios, and they are the ones worth
   extending when something new is added:
@@ -379,7 +379,11 @@ copy of one, or a snowball payoff is expected. Statement reconcile
 (`BankReconcileUI._stampBankStatuses`, called from `_run`) stamps every exact
 match in the open window with the bank's side, and every in-window entry the
 statement doesn't match at all "expected" (Not in bank), writing only when
-something actually changes; a stamp that wrote re-runs the report once. Its
+something actually changes; a stamp that wrote re-runs the report once. The
+re-run files a stamped entry the statement lacks under `appOnlyExpected`, and
+that list (in-window only) counts toward the report's "needs attention", so
+the "Everything reconciles" banner never shows while an entry is missing from
+the bank (TEST 147). Its
 exact matching ranks an entry on/before the latest anchor LAST for a line
 posted after it: that entry was absorbed by the anchor, so it is only a
 fallback when nothing after the anchor fits (TEST 136). The
@@ -581,7 +585,7 @@ local_last_sync, _backup_before_merge, calendar_view_mode
 
 - `styles.css` - CSS variables for theming (primary, accent, error colors)
 - `README.md` - Project documentation and feature overview
-- `scripts/verify-logic.js` - Standalone logic verification utility (140 tests)
+- `scripts/verify-logic.js` - Standalone logic verification utility (141 tests)
 - `scripts/verify-walk-parity.js` - Randomized balance-walk parity harness + source guard
 - `scripts/verify-ui.js` - Optional headless-Chromium UI harness (`npm run test:ui`)
 - `scripts/verify-sync.js` - Optional two-device cloud-sync harness (`npm run test:sync`)

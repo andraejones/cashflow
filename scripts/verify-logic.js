@@ -13457,6 +13457,81 @@ console.log("TEST 146: The Auto-Settle Sweep Leaves A Bank-Stamped Row Alone");
   }
 }
 
+console.log("TEST 147: An Entry Missing From The Bank Blocks The All-Clear");
+{
+  // The stamp marks every in-window entry the statement lacks Not in bank,
+  // which unsettles it, and the re-run then files it under appOnlyExpected
+  // (TEST 125 keeps that filing). needsAttention never counted that list, so
+  // an accidental duplicate that used to "need attention" produced
+  // "Everything reconciles" while the app sat $25 below the bank. The real
+  // _renderReport is driven here against a stand-in container, so the count
+  // and the banner are read exactly as the user sees them.
+  const assert = require("assert");
+  const RealDate = Date;
+  const FIXED = new RealDate(2026, 8, 29, 12, 0, 0);
+  class FrozenDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(FIXED.getTime()); else super(...a); }
+    static now() { return FIXED.getTime(); }
+  }
+  global.Date = FrozenDate;
+  const prevGetById = global.document.getElementById;
+  const stores = [];
+  try {
+    const container = { innerHTML: "", querySelectorAll: () => [] };
+    global.document.getElementById = (id) =>
+      id === "bankReconcileReport" ? container : prevGetById(id);
+    const bank = (date, signed, description, pending = false) =>
+      ({ date, postedDate: date, signed, description, pending, matched: false });
+    const reconcile = (entries, rows) => {
+      localStorage.clear();
+      const s = new TransactionStore();
+      s.resetData();
+      stores.push(s);
+      const rm = new RecurringTransactionManager(s);
+      s.addTransaction("2026-09-25", { amount: 500, type: "balance", description: "Ending Balance" });
+      entries.forEach(([d, t]) => s.addTransaction(d, t));
+      const br = new BankReconcileUI(s, rm, () => {}, () => {});
+      container.innerHTML = "";
+      br._run(rows);
+      const html = container.innerHTML;
+      const m = html.match(/(\d+) needs? attention/);
+      return { br, html, count: m ? Number(m[1]) : null, allClear: html.includes("bank-reconcile-allclear") };
+    };
+    const walmart = ["2026-09-26", { amount: 25, type: "expense", description: "Walmart", settled: true }];
+    const coffee = ["2026-09-27", { amount: 10, type: "expense", description: "Coffee", settled: true }];
+    const rows = [bank("2026-09-26", -25, "WAL-MART #1"), bank("2026-09-27", -10, "COFFEE")];
+
+    // Walmart entered twice; the statement has one. The spare is stamped Not
+    // in bank and filed under appOnlyExpected — and it needs attention.
+    const dup = reconcile([walmart, walmart, coffee], rows);
+    assert.strictEqual(dup.br.result.appOnlyExpected.length, 1, "the duplicate is filed as Not in bank");
+    assert.strictEqual(dup.br.result.appOnlyUnmatched.length, 0);
+    assert.strictEqual(dup.count, 1, `the duplicate needs attention (report said ${dup.count})`);
+    assert.ok(!dup.allClear, "no all-clear banner while an entry is missing from the bank");
+
+    // An unsettled entry the bank has no line for at all counts the same way.
+    const gift = reconcile([walmart, coffee,
+      ["2026-09-27", { amount: 40, type: "expense", description: "Gift", settled: false }]], rows);
+    assert.strictEqual(gift.count, 1);
+    assert.ok(!gift.allClear);
+
+    // Everything matched, a hold matching an unsettled entry (appPendingAtBank)
+    // and an entry after the statement's last line do not count: all clear.
+    const clean = reconcile([walmart, coffee,
+      ["2026-09-27", { amount: 7, type: "expense", description: "Parking", settled: false }],
+      ["2026-09-29", { amount: 12, type: "expense", description: "Lunch", settled: true }]],
+      [...rows, bank("2026-09-27", -7, "PARKING", true)]);
+    assert.strictEqual(clean.br.result.appPendingAtBank.length, 1);
+    assert.strictEqual(clean.count, 0, `a clean statement needs nothing (report said ${clean.count})`);
+    assert.ok(clean.allClear, "the all-clear banner still shows when everything reconciles");
+    console.log("✅ Not-in-bank entries count toward needs attention; a clean statement still reads all clear");
+  } finally {
+    global.Date = RealDate;
+    global.document.getElementById = prevGetById;
+    stores.forEach((st) => st.cancelPendingSave());
+  }
+}
+
 // Run the async network tests sequentially (shared global.fetch mock): TEST 32
 // first, then TEST 30, which prints the final banner.
 async function runUnreadableGistTest() {

@@ -1307,10 +1307,18 @@ class BankReconcileUI {
     const container = document.getElementById("bankReconcileReport");
     if (!container || !this.result) return;
     const r = this.result;
+    // appOnlyExpected counts too. It holds every in-window entry the
+    // statement has no line for (the list is window-filtered above), and
+    // after the stamp that includes a settled entry reconcile just marked Not
+    // in bank. Leaving it out made a duplicate or never-happened entry read
+    // "Everything reconciles" while the app sat that far below the bank
+    // (TEST 147). The section keeps its own heading; only the count and the
+    // banner follow it.
     const needsAttention =
       r.missingFromApp.length +
       r.reviewPairs.length +
       r.appOnlyUnmatched.length +
+      r.appOnlyExpected.length +
       r.dateDrifted.length;
 
     let html = `
