@@ -13646,6 +13646,147 @@ console.log("TEST 148: A Hold Pending Before The Ending Balance Stays Out Of Ava
   }
 }
 
+console.log("TEST 149: Semi-Monthly Days That Share A February Date Are Refused");
+{
+  // "The 28th and Last day" lands both halves on Feb 28 in a 28-day
+  // February: they share an occurrence key, one is dropped, and
+  // countOccurrencesBefore still counts two. Both forms that let the user pick
+  // the days now refuse such a pair (and two equal days, the same collapse in
+  // every month). A pair already stored — imported, or saved before the rule —
+  // is left alone, and editing a debt refuses it only once the days change.
+  const assert = require("assert");
+  const RealDate = Date;
+  const FIXED = new RealDate(2026, 8, 29, 12, 0, 0);
+  class FrozenDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(FIXED.getTime()); else super(...a); }
+    static now() { return FIXED.getTime(); }
+  }
+  global.Date = FrozenDate;
+  const prevFields = global.__domFields;
+  const realNotify = Utils.showNotification;
+  const errors = [];
+  Utils.showNotification = (message, type) => { if (type === "error") errors.push(message); };
+  const stores = [];
+  try {
+    const err = (days, last) => RecurringTransactionManager.semiMonthlyDaysError(
+      { recurrence: "semi-monthly", semiMonthlyDays: days, semiMonthlyLastDay: last });
+    assert.ok(err([28, 31], true), "28th + Last day");
+    assert.ok(err([28, 31], false), "a stored 31 is Last day too");
+    assert.ok(err([15, 15], false) && err([28, 28], false), "equal days");
+    assert.ok(/Last day/.test(err([28, 31], true)), "the message names the collision");
+    assert.strictEqual(err([27, 31], true), null);
+    assert.strictEqual(err([1, 15], false), null);
+    assert.strictEqual(err([20, 5], false), null, "a reversed pair is fine");
+    assert.strictEqual(RecurringTransactionManager.semiMonthlyDaysError(
+      { recurrence: "monthly", semiMonthlyDays: [28, 31], semiMonthlyLastDay: true }), null);
+    // The rule is exactly "both halves land on one date in Feb 2027".
+    for (let a = 1; a <= 28; a++) {
+      for (const b of [...Array.from({ length: 28 }, (_, i) => i + 1), "last"]) {
+        localStorage.clear();
+        const s = new TransactionStore();
+        s.resetData();
+        const rm = new RecurringTransactionManager(s);
+        const last = b === "last";
+        const rt = { id: "S", startDate: "2027-01-01", amount: 1, type: "income", description: "x",
+          recurrence: "semi-monthly", semiMonthlyDays: [a, last ? 31 : b], semiMonthlyLastDay: last };
+        s.addRecurringTransaction(rt);
+        rm.applyRecurringTransactions(2027, 1);
+        let count = 0;
+        Object.keys(s.getTransactions()).forEach((d) => {
+          if (d.startsWith("2027-02")) count += s.getTransactions()[d].filter((t) => t.recurringId === "S").length;
+        });
+        assert.strictEqual(!!err(rt.semiMonthlyDays, last), count < 2,
+          `[${a}, ${b}]: refused iff Feb 2027 pays once (paid ${count})`);
+        s.cancelPendingSave();
+      }
+    }
+
+    // The add-transaction form.
+    const addForm = (first, second) => {
+      localStorage.clear();
+      const s = new TransactionStore();
+      s.resetData();
+      stores.push(s);
+      const ui = Object.create(TransactionUI.prototype);
+      ui.store = s;
+      ui.recurringManager = new RecurringTransactionManager(s);
+      global.__domFields = {
+        transactionDate: "2026-10-01", transactionAmount: "500", transactionType: "income",
+        transactionDescription: "Paycheck", transactionRecurrence: "semi-monthly",
+        advancedRecurrenceOptions: "", semiMonthlyFirstDay: first, semiMonthlySecondDay: second,
+      };
+      errors.length = 0;
+      // Past validation the handler resets form fields this stub does not
+      // have and logs the TypeError it catches; the series is saved by then.
+      const realConsoleError = console.error;
+      console.error = () => {};
+      let saved;
+      try { saved = ui.addTransaction(); } finally { console.error = realConsoleError; }
+      const refusal = errors.find((m) => /same date/.test(m)) || null;
+      return { saved, defs: s.getRecurringTransactions().length, error: refusal };
+    };
+    let r = addForm("28", "last");
+    assert.strictEqual(r.defs, 0, "the add form refuses 28th + Last day");
+    assert.strictEqual(r.saved, false);
+    assert.ok(r.error && /Last day/.test(r.error), `a clear message (got ${r.error})`);
+    r = addForm("12", "12");
+    assert.strictEqual(r.defs, 0, "the add form refuses two equal days");
+    r = addForm("27", "last");
+    assert.strictEqual(r.defs, 1, "27th + Last day is saved");
+    assert.strictEqual(r.error, null);
+
+    // The debt form: new, edited, and a legacy pair left alone.
+    const debtForm = (s, editingDebtId, first, second, balance = "900") => {
+      const ui = Object.create(DebtSnowballUI.prototype);
+      ui.store = s;
+      ui.recurringManager = new RecurringTransactionManager(s);
+      ui.editingDebtId = editingDebtId;
+      ui.convertingFromRecurringId = null;
+      ui.debtNameInput = { value: "Card" };
+      ui.debtBalanceInput = { value: balance };
+      ui.debtMinPaymentInput = { value: "50" };
+      ui.debtRecurrenceInput = { value: "semi-monthly" };
+      ui.debtStartDateInput = { value: "2026-10-01" };
+      ui.debtDueDayInput = { value: "1" };
+      ui.debtDueDayPatternInput = { value: "" };
+      ui.debtInterestInput = { value: "0" };
+      ui.hideDebtForm = () => {};
+      ui.refresh = () => {};
+      ui.onUpdate = () => {};
+      global.__domFields = { debtSemiMonthlyFirstDay: first, debtSemiMonthlySecondDay: second };
+      errors.length = 0;
+      ui.saveDebt();
+      return errors[0] || null;
+    };
+    localStorage.clear();
+    const ds = new TransactionStore();
+    ds.resetData();
+    stores.push(ds);
+    assert.ok(debtForm(ds, null, "28", "last"), "a new debt on 28th + Last day is refused");
+    assert.strictEqual(ds.getDebts().length, 0);
+    assert.strictEqual(debtForm(ds, null, "15", "last"), null);
+    assert.strictEqual(ds.getDebts().length, 1);
+    const debtId = ds.getDebts()[0].id;
+    assert.ok(debtForm(ds, debtId, "28", "last"), "editing the days onto 28th + Last day is refused");
+    assert.deepStrictEqual(ds.getDebts()[0].semiMonthlyDays, [15, 31]);
+    // A pair stored before the rule (here: imported) is left alone, and an
+    // unrelated edit of that debt still saves.
+    const exported = JSON.parse(JSON.stringify(ds.exportData()));
+    exported.debts[0].semiMonthlyDays = [28, 31];
+    exported.debts[0].semiMonthlyLastDay = true;
+    ds.importData(exported);
+    assert.deepStrictEqual(ds.getDebts()[0].semiMonthlyDays, [28, 31], "an imported pair is kept");
+    assert.strictEqual(debtForm(ds, debtId, "28", "last", "850"), null, "an unrelated edit is not blocked");
+    assert.strictEqual(ds.getDebts()[0].balance, 850);
+    console.log("✅ Both forms refuse a semi-monthly pair that shares a February date; stored pairs are left alone");
+  } finally {
+    global.Date = RealDate;
+    global.__domFields = prevFields;
+    Utils.showNotification = realNotify;
+    stores.forEach((st) => st.cancelPendingSave());
+  }
+}
+
 // Run the async network tests sequentially (shared global.fetch mock): TEST 32
 // first, then TEST 30, which prints the final banner.
 async function runUnreadableGistTest() {

@@ -11,8 +11,8 @@ CashFlow Calendar is an offline-first, single-page personal finance application 
 **No build process required.** Open `index.html` directly in a browser or serve via any static server.
 
 **Tests:** `npm test` (or run the two scripts directly with Node) — it must pass before every commit:
-- `node scripts/verify-logic.js` — 142 numbered integration tests over vm-loaded sources
-  (numbered up to TEST 148; the numbering has gaps where tests were merged or
+- `node scripts/verify-logic.js` — 143 numbered integration tests over vm-loaded sources
+  (numbered up to TEST 149; the numbering has gaps where tests were merged or
   removed along with the feature they covered).
   Seven of them are SWEEPS rather than scenarios, and they are the ones worth
   extending when something new is added:
@@ -190,6 +190,19 @@ writer (TEST 116). A "this and future" split on a month-end-CLAMPED occurrence
 edits that occurrence in place and starts the new series at the next one
 (never clamped: every month after a short month has 31 days); anchoring on the
 clamped day turned a bill due the 29th into one due the 28th (TEST 115).
+
+A semi-monthly pair must land on two DIFFERENT dates in every month, and the
+tightest is a 28-day February, where every day clamps to the 28th and "Last
+day" is the 28th. "The 28th and Last day" (or two equal days) puts both halves
+on one date, where they share an occurrence key: one payment is dropped while
+`countOccurrencesBefore` still counts two. `RecurringTransactionManager
+.semiMonthlyDaysError(rt)` is the one rule, and the two forms that let the user
+pick the days refuse such a pair: the add-transaction form, and the debt form
+(for an edit, only once the days themselves change, so an unrelated edit of a
+debt saved before the rule is never blocked). No other path writes NEW days —
+import, cloud merge, a series split, the convert-to-debt pre-fill and the debt
+series rebuild all carry days already stored — so a stored pair is left alone
+and keeps paying once on Feb 28, as it always has (TEST 149).
 
 A "this and future" split moves every occurrence dated on/after its cutoff to
 the new series id, so everything the OLD id recorded about those occurrences
@@ -597,7 +610,7 @@ local_last_sync, _backup_before_merge, calendar_view_mode
 
 - `styles.css` - CSS variables for theming (primary, accent, error colors)
 - `README.md` - Project documentation and feature overview
-- `scripts/verify-logic.js` - Standalone logic verification utility (142 tests)
+- `scripts/verify-logic.js` - Standalone logic verification utility (143 tests)
 - `scripts/verify-walk-parity.js` - Randomized balance-walk parity harness + source guard
 - `scripts/verify-ui.js` - Optional headless-Chromium UI harness (`npm run test:ui`)
 - `scripts/verify-sync.js` - Optional two-device cloud-sync harness (`npm run test:sync`)

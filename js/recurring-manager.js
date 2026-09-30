@@ -1194,6 +1194,34 @@ class RecurringTransactionManager {
     return { first, second, isLastDay };
   }
 
+  // Why a semi-monthly pair can't be saved, or null if it can. The two halves
+  // must land on different dates in EVERY month, and the tightest month is a
+  // 28-day February: each day clamps to the 28th, and "Last day" IS the 28th.
+  // A first day of the 28th or later with "Last day" (or two equal days) puts
+  // both halves on one date, where they share an occurrence key and one of
+  // the two payments is silently dropped — while countOccurrencesBefore still
+  // counts two, so a cap or a split disagrees with the calendar.
+  //
+  // The two forms that let the user pick the days (add transaction, debt)
+  // refuse such a pair. Nothing else writes new days: an import, a cloud
+  // merge, a series split, a convert-to-debt pre-fill and the debt's own
+  // series rebuild all carry days already stored, so a pair saved before this
+  // rule (or imported) is left alone and keeps expanding the way it always
+  // has — one payment on Feb 28. Editing a debt refuses it only once the days
+  // themselves change.
+  static semiMonthlyDaysError(rt) {
+    if (!rt || rt.recurrence !== "semi-monthly") return null;
+    const { first, second, isLastDay } =
+      RecurringTransactionManager.prototype._semiMonthlyDays.call(null, rt);
+    if (!Number.isFinite(first) || !Number.isFinite(second)) return null;
+    const inShortFeb = (day, last) => (last ? 28 : Math.min(day, 28));
+    if (inShortFeb(first, false) !== inShortFeb(second, isLastDay)) return null;
+    if (isLastDay) {
+      return 'A first day of the 28th or later falls on the same date as "Last day" in February, so one of the two payments would be lost. Pick a first day before the 28th, or a second day other than "Last day".';
+    }
+    return "Pick two different days of the month: both payments would fall on the same date.";
+  }
+
   applySemiMonthlyRecurrence(
     rt,
     startDate,

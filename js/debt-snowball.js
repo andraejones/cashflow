@@ -828,6 +828,30 @@ class DebtSnowballUI {
       Utils.showNotification("Please enter a valid minimum payment", "error");
       return;
     }
+    // A semi-monthly pair that shares a date in a 28-day February pays once
+    // there (RecurringTransactionManager.semiMonthlyDaysError). A debt saved
+    // before the rule keeps its pair until the days themselves are edited, so
+    // an unrelated edit (a new balance) is never blocked by it.
+    const semiMonthlyError = RecurringTransactionManager.semiMonthlyDaysError({
+      recurrence,
+      ...advancedOptions,
+    });
+    if (semiMonthlyError) {
+      const stored = this.editingDebtId
+        ? this.store.getDebts().find((d) => d.id === this.editingDebtId)
+        : null;
+      const unchanged =
+        !!stored &&
+        stored.recurrence === "semi-monthly" &&
+        Array.isArray(stored.semiMonthlyDays) &&
+        stored.semiMonthlyDays.map(Number).join() ===
+          advancedOptions.semiMonthlyDays.map(Number).join() &&
+        (stored.semiMonthlyLastDay === true) === (advancedOptions.semiMonthlyLastDay === true);
+      if (!unchanged) {
+        Utils.showNotification(semiMonthlyError, "error");
+        return;
+      }
+    }
     if (
       payoffPriority !== null &&
       !(Number.isInteger(payoffPriority) && payoffPriority >= 1 && payoffPriority <= 99)

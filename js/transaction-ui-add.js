@@ -68,6 +68,17 @@ Object.assign(TransactionUI.prototype, {
       // interval below 1 makes applyCustomRecurrence skip the series entirely,
       // so the entry would vanish from the calendar while its definition
       // lingers invisibly.
+      // Two semi-monthly days that share a date in a 28-day February pay once
+      // there (see RecurringTransactionManager.semiMonthlyDaysError).
+      if (recurrence === "semi-monthly") {
+        const pair = { recurrence };
+        this.addAdvancedRecurringOptions(pair);
+        const semiMonthlyError = RecurringTransactionManager.semiMonthlyDaysError(pair);
+        if (semiMonthlyError) {
+          Utils.showNotification(semiMonthlyError, "error");
+          return false;
+        }
+      }
       if (recurrence === "custom") {
         const intervalEl = document.getElementById("customIntervalValue");
         if (intervalEl) {
