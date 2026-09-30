@@ -11,10 +11,10 @@ CashFlow Calendar is an offline-first, single-page personal finance application 
 **No build process required.** Open `index.html` directly in a browser or serve via any static server.
 
 **Tests:** `npm test` (or run the two scripts directly with Node) — it must pass before every commit:
-- `node scripts/verify-logic.js` — 119 numbered integration tests over vm-loaded sources
-  (numbered up to TEST 125; the numbering has gaps where tests were merged or
+- `node scripts/verify-logic.js` — 121 numbered integration tests over vm-loaded sources
+  (numbered up to TEST 127; the numbering has gaps where tests were merged or
   removed along with the feature they covered).
-  Four of them are SWEEPS rather than scenarios, and they are the ones worth
+  Six of them are SWEEPS rather than scenarios, and they are the ones worth
   extending when something new is added:
     - TEST 93 puts a wrong-typed value in every field the app reads, one field
       at a time, and walks every headless surface. Nothing coerces most stored
@@ -34,6 +34,11 @@ CashFlow Calendar is an offline-first, single-page personal finance application 
       comparison is always true — this blanked the calendar once) and
       `a < b ? -1 : 1` (never returns 0, so equal keys each claim to be greater
       and the engine may order them either way).
+    - TEST 126 pins the recurrence window (see DebtSnowballUI, rule (2)): for
+      every recurrence shape × business-day adjustment it ends a series on
+      each occurrence's landing date and deletes "all future" from it, and
+      asserts expansion, cleanup and the delete agree on what is left. Extend
+      it when a recurrence shape or business-day rule is added.
   Each was validated by reverting the fix it guards and watching it fail; keep
   doing that, or a sweep that cannot fail pins nothing.
   A test that builds a store must `cancelPendingSave()` on every store it
@@ -338,10 +343,23 @@ sweep **again** after that tightening, or a due-date edit leaves phantom
 minimums past the payoff for a whole render (TEST 82). (2) The recurrence window
 is judged on two DIFFERENT dates, and `_outsideRecurrenceWindow` owns that
 asymmetry: `startDate` against the SCHEDULED occurrence (`originalDate`), and
-`endDate` against the LANDING date — because that is what the expansion compares
-and what `computeMinimumPaymentEndDate` writes. Using one date for both made
-expansion and cleanup fight forever over a business-day-adjusted final payment
-(TEST 83).
+`endDate` against the LANDING date. Using one date for both made expansion and
+cleanup fight forever over a business-day-adjusted final payment (TEST 83).
+The landing rule holds on every side. **Every `endDate` writer produces a
+landing date**: the payoff sync (`getMinimumPaymentPayoffDate` — the payoff
+month's last landing occurrence, or the payoff month's LAST DAY when none lands
+there, never next month's occurrence, which became a phantom full minimum after
+the payoff), the already-paid bound (`getLatestPaidMinimumOccurrence` returns
+the landing date; the scheduled date put a forward-adjusted clearing payment
+outside its own window and flipped the debt paid/unpaid every render), and
+"delete all future" / the split (the day before the occurrence's landing date).
+**And every expansion gate honours it**: the loops and month gates step through
+SCHEDULED dates, so each one that compares a scheduled date or a month start to
+`endDate` allows `RecurringTransactionManager.END_GATE_SLACK_DAYS` (7) of slack
+via `_endGate`, and only the post-adjustment `<= endDate` check on the landing
+date decides. Without the slack, a final payment adjusted BACKWARD onto the end
+date (due Sun Nov 1, "previous" → Fri Oct 30) was never generated. TESTs 126
+(sweep) and 127.
 
 The projection must pay exactly the debt payments the calendar pays.
 `getDayFlow` excludes only the rows the sim schedules itself — recurring
@@ -438,7 +456,7 @@ local_last_sync, _backup_before_merge, calendar_view_mode
 
 - `styles.css` - CSS variables for theming (primary, accent, error colors)
 - `README.md` - Project documentation and feature overview
-- `scripts/verify-logic.js` - Standalone logic verification utility (119 tests)
+- `scripts/verify-logic.js` - Standalone logic verification utility (121 tests)
 - `scripts/verify-walk-parity.js` - Randomized balance-walk parity harness + source guard
 - `scripts/verify-ui.js` - Optional headless-Chromium UI harness (`npm run test:ui`)
 - `scripts/verify-sync.js` - Optional two-device cloud-sync harness (`npm run test:sync`)

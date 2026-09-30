@@ -174,13 +174,22 @@ Object.assign(DebtSnowballUI.prototype, {
     return recurringTransaction;
   },
 
-  // Resolve the actual (business-day-adjusted) date of a debt's minimum payment
-  // in a given month, honoring its recurrence type. Used to anchor the recurring
-  // endDate to the real payment date so an adjusted payment (e.g. a due date
-  // shifted onto the next business day) is still retained, and the next month's
-  // payment is excluded. Returns the latest in-month occurrence; if the payment
-  // was adjusted across the month boundary, returns the spilled occurrence in
-  // the following month. Null if no occurrence can be resolved.
+  // Resolve the LANDING (business-day-adjusted) date of a debt's last minimum
+  // payment in its payoff month, the date the recurring endDate is set to.
+  // endDate is judged on the landing date everywhere (the expansion's final
+  // check, _outsideRecurrenceWindow, and the scheduled-date gates' slack in
+  // RecurringTransactionManager.END_GATE_SLACK_DAYS), so the payment that
+  // clears the debt is kept however it was adjusted, and the next one is not.
+  //
+  // Payoffs are recorded in the month the clearing payment LANDS in, so a
+  // payment adjusted forward across the month end is already that later
+  // month's in-month occurrence. When no minimum lands in the payoff month at
+  // all (the debt clears from an infusion or a lump sum before any minimum
+  // there), the bound is the payoff month's LAST day, never next month's
+  // occurrence: that occurrence would sit inside the window after the debt is
+  // paid, and the paid-off prune and re-expansion then fight over it, leaving
+  // a phantom full-amount minimum after the payoff. Null only if the month
+  // cannot be resolved.
   getMinimumPaymentPayoffDate(debt, payoffYear, payoffMonth) {
     const template = this.buildDebtRecurringTransaction(debt);
     template.id = template.id || debt.minRecurringId || debt.id || Utils.generateUniqueId();
@@ -196,32 +205,22 @@ Object.assign(DebtSnowballUI.prototype, {
     if (inMonth.length) {
       return inMonth[inMonth.length - 1].dateString;
     }
-    // No occurrence landed in the payoff month — a business-day adjustment may
-    // have pushed it into the next month. The spilled payment is that month's
-    // earliest occurrence.
-    let nextYear = payoffYear;
-    let nextMonth = payoffMonth + 1;
-    if (nextMonth > 11) {
-      nextMonth = 0;
-      nextYear += 1;
+    const lastDay = new Date(payoffYear, payoffMonth + 1, 0, 12, 0, 0);
+    if (isNaN(lastDay.getTime())) {
+      return null;
     }
-    const inNext = this.getRecurringOccurrencesForMonth(
-      template,
-      nextYear,
-      nextMonth
-    );
-    if (inNext.length) {
-      return inNext[0].dateString;
-    }
-    return null;
+    return Utils.formatDateString(lastDay);
   },
 
   // Latest real (amount > 0) materialized minimum-payment occurrence for this
   // debt that has already happened (landed before the projection start, i.e.
-  // on/before today). Compared and returned on the scheduled occurrence date
-  // (originalDate when a business-day adjustment moved the landing date) so the
-  // result stays consistent with the recurrence-window checks in
-  // cleanupOrphanedDebtMinimums.
+  // on/before today). Compared and returned on the LANDING date, because that
+  // is what it becomes: computeMinimumPaymentEndDate writes it as the series'
+  // endDate, and endDate is judged on the landing date by the expansion and by
+  // _outsideRecurrenceWindow alike. Returning the scheduled date put a payment
+  // adjusted FORWARD (due Sat the 5th, landed Mon the 7th) outside its own
+  // window, so cleanup deleted the payment that cleared the debt and the debt
+  // flipped between paid and unpaid on every render.
   getLatestPaidMinimumOccurrence(debt) {
     if (!debt || !debt.id) return null;
     const now = new Date();
@@ -235,9 +234,8 @@ Object.assign(DebtSnowballUI.prototype, {
       transactions[dateKey].forEach((t) => {
         if (t.debtRole !== "minimum" || t.debtId !== debt.id) return;
         if (!(Number(t.amount) > 0)) return;
-        const occurrence = t.originalDate || dateKey;
-        if (!latest || occurrence > latest) {
-          latest = occurrence;
+        if (!latest || dateKey > latest) {
+          latest = dateKey;
         }
       });
     });
@@ -247,7 +245,11 @@ Object.assign(DebtSnowballUI.prototype, {
   // Compute the date a debt's minimum-payment recurring should stop expanding.
   // The recurrence is ended at the debt's projected payoff so the minimum
   // payment never appears after the debt is paid off. Any user-set debt.endDate
-  // still applies and wins if it is earlier.
+  // still applies and wins if it is earlier. Every bound written here is a
+  // LANDING date (the payoff-month occurrence, the month end when none lands
+  // there, the last paid payment's landing date), the same basis as "delete
+  // all future" and the "this and future" split — see
+  // RecurringTransactionManager.END_GATE_SLACK_DAYS.
   computeMinimumPaymentEndDate(debt, payoff) {
     const userEnd = debt && debt.endDate ? debt.endDate : null;
     let payoffEnd = null;

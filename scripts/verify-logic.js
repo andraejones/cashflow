@@ -10870,6 +10870,291 @@ console.log("TEST 125: Bank Status Decides What Carries Forward");
   }
 }
 
+console.log("TEST 126: The Recurrence Window Is Judged On The Landing Date Everywhere");
+{
+  // SWEEP. An occurrence is inside [startDate, endDate] iff its SCHEDULED date
+  // is on/after startDate and its LANDING date is on/before endDate — the rule
+  // every endDate writer (debt payoff sync, "delete all future", the split)
+  // writes by, and the one _outsideRecurrenceWindow judges by. The expansion's
+  // loops and month gates stepped through SCHEDULED dates, so an occurrence
+  // adjusted BACKWARD onto/before endDate (due Sun Nov 1, "previous business
+  // day" → Fri Oct 30, endDate Oct 30) was never generated: a debt's final
+  // payment vanished from the calendar while the projection paid it, and the
+  // debt stayed owing forever. The gates now allow END_GATE_SLACK_DAYS and the
+  // landing check decides. Extend the shapes when a new recurrence shape or
+  // business-day rule is added.
+  const assert = require("assert");
+  const RealDate = Date;
+  const FIXED = new RealDate(2025, 11, 1, 12, 0, 0);
+  class FrozenDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(FIXED.getTime()); else super(...a); }
+    static now() { return FIXED.getTime(); }
+  }
+  global.Date = FrozenDate;
+  try {
+    const outsideWindow = DebtSnowballUI.prototype._outsideRecurrenceWindow;
+    const shapes = [];
+    for (const startDate of ["2026-01-31", "2026-01-15", "2026-02-01", "2026-08-01"]) {
+      for (const businessDayAdjustment of ["none", "previous", "next", "nearest"]) {
+        const b = { startDate, businessDayAdjustment };
+        shapes.push({ ...b, recurrence: "monthly", lastDayOfMonth: false });
+        shapes.push({ ...b, recurrence: "monthly", lastDayOfMonth: true });
+        shapes.push({ ...b, recurrence: "weekly" });
+        shapes.push({ ...b, recurrence: "bi-weekly" });
+        shapes.push({ ...b, recurrence: "quarterly" });
+        shapes.push({ ...b, recurrence: "semi-monthly", semiMonthlyDays: [1, 15] });
+        shapes.push({ ...b, recurrence: "semi-monthly", semiMonthlyDays: [15, 31], semiMonthlyLastDay: true });
+        shapes.push({ ...b, recurrence: "custom", customInterval: { value: 2, unit: "months" } });
+        shapes.push({ ...b, recurrence: "custom", customInterval: { value: 10, unit: "days" } });
+        shapes.push({ ...b, recurrence: "monthly", daySpecific: true, daySpecificData: "1-1" });
+        // First Saturday: on the 1st, "previous" lands it in the month BEFORE,
+        // which only the nth-weekday month gate can let through.
+        shapes.push({ ...b, recurrence: "monthly", daySpecific: true, daySpecificData: "1-6" });
+        shapes.push({ ...b, recurrence: "daily" });
+      }
+    }
+    const stores = [];
+    // Expands the month before the series starts .. `through` (month index
+    // from Jan 2026), in order, as paging forward would.
+    const expand = (rm, through) => {
+      rm.invalidateCache();
+      const start = rm.store.getRecurringTransactions()[0].startDate;
+      const from = (Number(start.slice(0, 4)) - 2026) * 12 + Number(start.slice(5, 7)) - 2;
+      for (let k = from; k <= through; k++) {
+        rm.applyRecurringTransactions(2026 + Math.floor(k / 12), ((k % 12) + 12) % 12);
+      }
+    };
+    const make = (extra, through = 13) => {
+      localStorage.clear();
+      const s = new TransactionStore();
+      stores.push(s);
+      s.resetData();
+      const rm = new RecurringTransactionManager(s);
+      s.addRecurringTransaction({ id: "S", amount: 1, type: "expense", description: "x", ...extra });
+      expand(rm, through);
+      return { s, rm };
+    };
+    const occurrences = (s, before) => {
+      const tx = s.getTransactions();
+      const out = [];
+      Object.keys(tx).sort().forEach((d) => {
+        if (before && d >= before) return;
+        tx[d].forEach((t) => {
+          if (t.recurringId === "S" && !s.isTransactionSkipped(d, "S")) out.push(d);
+        });
+      });
+      return out;
+    };
+    let cases = 0;
+    const failures = [];
+    for (const shape of shapes) {
+      const base = occurrences(make(shape).s);
+      const upTo = Math.min(8, base.filter((d) => d < "2027-01-01").length - 1);
+      for (let k = 1; k <= upTo; k++) {
+        cases++;
+        const label = `${JSON.stringify(shape)} k=${k} (${base[k]})`;
+        // A leak shows first as occurrence k+1, so expanding through the month
+        // after it is enough (and keeps the sweep fast).
+        const next = base[k + 1] || "2027-01-01";
+        const through = Math.min(13,
+          (Number(next.slice(0, 4)) - 2026) * 12 + Number(next.slice(5, 7)) - 1 + 1);
+        // endDate = landing(k) keeps exactly the occurrences landing on/before
+        // it (0..k, plus any that share k's landing day) …
+        const ended = make({ ...shape, endDate: base[k] }, through);
+        const kept = occurrences(ended.s);
+        if (kept.join() !== base.filter((d) => d <= base[k]).join()) {
+          failures.push(`${label} endDate=landing kept ${kept.join(",")}`);
+        }
+        // … and cleanup agrees with the expansion about every row it made.
+        const rt = ended.s.getRecurringTransactions()[0];
+        const tx = ended.s.getTransactions();
+        Object.keys(tx).forEach((d) => tx[d].forEach((t) => {
+          if (t.recurringId === "S" && outsideWindow.call(null, rt, t.originalDate || d, d) !== false) {
+            failures.push(`${label} cleanup would delete the expansion's ${d}`);
+          }
+        }));
+        // "Delete all future" at k leaves exactly the occurrences landing
+        // before k's day (0..k-1, less any that share k's landing day).
+        const del = make(shape, through);
+        const idx = del.s.getTransactions()[base[k]].findIndex((t) => t.recurringId === "S");
+        del.rm.deleteTransaction(base[k], idx, true);
+        expand(del.rm, through);
+        const left = occurrences(del.s, "2027-02-01");
+        if (left.join() !== base.filter((d) => d < base[k]).join()) {
+          failures.push(`${label} deleteFuture left ${left.join(",")}`);
+        }
+      }
+    }
+    stores.forEach((s) => s.cancelPendingSave());
+    assert.ok(cases > 1000, `sweep ran ${cases} cases`);
+    assert.strictEqual(failures.length, 0,
+      `${failures.length} window disagreements, e.g.\n  ${failures.slice(0, 5).join("\n  ")}`);
+    console.log(`✅ Expansion, cleanup and "delete all future" agree on the landing-date window (${cases} cases)`);
+  } finally {
+    global.Date = RealDate;
+  }
+}
+
+console.log("TEST 127: A Debt's Final Payment Neither Flickers Nor Outlives Its Payoff");
+{
+  // Three endDate writers disagreed with the landing-date rule TEST 126 pins:
+  //  (a) getLatestPaidMinimumOccurrence returned the SCHEDULED date, so the
+  //      forward-adjusted payment that cleared a debt (due Sat Sep 5, landed
+  //      Tue Sep 8) fell outside its own window; cleanup deleted it, the debt
+  //      read unpaid, the next render paid it again — flipping every render.
+  //  (b) the expansion gates dropped a final payment adjusted BACKWARD across
+  //      the month (due Sun Nov 1 → Fri Oct 30) although endDate was Oct 30.
+  //  (c) with no minimum landing in the payoff month, endDate became NEXT
+  //      month's occurrence, which the prune deleted and the expansion re-made
+  //      at full price: a phantom minimum after the payoff.
+  const assert = require("assert");
+  const RealDate = Date;
+  let FIXED = null;
+  class FrozenDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(FIXED.getTime()); else super(...a); }
+    static now() { return FIXED.getTime(); }
+  }
+  const stores = [];
+  const setup = (y, m0, d) => {
+    FIXED = new RealDate(y, m0, d, 12, 0, 0);
+    localStorage.clear();
+    const s = new TransactionStore();
+    stores.push(s);
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    const cs = new CalculationService(s, rm);
+    const ui = new DebtSnowballUI(s, rm, () => {}, cs);
+    return { s, rm, cs, ui };
+  };
+  const addDebt = (ctx, fields) => {
+    const id = ctx.s.addDebt({ recurrence: "monthly", interestRate: 0, dueLastDay: false, ...fields });
+    ctx.ui.ensureMinimumPaymentRecurring(ctx.s.getDebts().find((d) => d.id === id));
+    return id;
+  };
+  // The calendar render: expansion, snowball horizon, balances.
+  const render = (ctx, y, m0) => {
+    ctx.rm.applyRecurringTransactions(y, m0);
+    ctx.ui.ensureSnowballPaymentsForHorizon(y, m0);
+    ctx.cs.updateMonthlyBalances(new Date(y, m0, 1));
+  };
+  const balances = (ctx, from, to) => {
+    ctx.cs.invalidateCache();
+    const [y, m] = from.split("-").map(Number);
+    const seed = ctx.cs.calculateMonthlySummary(y, m - 1).startingBalance;
+    const out = {};
+    ctx.cs.walkDays(`${from.slice(0, 7)}-01`, to, {
+      seedBalance: seed,
+      ensureRecurringExpansion: true,
+      onDay: (day) => { if (day.dateString >= from) out[day.dateString] = day.balance; },
+    });
+    return out;
+  };
+  const paid = (ctx, debtId, after) => {
+    const tx = ctx.s.getTransactions();
+    const out = [];
+    Object.keys(tx).sort().forEach((d) => tx[d].forEach((t) => {
+      if (t.debtId !== debtId || !(Number(t.amount) > 0) || t.hidden === true) return;
+      if (t.recurringId && ctx.s.isTransactionSkipped(d, t.recurringId)) return;
+      if (after && d <= after) return;
+      out.push({ d, t });
+    }));
+    return out;
+  };
+  global.Date = FrozenDate;
+  try {
+    {
+      // (a) Paid by a forward-adjusted payment: identical on every render.
+      const ctx = setup(2026, 8, 29);
+      ctx.s.addTransaction("2026-09-01", { amount: 3000, type: "balance", description: "Ending Balance" });
+      ctx.s.setDebtSnowballSettings({ dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false });
+      const D = addDebt(ctx, { name: "Card", balance: 700, minPayment: 200, dueDay: 5,
+        dueStartDate: "2026-06-05", businessDayAdjustment: "next" });
+      const seen = [];
+      for (let r = 0; r < 4; r++) {
+        render(ctx, 2026, 8);
+        ctx.cs.invalidateCache();
+        const rows = paid(ctx, D).map(({ d }) => d);
+        seen.push({
+          endDate: ctx.s.getRecurringTransactions().find((rt) => rt.debtId === D).endDate,
+          today: ctx.cs.getRunningBalanceForDate("2026-09-29"),
+          remaining: ctx.ui.getDebtSummaries(new Date(2026, 8, 30))[0].remaining,
+          rows: rows.join(","),
+        });
+      }
+      seen.forEach((r, i) => assert.deepStrictEqual(r, seen[0], `(a) render ${i + 1} matches render 1`));
+      assert.strictEqual(seen[0].endDate, "2026-09-08", "(a) endDate is the clearing payment's landing date");
+      assert.ok(seen[0].rows.includes("2026-09-08"), "(a) the clearing payment stays on the calendar");
+      assert.ok(!seen[0].rows.includes("2026-10-05"), "(a) no payment after the debt is paid");
+      assert.strictEqual(seen[0].remaining, 0);
+      assert.strictEqual(seen[0].today, 2800);
+    }
+    {
+      // (b) The final payment adjusted backward across the month end.
+      const ctx = setup(2026, 8, 29);
+      ctx.s.addTransaction("2026-09-29", { amount: 3000, type: "balance", description: "Ending Balance" });
+      ctx.s.setDebtSnowballSettings({ dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false });
+      const D = addDebt(ctx, { name: "Loan", balance: 300, minPayment: 150, dueDay: 1,
+        dueStartDate: "2026-10-01", businessDayAdjustment: "previous" });
+      for (let r = 0; r < 3; r++) render(ctx, 2026, 8);
+      assert.strictEqual(ctx.s.getRecurringTransactions().find((rt) => rt.debtId === D).endDate, "2026-10-30");
+      const final = paid(ctx, D).find(({ d }) => d === "2026-10-30");
+      assert.ok(final, "(b) the Oct 30 final payment is on the calendar");
+      assert.strictEqual(final.t.originalDate, "2026-11-01");
+      assert.strictEqual(final.t.amount, 150);
+      assert.strictEqual(
+        ctx.ui.getHistoricalDebtSnapshot(new Date(2026, 10, 1)).remainingByDebtId[D], 0,
+        "(b) the snapshot sees the debt paid, as the projection does"
+      );
+      const w = balances(ctx, "2026-10-29", "2026-10-31");
+      assert.strictEqual(w["2026-10-29"] - w["2026-10-30"], 150, "(b) the calendar pays it on Oct 30");
+    }
+    // (c) Cleared in a month where no minimum lands: endDate = that month's end.
+    const phantom = (label, today, debtFields, infusion, payoffDay, endDate) => {
+      const ctx = setup(...today);
+      const todayStr = Utils.formatDateString(new Date(...today));
+      ctx.s.addTransaction(todayStr, { amount: 2000, type: "balance", description: "Ending Balance" });
+      ctx.s.setDebtSnowballSettings({ dailyFloor: 1e9, extraPaymentStartMonth: "", autoGenerate: false });
+      const D = addDebt(ctx, { name: "Card", ...debtFields });
+      addDebt(ctx, { name: "Other", balance: 9000, minPayment: 50, dueDay: 10, dueStartDate: "2026-09-10" });
+      ctx.s.addCashInfusion({ name: "Windfall", amount: infusion.amount, date: infusion.date, targetDebtId: D });
+      for (let r = 0; r < 3; r++) render(ctx, today[0], today[1]);
+      const p = ctx.ui.calculateSnowballProjection(today[0], today[1], false).payoffByDebtId[D];
+      assert.strictEqual(Utils.formatDateString(new Date(p.year, p.month, p.day)), payoffDay, `${label} payoff day`);
+      assert.strictEqual(ctx.s.getRecurringTransactions().find((rt) => rt.debtId === D).endDate, endDate,
+        `${label} endDate is the payoff month's last day`);
+      const after = paid(ctx, D, payoffDay);
+      assert.deepStrictEqual(after.map(({ d }) => d), [], `${label} no minimum after the payoff`);
+    };
+    phantom("(c1) first due next month:", [2026, 8, 20],
+      { balance: 400, minPayment: 60, dueDay: 5, dueStartDate: "2026-10-05" },
+      { amount: 400, date: "2026-09-25" }, "2026-09-25", "2026-09-30");
+    phantom("(c2) payoff month's due date pushed into the next month:", [2026, 11, 20],
+      { balance: 400, minPayment: 60, dueDay: 30, dueLastDay: true, dueStartDate: "2026-09-30",
+        businessDayAdjustment: "next" },
+      { amount: 1000, date: "2027-01-05" }, "2027-01-05", "2027-01-31");
+    {
+      // (c3) A lump sum clears a debt whose first due date is next month.
+      const ctx = setup(2026, 8, 20);
+      ctx.s.addTransaction("2026-09-20", { amount: 5000, type: "balance", description: "Ending Balance" });
+      ctx.s.addRecurringTransaction({ startDate: "2026-10-01", amount: 2000, type: "income",
+        description: "Pay", recurrence: "monthly", lastDayOfMonth: false });
+      ctx.s.setDebtSnowballSettings({ dailyFloor: 500, extraPaymentStartMonth: "", autoGenerate: true });
+      const D = addDebt(ctx, { name: "Card", balance: 400, minPayment: 60, dueDay: 5, dueStartDate: "2026-10-05" });
+      for (let r = 0; r < 3; r++) render(ctx, 2026, 8);
+      assert.strictEqual(ctx.s.getRecurringTransactions().find((rt) => rt.debtId === D).endDate, "2026-09-30");
+      assert.deepStrictEqual(paid(ctx, D).map(({ d, t }) => `${d} ${t.amount} ${t.debtRole}`),
+        ["2026-09-21 400 snowball"], "(c3) only the payoff, no minimum after it");
+      const w = balances(ctx, "2026-10-04", "2026-10-06");
+      assert.strictEqual(w["2026-10-05"], w["2026-10-04"], "(c3) nothing leaves checking on Oct 5");
+    }
+    stores.forEach((s) => s.cancelPendingSave());
+    console.log("✅ A debt's final payment stays put on every render and nothing follows it");
+  } finally {
+    global.Date = RealDate;
+    stores.forEach((s) => s.cancelPendingSave());
+  }
+}
+
 // Run the async network tests sequentially (shared global.fetch mock): TEST 32
 // first, then TEST 30, which prints the final banner.
 async function runUnreadableGistTest() {

@@ -1,5 +1,24 @@
 class RecurringTransactionManager {
 
+  // An occurrence is inside [startDate, endDate] iff its SCHEDULED date is
+  // on/after startDate and its LANDING (business-day-adjusted) date is on/before
+  // endDate. Every endDate writer (the debt payoff sync, the already-paid bound,
+  // "delete all future" and the "this and future" split) writes a landing date,
+  // and cleanup (DebtSnowballUI._outsideRecurrenceWindow) judges the same way.
+  //
+  // The expansion loops, though, step through SCHEDULED dates (and month
+  // starts), and a backward adjustment lands an occurrence EARLIER than it was
+  // scheduled: a Sunday-the-1st payment with "previous business day" lands on
+  // Friday the 30th of the month before. Gating the scheduled date against
+  // endDate dropped exactly that occurrence — a debt's final payment vanished.
+  // So every gate that compares a scheduled date or a month start to endDate
+  // allows this much slack, and the post-adjustment `<= endDate` check on the
+  // landing date stays the only thing that decides. The largest backward shift
+  // is a weekend plus an observed holiday (<= 4 days); 7 leaves margin. Extra
+  // iterations past endDate generate nothing: their landing date fails the
+  // final check.
+  static END_GATE_SLACK_DAYS = 7;
+
   constructor(store) {
     this.store = store;
     // Cache for expanded recurring transactions per month
@@ -24,6 +43,21 @@ class RecurringTransactionManager {
       hash = hash & hash; // Convert to 32-bit integer
     }
     return hash.toString();
+  }
+
+  // endDate widened by END_GATE_SLACK_DAYS, for the SCHEDULED-date gates only
+  // (see the note on END_GATE_SLACK_DAYS). Never use it for the final landing
+  // check. Null passes through, so `!endDate ||` guards read the same.
+  _endGate(endDate) {
+    if (!endDate) return endDate;
+    return new Date(
+      endDate.getFullYear(),
+      endDate.getMonth(),
+      endDate.getDate() + RecurringTransactionManager.END_GATE_SLACK_DAYS,
+      12,
+      0,
+      0
+    );
   }
 
   // Invalidate cache when recurring templates change
@@ -393,7 +427,7 @@ class RecurringTransactionManager {
 
         if (
           startDate <= targetEndOfMonth &&
-          (!endDate || endDate >= targetStartOfMonth)
+          (!endDate || this._endGate(endDate) >= targetStartOfMonth)
         ) {
           switch (rt.recurrence) {
             case "once":
@@ -836,9 +870,11 @@ class RecurringTransactionManager {
       occurrenceCount = this.daysBetween(startDate, startOfMonth);
     }
 
+    // Scheduled-date gate; the landing check below decides (END_GATE_SLACK_DAYS).
+    const endGate = this._endGate(endDate);
     while (
       currentDate <= endOfMonth &&
-      (!endDate || currentDate <= endDate) &&
+      (!endDate || currentDate <= endGate) &&
       (!maxOccurrences || occurrenceCount < maxOccurrences)
     ) {
       let targetDate = currentDate;
@@ -891,9 +927,11 @@ class RecurringTransactionManager {
     if (occurrenceCount > 0) {
       currentDate.setDate(currentDate.getDate() + occurrenceCount * 7);
     }
+    // Scheduled-date gate; the landing check below decides (END_GATE_SLACK_DAYS).
+    const endGate = this._endGate(endDate);
     while (
       currentDate <= endOfMonth &&
-      (!endDate || currentDate <= endDate) &&
+      (!endDate || currentDate <= endGate) &&
       (!maxOccurrences || occurrenceCount < maxOccurrences)
     ) {
       let targetDate = currentDate;
@@ -943,9 +981,11 @@ class RecurringTransactionManager {
     if (occurrenceCount > 0) {
       currentDate.setDate(currentDate.getDate() + occurrenceCount * 14);
     }
+    // Scheduled-date gate; the landing check below decides (END_GATE_SLACK_DAYS).
+    const endGate = this._endGate(endDate);
     while (
       currentDate <= endOfMonth &&
-      (!endDate || currentDate <= endDate) &&
+      (!endDate || currentDate <= endGate) &&
       (!maxOccurrences || occurrenceCount < maxOccurrences)
     ) {
       let targetDate = currentDate;
@@ -1003,7 +1043,7 @@ class RecurringTransactionManager {
     const startOfMonth = new Date(year, month, 1, 12, 0, 0);
     const endOfMonth = new Date(year, month + 1, 0, 12, 0, 0);
 
-    if ((endDate && endDate < startOfMonth) || startDate > endOfMonth) {
+    if ((endDate && this._endGate(endDate) < startOfMonth) || startDate > endOfMonth) {
       return;
     }
     const monthsSinceStart =
@@ -1064,7 +1104,7 @@ class RecurringTransactionManager {
     const startOfMonth = new Date(year, month, 1, 12, 0, 0);
     const endOfMonth = new Date(year, month + 1, 0, 12, 0, 0);
 
-    if ((endDate && endDate < startOfMonth) || startDate > endOfMonth) {
+    if ((endDate && this._endGate(endDate) < startOfMonth) || startDate > endOfMonth) {
       return;
     }
     const parsed = this.parseDaySpecificData(rt.daySpecificData);
@@ -1078,7 +1118,9 @@ class RecurringTransactionManager {
       parsed.occurrence
     );
 
-    if (!targetDate || (endDate && targetDate > endDate)) {
+    // targetDate is still the SCHEDULED day here, so this is a slack gate; the
+    // landing check after the adjustment decides (END_GATE_SLACK_DAYS).
+    if (!targetDate || (endDate && targetDate > this._endGate(endDate))) {
       return;
     }
     // Lower-bound guard: an "Nth weekday" can fall earlier in the month than
@@ -1177,7 +1219,7 @@ class RecurringTransactionManager {
     secondDate = Math.min(secondDate, lastDayOfMonth);
     if (
       (!maxOccurrences || occurrenceCount < maxOccurrences) &&
-      (!endDate || new Date(year, month, firstDate, 12, 0, 0) <= endDate) &&
+      (!endDate || new Date(year, month, firstDate, 12, 0, 0) <= this._endGate(endDate)) &&
       startDate <= new Date(year, month, firstDate, 12, 0, 0)
     ) {
       let firstDateObj = new Date(year, month, firstDate, 12, 0, 0);
@@ -1210,7 +1252,7 @@ class RecurringTransactionManager {
     }
     if (
       (!maxOccurrences || occurrenceCount < maxOccurrences) &&
-      (!endDate || new Date(year, month, secondDate, 12, 0, 0) <= endDate) &&
+      (!endDate || new Date(year, month, secondDate, 12, 0, 0) <= this._endGate(endDate)) &&
       startDate <= new Date(year, month, secondDate, 12, 0, 0)
     ) {
       let secondDateObj = new Date(year, month, secondDate, 12, 0, 0);
@@ -1457,9 +1499,11 @@ class RecurringTransactionManager {
         occurrenceCount++;
       }
     }
+    // Scheduled-date gate; the landing check below decides (END_GATE_SLACK_DAYS).
+    const endGate = this._endGate(endDate);
     while (
       currentDate <= endOfMonth &&
-      (!endDate || currentDate <= endDate) &&
+      (!endDate || currentDate <= endGate) &&
       (!maxOccurrences || occurrenceCount < maxOccurrences)
     ) {
       let targetDate = currentDate;
