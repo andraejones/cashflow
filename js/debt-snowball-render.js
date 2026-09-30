@@ -533,9 +533,9 @@ Object.assign(DebtSnowballUI.prototype, {
       return;
     }
 
-    // Calculate allocation for each infusion. The plan projection (already run
-    // by the caller) supplies the lump-sum payoff schedule so the breakdown's
-    // surviving-debt set matches the actual plan.
+    // Where each infusion was applied: read from the plan projection the
+    // caller already ran (and the snapshot, for infusions already past), so
+    // the breakdown is exactly what the hero and plan list are built on.
     const infusionAllocations = this.calculateInfusionAllocations(projection);
 
     const sortedInfusions = [...infusions].sort((a, b) =>

@@ -765,15 +765,21 @@ try {
     );
   }
 
-  // Without the plan overlay the bare monthly sim keeps Small alive and
-  // mis-credits the infusion to it — the inconsistency the overlay fixes.
+  // Without a projection passed in, the breakdown must still be the plan's
+  // own. This half used to assert the opposite — that the bare monthly sim
+  // "mis-credits Small with 100" — which pinned the third, disagreeing
+  // simulation as expected behaviour. The breakdown is now read from the
+  // projection walk and the snapshot, so both calls credit Big.
   const withoutPlan = ui.calculateInfusionAllocations();
-  const oldToSmall = (withoutPlan[infId] && withoutPlan[infId][smallId]) || 0;
-  if (oldToSmall !== 100) {
+  if (JSON.stringify(withoutPlan[infId]) !== JSON.stringify(withPlan[infId])) {
     throw new Error(
-      `Expected the un-overlaid sim to mis-credit Small with 100, got ${oldToSmall}`
+      `The breakdown depends on which caller asked: ${JSON.stringify(withoutPlan[infId])} vs ${JSON.stringify(withPlan[infId])}`
     );
   }
+  if (JSON.stringify(withPlan[infId]) !== JSON.stringify(projection.infusionAllocations[infId])) {
+    throw new Error("The breakdown is not what the projection walk applied");
+  }
+  s.cancelPendingSave();
   console.log("✅ Infusion breakdown skips plan-paid-off debts, flows to survivors");
 } finally {
   global.Date = T12_RealDate;
@@ -10424,10 +10430,11 @@ console.log('TEST 105: Reconciliation Dates And Stale Row Identity');
 }
 
 // TEST 118: A user-set payoff priority reorders the snowball — and every site
-// that decides "which debt next" agrees on it. Five places sort debts for the
-// snowball (the lump-sum sweep, the monthly target, both infusion
-// redistributions, the historical snapshot); each used to hand-roll
-// smallest-first. Pinned here: prioritized debts clear first, lowest number
+// that decides "which debt next" agrees on it. Four places sort debts for the
+// snowball (the lump-sum sweep, the monthly target, the projection's infusion
+// redistribution, the historical snapshot); each used to hand-roll
+// smallest-first. (A fifth, the infusion breakdown's own simulation, is gone:
+// the breakdown now reads the projection and the snapshot — TEST 142.) Pinned here: prioritized debts clear first, lowest number
 // first, and strictly (a smaller auto debt waits even when it would fit);
 // equal priorities fall back to smallest-first; an untargeted infusion lands
 // on the priority head identically in the projection, the snapshot and the
@@ -10586,7 +10593,7 @@ console.log("TEST 118: Payoff Priority Orders The Snowball");
       assert.strictEqual(t.ui._debtPayoffRank({ payoffPriority: "1" }), UNRANKED_PAYOFF);
       assert.strictEqual(t.ui._debtPayoffRank(null), UNRANKED_PAYOFF);
     }
-    console.log("✅ Payoff priority orders the snowball; all five sort sites agree");
+    console.log("✅ Payoff priority orders the snowball; every sort site agrees");
   } finally {
     built.forEach((s) => s.cancelPendingSave());
     global.Date = T118_RealDate;
@@ -12639,6 +12646,365 @@ console.log("TEST 138: With Auto-Generate Off The Plan List Matches The Hero");
     global.document.getElementById = prevGetById;
     if (prevCreate === undefined) delete global.document.createElement;
     else global.document.createElement = prevCreate;
+    stores.forEach((st) => st.cancelPendingSave());
+  }
+}
+
+// Shared by TESTs 139–142: a real DebtSnowballUI over a fresh store, with the
+// calendar render's chain (expansion → snowball horizon → balances).
+function buildInfusionFixture(stores) {
+  localStorage.clear();
+  const s = new TransactionStore();
+  s.resetData();
+  stores.push(s);
+  const rm = new RecurringTransactionManager(s);
+  const cs = new CalculationService(s, rm);
+  const ui = new DebtSnowballUI(s, rm, () => {}, cs);
+  const addDebt = (fields) => {
+    const id = s.addDebt({ recurrence: "monthly", interestRate: 0, dueLastDay: false, ...fields });
+    ui.ensureMinimumPaymentRecurring(s.getDebts().find((d) => d.id === id));
+    return id;
+  };
+  const render = (y, m) => {
+    rm.applyRecurringTransactions(y, m);
+    ui.ensureSnowballPaymentsForHorizon(y, m);
+    cs.updateMonthlyBalances(new Date(y, m, 1));
+  };
+  return { s, rm, cs, ui, addDebt, render };
+}
+
+// TEST 139: a same-day infusion lands where the plan put it.
+console.log("TEST 139: A Same-Day Infusion Lands Where The Plan Put It");
+{
+  // A $500 (min $450 due Oct 10), B $300 (min $10 due Oct 20), and an
+  // untargeted $300 infusion on Oct 10. The projection applies the infusion
+  // FIRST — smallest-first, it clears B — and then A's $450 minimum leaves A
+  // at $50. The snapshot applied the day's payments first, so the minimum left
+  // A at $50, the infusion saw A as the smallest, and it read back A 0 / B 50.
+  // Harmless while Oct 10 was in the future; the morning after, the plan
+  // re-seeded from that snapshot, called A already paid and moved B's payoff
+  // four months out, with no change to the data.
+  const assert = require("assert");
+  const RealDate = Date;
+  let FIXED = new RealDate(2026, 8, 29, 12, 0, 0);
+  class FrozenDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(FIXED.getTime()); else super(...a); }
+    static now() { return FIXED.getTime(); }
+  }
+  global.Date = FrozenDate;
+  const stores = [];
+  try {
+    const { s, ui, addDebt, render } = buildInfusionFixture(stores);
+    s.addRecurringTransaction({ startDate: "2026-09-01", amount: 100, type: "income", description: "Pay", recurrence: "monthly" });
+    s.setDebtSnowballSettings({ dailyFloor: 1e9, extraPaymentStartMonth: "", autoGenerate: false });
+    const A = addDebt({ name: "A", balance: 500, minPayment: 450, dueDay: 10, dueStartDate: "2026-10-10" });
+    const B = addDebt({ name: "B", balance: 300, minPayment: 10, dueDay: 20, dueStartDate: "2026-10-20" });
+    const infId = s.addCashInfusion({ name: "Bonus", amount: 300, date: "2026-10-10", targetDebtId: null });
+    render(2026, 8);
+
+    const plan = ui.calculateSnowballProjection(2026, 9, true);
+    assert.strictEqual(plan.viewBalances[A], 50, "setup: the plan leaves A at $50");
+    assert.strictEqual(plan.viewBalances[B], 0, "setup: the plan clears B with the infusion");
+    const snap = ui.getHistoricalDebtSnapshot(new RealDate(2026, 9, 11, 12));
+    assert.strictEqual(snap.remainingByDebtId[A], 50,
+      `the snapshot after Oct 10 reads A where the plan left it (got ${snap.remainingByDebtId[A]})`);
+    assert.strictEqual(snap.remainingByDebtId[B], 0,
+      `the snapshot after Oct 10 reads B where the plan left it (got ${snap.remainingByDebtId[B]})`);
+    assert.deepStrictEqual(snap.infusionAllocations[infId], { [B]: 300 }, "the snapshot credits B, as the plan did");
+    const before = ui.calculateInfusionAllocations(plan)[infId];
+
+    // The day passes. Nothing changed but the date, so nothing may move.
+    FIXED = new RealDate(2026, 9, 11, 12, 0, 0);
+    render(2026, 9);
+    const after = ui.calculateSnowballProjection(2026, 9, true);
+    assert.deepStrictEqual(after.payoffByDebtId[A], plan.payoffByDebtId[A],
+      "A's payoff is where the plan put it before the infusion day passed");
+    assert.strictEqual(after.payoffByDebtId[A].month, 10, "A still clears in November");
+    assert.strictEqual(after.payoffByDebtId[B].alreadyPaid, true, "B is paid — by the infusion");
+    assert.strictEqual(after.viewBalances[A], 50);
+    assert.strictEqual(after.viewBalances[B], 0);
+    assert.deepStrictEqual(ui.calculateInfusionAllocations(after)[infId], before,
+      "the breakdown reads the same once the snapshot answers for it");
+    console.log("✅ Infusions go first on their day, in the plan and in the snapshot alike");
+  } finally {
+    global.Date = RealDate;
+    stores.forEach((st) => st.cancelPendingSave());
+  }
+}
+
+// TEST 140: the "Applied:" breakdown is the plan's own.
+console.log("TEST 140: The Infusion Breakdown Is The Plan's Own");
+{
+  // The breakdown was a third, month-at-a-time simulation. (a) A lump sum
+  // clears A on Oct 5 and a $1000 infusion lands Oct 20: the plan puts all of
+  // it on B, the sim still saw A alive (it only dropped debts cleared in an
+  // EARLIER month) and showed "A $275, B $725". (b) A $500 infusion targeted
+  // at A ($500, $100 minimum on the 15th) lands Oct 1: the plan applies $500
+  // and suppresses the minimum; the sim paid the whole month's minimum first,
+  // applied $400, and the other $100 appeared nowhere.
+  const assert = require("assert");
+  const RealDate = Date;
+  const FIXED = new RealDate(2026, 8, 29, 12, 0, 0);
+  class FrozenDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(FIXED.getTime()); else super(...a); }
+    static now() { return FIXED.getTime(); }
+  }
+  class El {
+    constructor(tag) {
+      this.tag = tag; this.children = []; this.className = ""; this._text = "";
+      this.style = {}; this.dataset = {}; this.options = [];
+      this.classList = { add: (c) => { this.className += " " + c; } };
+    }
+    appendChild(c) { this.children.push(c); return c; }
+    set textContent(v) { this._text = String(v); this.children = []; }
+    get textContent() { return this._text + this.children.map((c) => c.textContent).join(" | "); }
+    set innerHTML(v) { this._text = ""; this.children = []; }
+    get innerHTML() { return ""; }
+    setAttribute() {} focus() {} addEventListener() {} remove() {}
+    querySelector() { return null; }
+  }
+  const prevCreate = global.document.createElement;
+  global.document.createElement = (tag) => new El(tag);
+  global.Date = FrozenDate;
+  const stores = [];
+  try {
+    // (a)
+    {
+      const { s, ui, addDebt, render } = buildInfusionFixture(stores);
+      s.addTransaction("2026-09-29", { amount: 1000, type: "balance", description: "Ending Balance" });
+      s.addRecurringTransaction({ startDate: "2026-10-05", amount: 400, type: "income", description: "Pay", recurrence: "monthly" });
+      s.setDebtSnowballSettings({ dailyFloor: 1000, extraPaymentStartMonth: "", autoGenerate: true });
+      const A = addDebt({ name: "A", balance: 300, minPayment: 25, dueDay: 25, dueStartDate: "2026-10-25" });
+      const B = addDebt({ name: "B", balance: 5000, minPayment: 50, dueDay: 25, dueStartDate: "2026-10-25" });
+      const infId = s.addCashInfusion({ name: "Refund", amount: 1000, date: "2026-10-20", targetDebtId: null });
+      render(2026, 8);
+      const plan = ui.calculateSnowballProjection(2026, 9, true);
+      assert.strictEqual(plan.monthTargets["2026-10"].lumpSumDateByDebtId[A], "2026-10-05",
+        "setup: the lump sum clears A on Oct 5, before the infusion");
+      // What the plan applied, measured from outside: its B with and without it.
+      const saved = s.cashInfusions;
+      s.cashInfusions = [];
+      const without = ui.calculateSnowballProjection(2026, 9, true);
+      s.cashInfusions = saved;
+      assert.strictEqual(Math.round((without.viewBalances[B] - plan.viewBalances[B]) * 100) / 100, 1000,
+        "setup: the plan spends the whole infusion on B");
+      const breakdown = ui.calculateInfusionAllocations(plan)[infId];
+      assert.deepStrictEqual(breakdown, { [B]: 1000 },
+        `the breakdown is what the plan applied (got ${JSON.stringify(breakdown)})`);
+      ui.cashInfusionList = new El("div");
+      ui.renderCashInfusions(plan);
+      const text = ui.cashInfusionList.textContent;
+      assert.ok(/Applied: B: \$1,000\.00/.test(text) && !/A: \$/.test(text),
+        `the list says what the plan did: ${text}`);
+    }
+    // (b)
+    {
+      const { s, ui, addDebt, render } = buildInfusionFixture(stores);
+      s.addRecurringTransaction({ startDate: "2026-10-01", amount: 100, type: "income", description: "Pay", recurrence: "monthly" });
+      s.setDebtSnowballSettings({ dailyFloor: 1e9, extraPaymentStartMonth: "", autoGenerate: false });
+      const A = addDebt({ name: "A", balance: 500, minPayment: 100, dueDay: 15, dueStartDate: "2026-10-15" });
+      addDebt({ name: "B", balance: 800, minPayment: 10, dueDay: 15, dueStartDate: "2026-10-15" });
+      const infId = s.addCashInfusion({ name: "Gift", amount: 500, date: "2026-10-01", targetDebtId: A });
+      render(2026, 8);
+      const plan = ui.calculateSnowballProjection(2026, 9, true);
+      assert.strictEqual(plan.monthTargets["2026-10"].minPaidByDebtId[A], 0,
+        "setup: the infusion clears A first, so the plan pays no October minimum");
+      const breakdown = ui.calculateInfusionAllocations(plan)[infId];
+      assert.deepStrictEqual(breakdown, { [A]: 500 }, `the breakdown shows all $500 on A (got ${JSON.stringify(breakdown)})`);
+      const sum = Object.values(breakdown).reduce((a, b) => a + b, 0);
+      assert.strictEqual(sum, 500, "every dollar of the infusion is accounted for");
+      // Without a projection handed in, the method projects the same plan.
+      assert.deepStrictEqual(ui.calculateInfusionAllocations()[infId], breakdown);
+    }
+    console.log("✅ The Applied: breakdown is read from the plan, not re-simulated");
+  } finally {
+    global.Date = RealDate;
+    if (prevCreate === undefined) delete global.document.createElement;
+    else global.document.createElement = prevCreate;
+    stores.forEach((st) => st.cancelPendingSave());
+  }
+}
+
+// TEST 141: a targeted infusion's excess isn't lost.
+console.log("TEST 141: A Targeted Infusion's Excess Isn't Lost");
+{
+  // $1000 targeted at A ($300), with B at $5000. Aimed at a $0 debt the whole
+  // $1000 was redistributed to B; aimed at a $300 one, $300 reached A and the
+  // other $700 vanished — in the projection, the snapshot and the breakdown.
+  const assert = require("assert");
+  const RealDate = Date;
+  let FIXED = new RealDate(2026, 8, 29, 12, 0, 0);
+  class FrozenDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(FIXED.getTime()); else super(...a); }
+    static now() { return FIXED.getTime(); }
+  }
+  global.Date = FrozenDate;
+  const stores = [];
+  try {
+    const run = (targetBalance) => {
+      FIXED = new RealDate(2026, 8, 29, 12, 0, 0);
+      const { s, ui, addDebt, render } = buildInfusionFixture(stores);
+      s.addRecurringTransaction({ startDate: "2026-10-01", amount: 100, type: "income", description: "Pay", recurrence: "monthly" });
+      s.setDebtSnowballSettings({ dailyFloor: 1e9, extraPaymentStartMonth: "", autoGenerate: false });
+      const A = addDebt({ name: "A", balance: targetBalance, minPayment: 25, dueDay: 25, dueStartDate: "2026-10-25" });
+      const B = addDebt({ name: "B", balance: 5000, minPayment: 50, dueDay: 25, dueStartDate: "2026-10-25" });
+      const infId = s.addCashInfusion({ name: "Refund", amount: 1000, date: "2026-10-05", targetDebtId: A });
+      render(2026, 8);
+      const plan = ui.calculateSnowballProjection(2026, 9, true);
+      const snap6 = ui.getHistoricalDebtSnapshot(new RealDate(2026, 9, 6, 12)).remainingByDebtId;
+      const snapNov = ui.getHistoricalDebtSnapshot(new RealDate(2026, 10, 1, 12)).remainingByDebtId;
+      const breakdown = ui.calculateInfusionAllocations(plan)[infId];
+      FIXED = new RealDate(2026, 9, 6, 12, 0, 0);
+      render(2026, 9);
+      const pastBreakdown = ui.calculateInfusionAllocations()[infId];
+      return { A, B, plan, snap6, snapNov, breakdown, pastBreakdown };
+    };
+    const over = run(300);
+    assert.strictEqual(over.snap6[over.A], 0);
+    assert.strictEqual(over.snap6[over.B], 4300, `the snapshot hands B the $700 excess (got ${over.snap6[over.B]})`);
+    assert.strictEqual(over.plan.viewBalances[over.B], 4250, "the plan does too, less B's $50 October minimum");
+    assert.strictEqual(over.snapNov[over.B], over.plan.viewBalances[over.B], "snapshot and plan agree at month end");
+    assert.deepStrictEqual(over.breakdown, { [over.A]: 300, [over.B]: 700 },
+      `the breakdown shows the excess on B (got ${JSON.stringify(over.breakdown)})`);
+    assert.deepStrictEqual(over.pastBreakdown, over.breakdown, "and still does once the day has passed");
+    // Control: aimed at a debt already at $0, the whole infusion reaches B.
+    const paid = run(0);
+    assert.strictEqual(paid.snap6[paid.B], 4000);
+    assert.strictEqual(paid.plan.viewBalances[paid.B], 3950);
+    assert.deepStrictEqual(paid.breakdown, { [paid.B]: 1000 });
+    console.log("✅ A targeted infusion's excess goes on down the snowball");
+  } finally {
+    global.Date = RealDate;
+    stores.forEach((st) => st.cancelPendingSave());
+  }
+}
+
+// TEST 142: the three infusion sites agree, checked against each other.
+console.log("TEST 142: The Projection, The Snapshot And The Breakdown Apply Each Infusion Alike");
+{
+  // One fact, three readers: the projection walk (future infusions), the
+  // historical snapshot (everything before the cutoff, including the forward
+  // days the calendar has materialized), and the "Applied:" breakdown. For
+  // every infusion shape — untargeted, targeted under / over its target, at a
+  // paid debt, at an unknown id, two on one day, a payoff priority — on a day
+  // with its own minimums and on a quiet one, and with lump sums on and off:
+  //   1. the breakdown IS what the projection walk applied;
+  //   2. a snapshot cut after the month applies each infusion identically and
+  //      leaves every debt where the plan's month-end balances do;
+  //   3. no infusion loses money (it applies in full, or up to what is owed);
+  //   4. once a same-day infusion's day passes (minimums mode, so no payoff
+  //      creep — a separate, deferred issue), the breakdown and the month-end
+  //      balances do not move.
+  const assert = require("assert");
+  const RealDate = Date;
+  let FIXED = new RealDate(2026, 8, 29, 12, 0, 0);
+  class FrozenDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(FIXED.getTime()); else super(...a); }
+    static now() { return FIXED.getTime(); }
+  }
+  global.Date = FrozenDate;
+  const stores = [];
+  const round = (v) => Math.round(v * 100) / 100;
+  const SHAPES = [
+    { name: "auto 300", infusions: (ids) => [{ amount: 300 }] },
+    { name: "targeted under", infusions: (ids) => [{ amount: 200, target: ids.B }] },
+    { name: "targeted over", infusions: (ids) => [{ amount: 700, target: ids.A }] },
+    { name: "targeted at a paid debt", infusions: (ids) => [{ amount: 250, target: ids.Z }] },
+    { name: "targeted at an unknown id", infusions: () => [{ amount: 250, target: "gone" }] },
+    { name: "two on one day", infusions: (ids) => [{ amount: 150 }, { amount: 3000, target: ids.C }] },
+    { name: "priority head", priority: true, infusions: () => [{ amount: 600 }] },
+    { name: "more than is owed", infusions: () => [{ amount: 10000 }] },
+  ];
+  let checked = 0;
+  let lumpSums = 0;
+  try {
+    for (const snowball of [false, true]) {
+      for (const day of ["05", "10"]) {
+        for (const shape of SHAPES) {
+          const label = `${shape.name} on Oct ${day}${snowball ? " (lump sums on)" : ""}`;
+          FIXED = new RealDate(2026, 8, 29, 12, 0, 0);
+          const { s, ui, addDebt, render } = buildInfusionFixture(stores);
+          if (snowball) {
+            s.addTransaction("2026-09-29", { amount: 1500, type: "balance", description: "Ending Balance" });
+            s.addRecurringTransaction({ startDate: "2026-10-03", amount: 600, type: "income", description: "Pay", recurrence: "monthly" });
+            s.setDebtSnowballSettings({ dailyFloor: 800, extraPaymentStartMonth: "", autoGenerate: true });
+          } else {
+            s.addRecurringTransaction({ startDate: "2026-10-01", amount: 100, type: "income", description: "Pay", recurrence: "monthly" });
+            s.setDebtSnowballSettings({ dailyFloor: 1e9, extraPaymentStartMonth: "", autoGenerate: false });
+          }
+          const ids = {
+            // A's big minimum on the 10th makes it smaller than B, so on that
+            // day the order of infusions and payments decides which debt an
+            // untargeted infusion reaches (TEST 139's shape).
+            // Minimums are large so every debt clears within months: each
+            // projection then walks a short horizon instead of decades.
+            A: addDebt({ name: "A", balance: 500, minPayment: 450, dueDay: 10, dueStartDate: "2026-10-10" }),
+            B: addDebt({ name: "B", balance: 300, minPayment: 100, dueDay: 20, dueStartDate: "2026-10-20" }),
+            C: addDebt({ name: "C", balance: 2500, minPayment: 500, dueDay: 10, dueStartDate: "2026-10-10" }),
+            Z: addDebt({ name: "Z", balance: 0, minPayment: 10, dueDay: 12, dueStartDate: "2026-10-12" }),
+          };
+          if (shape.priority) s.updateDebt(ids.C, { payoffPriority: 1 });
+          const infIds = shape.infusions(ids).map((inf, n) => s.addCashInfusion({
+            name: `Inf ${n}`, amount: inf.amount, date: `2026-10-${day}`, targetDebtId: inf.target || null,
+          }));
+          render(2026, 8);
+          const plan = ui.calculateSnowballProjection(2026, 9, true);
+          const breakdown = ui.calculateInfusionAllocations(plan);
+          const snap = ui.getHistoricalDebtSnapshot(new RealDate(2026, 10, 1, 12));
+          if (snowball) {
+            lumpSums += Object.keys(plan.monthTargets["2026-10"].lumpSumDateByDebtId).length;
+          }
+
+          const owedBefore = round(Object.values(ui.getHistoricalDebtSnapshot(new RealDate(2026, 9, Number(day), 12)).remainingByDebtId)
+            .reduce((a, b) => a + b, 0));
+          let owed = owedBefore;
+          infIds.forEach((infId, n) => {
+            // 1. the breakdown is the walk's own record
+            const walked = (plan.infusionAllocations || {})[infId] || {};
+            assert.deepStrictEqual(breakdown[infId], walked,
+              `${label}: breakdown ${JSON.stringify(breakdown[infId])} ≠ projection ${JSON.stringify(walked)}`);
+            // 2. the snapshot applies it identically
+            assert.deepStrictEqual(snap.infusionAllocations[infId] || {}, breakdown[infId],
+              `${label}: snapshot ${JSON.stringify(snap.infusionAllocations[infId])} ≠ breakdown ${JSON.stringify(breakdown[infId])}`);
+            // 3. nothing is lost
+            const applied = round(Object.values(breakdown[infId]).reduce((a, b) => a + b, 0));
+            const amount = shape.infusions(ids)[n].amount;
+            assert.strictEqual(applied, Math.min(amount, owed), `${label}: infusion ${n} applied ${applied} of ${amount} (owed ${owed})`);
+            owed = round(owed - applied);
+            checked += 1;
+          });
+          Object.values(ids).forEach((debtId) => {
+            assert.strictEqual(snap.remainingByDebtId[debtId], round(plan.viewBalances[debtId] || 0),
+              `${label}: month-end snapshot ${snap.remainingByDebtId[debtId]} ≠ plan ${plan.viewBalances[debtId]}`);
+          });
+
+          // 4. the day passes (the same-day case, where the snapshot's order
+          // is what the next day's plan re-seeds from; TEST 141 covers a
+          // quiet day)
+          if (!snowball && day === "10") {
+            FIXED = new RealDate(2026, 9, Number(day) + 1, 12, 0, 0);
+            render(2026, 9);
+            const later = ui.calculateSnowballProjection(2026, 9, true);
+            const laterBreakdown = ui.calculateInfusionAllocations(later);
+            infIds.forEach((infId) => {
+              assert.deepStrictEqual(laterBreakdown[infId], breakdown[infId],
+                `${label}: the breakdown moved when the day passed`);
+            });
+            Object.values(ids).forEach((debtId) => {
+              assert.strictEqual(round(later.viewBalances[debtId] || 0), round(plan.viewBalances[debtId] || 0),
+                `${label}: a debt's month-end balance moved when the day passed`);
+            });
+          }
+          s.cancelPendingSave();
+        }
+      }
+    }
+    // Vacuity guard: the lump-sum half really paid October lump sums, which
+    // the snapshot then reads back from the rows the render materialized.
+    assert.ok(lumpSums >= 8, `setup: expected October lump sums in the snowball half, got ${lumpSums}`);
+    console.log(`✅ ${checked} infusions (${lumpSums} October lump sums) applied alike by the projection, the snapshot and the breakdown`);
+  } finally {
+    global.Date = RealDate;
     stores.forEach((st) => st.cancelPendingSave());
   }
 }

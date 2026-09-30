@@ -11,10 +11,10 @@ CashFlow Calendar is an offline-first, single-page personal finance application 
 **No build process required.** Open `index.html` directly in a browser or serve via any static server.
 
 **Tests:** `npm test` (or run the two scripts directly with Node) — it must pass before every commit:
-- `node scripts/verify-logic.js` — 132 numbered integration tests over vm-loaded sources
-  (numbered up to TEST 138; the numbering has gaps where tests were merged or
+- `node scripts/verify-logic.js` — 136 numbered integration tests over vm-loaded sources
+  (numbered up to TEST 142; the numbering has gaps where tests were merged or
   removed along with the feature they covered).
-  Six of them are SWEEPS rather than scenarios, and they are the ones worth
+  Seven of them are SWEEPS rather than scenarios, and they are the ones worth
   extending when something new is added:
     - TEST 93 puts a wrong-typed value in every field the app reads, one field
       at a time, and walks every headless surface. Nothing coerces most stored
@@ -43,6 +43,12 @@ CashFlow Calendar is an offline-first, single-page personal finance application 
       each occurrence's landing date and deletes "all future" from it, and
       asserts expansion, cleanup and the delete agree on what is left. Extend
       it when a recurrence shape or business-day rule is added.
+    - TEST 142 pins the cash-infusion rule (see DebtSnowballUI, payoff order):
+      for every infusion shape, on a day with its own minimums and a quiet
+      one, with lump sums on and off, the projection walk, the snapshot and
+      the "Applied:" breakdown apply each infusion identically and lose
+      nothing, and a same-day infusion's breakdown and month-end balances do
+      not move when its day passes.
   Each was validated by reverting the fix it guards and watching it fail; keep
   doing that, or a sweep that cannot fail pins nothing.
   A test that builds a store must `cancelPendingSave()` on every store it
@@ -456,15 +462,33 @@ before the flag, which keeps the old start-date inference (TEST 121).
 Payoff ORDER is one rule with one implementation: `makePayoffOrder()` (engine
 companion) — a debt's optional `payoffPriority` (whole 1–99, lower first;
 `null` = auto, ranked `UNRANKED_PAYOFF`), then smallest balance, then name,
-then id. Five sites decide "which debt next" and all must sort with it: the
-floor sweep, the monthly `targetDebtId`, the projection's untargeted-infusion
-redistribution, `calculateInfusionAllocations`, and the snapshot's
-`distributeAuto`; the plan list uses it as the fallback for debts that never
-clear. The sweep is STRICT — if the head debt cannot be covered yet, nothing
-behind it is paid, so surplus waits for the prioritized debt. A hand-rolled
-smallest-first sort at any one site lets the calendar pay one debt while the
-snapshot or infusion breakdown credits another (TEST 118 fails on each).
-`_normalizePayoffPriority` coerces the field on the way in.
+then id. Four sites decide "which debt next" and all must sort with it: the
+floor sweep, the monthly `targetDebtId`, the projection's infusion
+redistribution, and the snapshot's `distributeAuto`; the plan list uses it as
+the fallback for debts that never clear. The sweep is STRICT — if the head
+debt cannot be covered yet, nothing behind it is paid, so surplus waits for
+the prioritized debt. A hand-rolled smallest-first sort at any one site lets
+the calendar pay one debt while the snapshot or infusion breakdown credits
+another (TEST 118 fails on each). `_normalizePayoffPriority` coerces the field
+on the way in.
+
+Cash infusions are applied in exactly two places, which must apply them
+identically: the projection walk (infusions on/after the projection start)
+and `getHistoricalDebtSnapshot` (everything before its cutoff). Within a day,
+**infusions go FIRST**, in store order, before the day's real debt payments,
+minimums and lump sums. Auto-distribution sorts by the balances it finds, so
+the snapshot's old payments-first order sent a same-day windfall to a
+different debt, and once the day passed the plan re-seeded from that snapshot
+and moved a payoff months out (TEST 139). A targeted infusion larger than its
+target's balance hands the excess to the same auto-distribution a paid-off
+target's infusion gets (TEST 141). The "Applied:" breakdown
+(`calculateInfusionAllocations`) is READ from those two, never re-simulated:
+each records what it applied per infusion and debt (`infusionAllocations` on
+the projection and on the snapshot). It used to be a third, month-at-a-time
+simulation that credited debts the plan had already cleared and dropped
+money the plan spent (TEST 140). TEST 142 checks the projection, the snapshot
+and the breakdown against each other across every infusion shape; extend it
+when infusions learn something new.
 
 **CloudSync** (`cloud-sync.js`) - GitHub Gist integration with bi-directional sync and debounced saves. Also owns the GitHub token at rest: it encrypts/decrypts `github_token_encrypted` with an AES-GCM key derived from the plaintext `_device_id` (PinProtection is not involved in token storage).
 
@@ -537,7 +561,7 @@ local_last_sync, _backup_before_merge, calendar_view_mode
 
 - `styles.css` - CSS variables for theming (primary, accent, error colors)
 - `README.md` - Project documentation and feature overview
-- `scripts/verify-logic.js` - Standalone logic verification utility (132 tests)
+- `scripts/verify-logic.js` - Standalone logic verification utility (136 tests)
 - `scripts/verify-walk-parity.js` - Randomized balance-walk parity harness + source guard
 - `scripts/verify-ui.js` - Optional headless-Chromium UI harness (`npm run test:ui`)
 - `scripts/verify-sync.js` - Optional two-device cloud-sync harness (`npm run test:sync`)

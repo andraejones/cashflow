@@ -192,10 +192,11 @@ Object.assign(DebtSnowballUI.prototype, {
 
   // THE snowball payoff order — explicit payoffPriority (lower first), then
   // smallest balance, then name, then id. Every site that decides which debt
-  // the snowball works on next (the projection's lump-sum sweep and monthly
-  // target, both infusion redistributions, and the historical snapshot) must
-  // sort with this, or the calendar pays one debt while the snapshot and the
-  // infusion breakdown credit another. Priorities are read once here; call
+  // the snowball works on next (the projection's lump-sum sweep, its monthly
+  // target and its infusion redistribution, and the historical snapshot's
+  // distributeAuto) must sort with this, or the calendar pays one debt while
+  // the snapshot and the infusion breakdown (read from those two) credit
+  // another. Priorities are read once here; call
   // the returned function with the balance map the site is sorting by.
   makePayoffOrder() {
     const rankById = {};
@@ -276,12 +277,18 @@ Object.assign(DebtSnowballUI.prototype, {
     const paidByDebtId = {};
     const eventsByDate = new Map();
 
+    // What this snapshot applied, per infusion id → debt id: the "Applied:"
+    // breakdown for every infusion before the cutoff (see
+    // calculateInfusionAllocations).
+    const infusionAllocations = {};
+
     const ensureDateBucket = (dateString) => {
       if (!eventsByDate.has(dateString)) {
         eventsByDate.set(dateString, {
           transactions: [],
-          targetedInfusions: [],
-          autoInfusions: [],
+          // One list, in store order — the order the projection walk
+          // applies a day's infusions in.
+          infusions: [],
         });
       }
       return eventsByDate.get(dateString);
@@ -320,21 +327,17 @@ Object.assign(DebtSnowballUI.prototype, {
       const amount = roundToCents(Number(infusion.amount) || 0);
       if (amount <= 0) return;
 
-      const bucket = ensureDateBucket(infusion.date);
-      if (
+      const targeted =
         infusion.targetDebtId &&
         Object.prototype.hasOwnProperty.call(
           remainingByDebtId,
           infusion.targetDebtId
-        )
-      ) {
-        bucket.targetedInfusions.push({
-          debtId: infusion.targetDebtId,
-          amount,
-        });
-      } else {
-        bucket.autoInfusions.push({ amount });
-      }
+        );
+      ensureDateBucket(infusion.date).infusions.push({
+        id: infusion.id,
+        debtId: targeted ? infusion.targetDebtId : null,
+        amount,
+      });
     });
 
     // Forward interest accrual — keeps this snapshot consistent with the
@@ -381,11 +384,30 @@ Object.assign(DebtSnowballUI.prototype, {
       }
     };
 
-    // Auto-distribution in snowball payoff order (makePayoffOrder). Also used
-    // for a targeted infusion whose target is already paid off by its date —
-    // the projection's daily walk redistributes that windfall to the surviving
-    // debts, so this snapshot must do the same.
-    const distributeAuto = (amount) => {
+    // Apply up to `amount` of one infusion to one debt; returns what it took.
+    const applyInfusion = (infusionId, debtId, amount) => {
+      const currentBalance = Number(remainingByDebtId[debtId]) || 0;
+      if (currentBalance <= 0) {
+        return 0;
+      }
+      const applied = roundToCents(Math.min(currentBalance, amount));
+      if (applied <= 0) {
+        return 0;
+      }
+      paidByDebtId[debtId] = roundToCents(paidByDebtId[debtId] + applied);
+      remainingByDebtId[debtId] = roundToCents(currentBalance - applied);
+      const byDebt =
+        infusionAllocations[infusionId] || (infusionAllocations[infusionId] = {});
+      byDebt[debtId] = roundToCents((byDebt[debtId] || 0) + applied);
+      return applied;
+    };
+
+    // Auto-distribution in snowball payoff order (makePayoffOrder). Also takes
+    // a targeted infusion whose target is already paid off by its date, and
+    // the excess of one larger than its target's balance — the projection's
+    // daily walk redistributes both to the surviving debts, so this snapshot
+    // must do the same.
+    const distributeAuto = (infusionId, amount) => {
       let remainingInfusion = roundToCents(Number(amount) || 0);
       if (remainingInfusion <= 0) {
         return;
@@ -398,19 +420,9 @@ Object.assign(DebtSnowballUI.prototype, {
         if (remainingInfusion <= 0) {
           return;
         }
-        const currentBalance = Number(remainingByDebtId[debtId]) || 0;
-        if (currentBalance <= 0) {
-          return;
-        }
-        const applied = roundToCents(
-          Math.min(currentBalance, remainingInfusion)
+        remainingInfusion = roundToCents(
+          remainingInfusion - applyInfusion(infusionId, debtId, remainingInfusion)
         );
-        if (applied <= 0) {
-          return;
-        }
-        paidByDebtId[debtId] = roundToCents(paidByDebtId[debtId] + applied);
-        remainingByDebtId[debtId] = roundToCents(currentBalance - applied);
-        remainingInfusion = roundToCents(remainingInfusion - applied);
       });
     };
 
@@ -424,6 +436,20 @@ Object.assign(DebtSnowballUI.prototype, {
         }
       }
       const bucket = eventsByDate.get(dateKey);
+      // Infusions FIRST, then the day's payments — the projection walk's
+      // order. Auto-distribution sorts by the balances it finds, so the other
+      // order sent a same-day windfall to a different debt than the plan did,
+      // and the plan then re-seeded from this snapshot once the day passed.
+      bucket.infusions.forEach((infusion) => {
+        let rest = infusion.amount;
+        if (infusion.debtId) {
+          rest = roundToCents(
+            rest - applyInfusion(infusion.id, infusion.debtId, rest)
+          );
+        }
+        distributeAuto(infusion.id, rest);
+      });
+
       bucket.transactions.forEach((transaction) => {
         const debtId = transaction.debtId;
         const amount = roundToCents(Number(transaction.amount) || 0);
@@ -434,32 +460,6 @@ Object.assign(DebtSnowballUI.prototype, {
         remainingByDebtId[debtId] = roundToCents(
           Math.max(0, remainingByDebtId[debtId] - amount)
         );
-      });
-
-      bucket.targetedInfusions.forEach((infusion) => {
-        const currentBalance = Number(remainingByDebtId[infusion.debtId]) || 0;
-        if (currentBalance <= 0) {
-          // Target already cleared by this date — redistribute snowball-style,
-          // matching the projection walk's targeted-infusion fallback.
-          distributeAuto(infusion.amount);
-          return;
-        }
-        const applied = roundToCents(
-          Math.min(currentBalance, Number(infusion.amount) || 0)
-        );
-        if (applied <= 0) {
-          return;
-        }
-        paidByDebtId[infusion.debtId] = roundToCents(
-          paidByDebtId[infusion.debtId] + applied
-        );
-        remainingByDebtId[infusion.debtId] = roundToCents(
-          currentBalance - applied
-        );
-      });
-
-      bucket.autoInfusions.forEach((infusion) => {
-        distributeAuto(infusion.amount);
       });
     });
 
@@ -477,7 +477,7 @@ Object.assign(DebtSnowballUI.prototype, {
       }
     }
 
-    return { paidByDebtId, remainingByDebtId };
+    return { paidByDebtId, remainingByDebtId, infusionAllocations };
   },
 
   getDebtSummaries(cutoffDate = null) {
@@ -566,22 +566,6 @@ Object.assign(DebtSnowballUI.prototype, {
       template.id =
         template.id || debt.minRecurringId || debt.id || Utils.generateUniqueId();
       recurringTemplates[debt.id] = template;
-    });
-
-    // Group cash infusions by month
-    const cashInfusions = this.store.getCashInfusions();
-    const infusionsByMonthKey = {};
-    cashInfusions.forEach((infusion) => {
-      if (!infusion.date) return;
-      const infusionDate = this.getDateFromString(infusion.date);
-      if (!infusionDate) return;
-      const infusionYear = infusionDate.getFullYear();
-      const infusionMonth = infusionDate.getMonth();
-      const key = `${infusionYear}-${String(infusionMonth + 1).padStart(2, "0")}`;
-      if (!infusionsByMonthKey[key]) {
-        infusionsByMonthKey[key] = [];
-      }
-      infusionsByMonthKey[key].push(infusion);
     });
 
     const payoffByDebtId = {};
@@ -829,6 +813,16 @@ Object.assign(DebtSnowballUI.prototype, {
       }
       infusionsByDate.get(infusion.date).push(infusion);
     });
+    // What the walk actually applied, per infusion id → debt id. This IS the
+    // cash-infusion list's "Applied:" breakdown for infusions on/after the
+    // projection start (calculateInfusionAllocations reads it; the snapshot
+    // supplies the earlier ones). There is no other simulation to disagree.
+    const infusionAllocations = {};
+    const recordInfusion = (infusionId, debtId, applied) => {
+      const byDebt =
+        infusionAllocations[infusionId] || (infusionAllocations[infusionId] = {});
+      byDebt[debtId] = roundToCents((byDebt[debtId] || 0) + applied);
+    };
 
     // Credit a day's real debt payments (see getDayFlow) to the debt balances.
     // Their checking side is already in baseNet. Returns the debt ids each one
@@ -970,44 +964,48 @@ Object.assign(DebtSnowballUI.prototype, {
         }
       });
 
-      // Cash infusions applied straight to debt balances (not checking).
+      // Cash infusions applied straight to debt balances (not checking). Same
+      // day, infusions go FIRST — before the day's real debt payments and
+      // minimums — and getHistoricalDebtSnapshot applies them in the same
+      // order, so a day that passes reads back exactly what the plan did.
       const dayInfusions = infusionsByDate.get(ds);
       if (dayInfusions) {
+        const applyInfusion = (infusionId, debtId, amount) => {
+          const b = Number(balances[debtId]) || 0;
+          const applied = roundToCents(Math.min(b, amount));
+          if (applied <= 0) return 0;
+          balances[debtId] = roundToCents(b - applied);
+          recordInfusion(infusionId, debtId, applied);
+          if (balances[debtId] <= epsilon && !payoffByDebtId[debtId]) {
+            payoffByDebtId[debtId] = { year, month, day, seq: payoffSeq++ };
+          }
+          return applied;
+        };
+        // Snowball payoff order (makePayoffOrder). Takes an untargeted
+        // infusion, one whose target is already paid or unknown, and the
+        // excess of one larger than its target's balance.
+        const distributeAuto = (infusionId, amount) => {
+          let remaining = amount;
+          const order = Object.keys(balances)
+            .filter((id) => balances[id] > 0)
+            .sort(byPayoffOrder(balances));
+          for (const debtId of order) {
+            if (remaining <= epsilon) break;
+            remaining = roundToCents(
+              remaining - applyInfusion(infusionId, debtId, remaining)
+            );
+          }
+        };
         dayInfusions.forEach((infusion) => {
           const amount = roundToCents(Number(infusion.amount) || 0);
           if (amount <= 0) return;
+          let rest = amount;
           if (infusion.targetDebtId && balances[infusion.targetDebtId] > 0) {
-            const b = Number(balances[infusion.targetDebtId]) || 0;
-            const applied = Math.min(b, amount);
-            balances[infusion.targetDebtId] = roundToCents(b - applied);
-            if (
-              balances[infusion.targetDebtId] <= epsilon &&
-              !payoffByDebtId[infusion.targetDebtId]
-            ) {
-              payoffByDebtId[infusion.targetDebtId] = {
-                year,
-                month,
-                day,
-                seq: payoffSeq++,
-              };
-            }
-          } else {
-            let remaining = amount;
-            const order = Object.keys(balances)
-              .filter((id) => balances[id] > 0)
-              .sort(byPayoffOrder(balances));
-            for (const debtId of order) {
-              if (remaining <= epsilon) break;
-              const b = Number(balances[debtId]) || 0;
-              if (b <= 0) continue;
-              const applied = roundToCents(Math.min(b, remaining));
-              balances[debtId] = roundToCents(b - applied);
-              remaining = roundToCents(remaining - applied);
-              if (balances[debtId] <= epsilon && !payoffByDebtId[debtId]) {
-                payoffByDebtId[debtId] = { year, month, day, seq: payoffSeq++ };
-              }
-            }
+            rest = roundToCents(
+              amount - applyInfusion(infusion.id, infusion.targetDebtId, amount)
+            );
           }
+          if (rest > epsilon) distributeAuto(infusion.id, rest);
         });
       }
 
@@ -1121,236 +1119,53 @@ Object.assign(DebtSnowballUI.prototype, {
       monthTargets,
       dailyFloor,
       applySnowball,
+      projectionStartDateString,
+      infusionAllocations,
     };
   },
 
+  // The cash-infusion list's "Applied:" breakdown, per infusion id → debt id.
+  // It is READ from where the money is actually applied, never re-simulated:
+  // infusions dated before the projection start from the historical snapshot
+  // (which the projection seeds itself from), the rest from the projection
+  // walk. A third, monthly simulation used to compute this on its own and
+  // disagreed with the plan — applying a month's minimums before an infusion
+  // the plan applied first, crediting debts the plan had already cleared, and
+  // dropping money the plan spent. Pass the plan projection the panel is
+  // showing (refresh() does); without one, the advisory plan is projected
+  // for the viewed month. Every infusion gets an entry — {} for one that was
+  // never applied (undated, past the last payoff, or nothing left owing).
   calculateInfusionAllocations(projection = null) {
-    // This method calculates how each infusion is allocated to debts by running
-    // a month-by-month projection and tracking infusion-specific allocations.
-    // When the plan projection is supplied (the normal render path), its
-    // lump-sum payoff schedule is overlaid so a debt the plan has already paid
-    // off is not credited with a later infusion — keeping this breakdown's
-    // surviving-debt set in step with the hero card / plan list. Past-dated
-    // infusions, which the forward plan projection does not cover, still
-    // reconstruct from their own month.
     const infusions = this.store.getCashInfusions();
-    const debts = this.store.getDebts();
-    const byPayoffOrder = this.makePayoffOrder();
-    const settings = this.store.getDebtSnowballSettings();
-    const roundToCents = (value) =>
-      Math.round((Number(value) || 0) * 100) / 100;
-
-    if (infusions.length === 0 || debts.length === 0) {
-      return {};
-    }
-
-    const infusionsByMonthKey = {};
+    const allocations = {};
     infusions.forEach((infusion) => {
-      if (!infusion.date) return;
-      const infusionDate = this.getDateFromString(infusion.date);
-      if (!infusionDate) return;
-      const infusionYear = infusionDate.getFullYear();
-      const infusionMonth = infusionDate.getMonth();
-      const key = `${infusionYear}-${String(infusionMonth + 1).padStart(2, "0")}`;
-      if (!infusionsByMonthKey[key]) {
-        infusionsByMonthKey[key] = [];
-      }
-      infusionsByMonthKey[key].push(infusion);
+      if (infusion && infusion.id !== undefined) allocations[infusion.id] = {};
     });
-
-    // Find the earliest infusion date to start projection from. Only dated
-    // infusions count: an undated one (possible from an import or a cloud
-    // merge — _normalizeCashInfusion defaults `date` to "") would sort first
-    // and empty the whole breakdown. The grouping pass above already ignores
-    // them.
-    const sortedInfusions = infusions
-      .filter((inf) => this.isValidDateString(inf.date))
-      .sort((a, b) => a.date.localeCompare(b.date));
-    if (sortedInfusions.length === 0) return {};
-    const earliestDate = this.getDateFromString(sortedInfusions[0].date);
-    const latestDate = this.getDateFromString(sortedInfusions[sortedInfusions.length - 1].date);
-
-    if (!earliestDate) return {};
-
-    const today = new Date();
-    // Start the projection at the earlier of the first infusion's month and the
-    // current month, compared as absolute year-month indices (component-wise
-    // min(year)/min(month) is wrong across a year boundary).
-    const startIndex = Math.min(
-      this.getMonthIndex(earliestDate.getFullYear(), earliestDate.getMonth()),
-      this.getMonthIndex(today.getFullYear(), today.getMonth())
-    );
-    const startYear = Math.floor(startIndex / 12);
-    const startMonth = startIndex % 12;
-
-    const endYear = latestDate ? latestDate.getFullYear() : today.getFullYear();
-    const endMonth = latestDate ? latestDate.getMonth() : today.getMonth();
-
-    const baseDate = new Date(startYear, startMonth, 1);
-    const baseSummaries = this.getDebtSummaries(baseDate);
-    let balances = {};
-    const debtById = {};
-    const recurringTemplates = {};
-
-    baseSummaries.forEach(({ debt, remaining }) => {
-      balances[debt.id] = Number(remaining) || 0;
-      debtById[debt.id] = debt;
-    });
-
-    debts.forEach((debt) => {
-      if (!debtById[debt.id]) {
-        debtById[debt.id] = debt;
-        balances[debt.id] = Number(debt.balance) || 0;
-      }
-      const template = this.buildDebtRecurringTransaction(debt);
-      template.id = template.id || debt.minRecurringId || debt.id || Utils.generateUniqueId();
-      recurringTemplates[debt.id] = template;
-    });
-
-    const payoffByDebtId = {};
-    Object.keys(balances).forEach((debtId) => {
-      if (balances[debtId] <= 0) {
-        payoffByDebtId[debtId] = { year: startYear, month: startMonth, alreadyPaid: true };
-      }
-    });
-
-    const infusionAllocations = {};
-    infusions.forEach((inf) => {
-      infusionAllocations[inf.id] = {};
-    });
-
-    // Month index at which the real plan pays each debt off (lump sum, minimum
-    // or infusion). Used to drop debts from the candidate set in months strictly
-    // after the plan clears them, so the surviving-debt set matches the plan.
-    const planPayoffIndexByDebtId = {};
-    if (projection && projection.payoffByDebtId) {
-      Object.keys(projection.payoffByDebtId).forEach((debtId) => {
-        const p = projection.payoffByDebtId[debtId];
-        if (p && typeof p.year === "number" && typeof p.month === "number") {
-          planPayoffIndexByDebtId[debtId] = this.getMonthIndex(p.year, p.month);
-        }
-      });
+    if (infusions.length === 0 || this.store.getDebts().length === 0) {
+      return allocations;
     }
-
-    // Run projection month by month
-    let year = startYear;
-    let month = startMonth;
-    const maxMonths = (endYear - startYear) * 12 + (endMonth - startMonth) + 12; // Add buffer
-
-    for (let i = 0; i < maxMonths; i++) {
-      const monthKey = `${year}-${String(month + 1).padStart(2, "0")}`;
-      const monthIndex = this.getMonthIndex(year, month);
-
-      const monthlyTotalsByDebtId = {};
-      Object.keys(recurringTemplates).forEach((debtId) => {
-        const template = recurringTemplates[debtId];
-        if (!template) {
-          monthlyTotalsByDebtId[debtId] = 0;
-          return;
-        }
-        // Skip-aware, like the plan projection's minimum schedule.
-        const occurrences = this.getRecurringOccurrencesForMonth(
-          template,
-          year,
-          month
-        ).filter(
-          (occ) =>
-            !this.recurringManager ||
-            !this.recurringManager.isTransactionSkipped(occ.dateString, template.id)
-        );
-        const totalPayment = roundToCents(
-          occurrences.reduce((sum, occ) => sum + occ.amount, 0)
-        );
-        monthlyTotalsByDebtId[debtId] = totalPayment;
-      });
-
-      // Apply interest
-      Object.keys(balances).forEach((debtId) => {
-        const debt = debtById[debtId];
-        const balance = Number(balances[debtId]) || 0;
-        const interestRate = debt?.interestRate || 0;
-        if (balance <= 0 || interestRate <= 0) return;
-        const interest = roundToCents((balance * interestRate) / 1200);
-        if (interest > 0) {
-          balances[debtId] = roundToCents(balance + interest);
-        }
-      });
-
-      // Apply minimum payments
-      Object.keys(balances).forEach((debtId) => {
-        const balance = Number(balances[debtId]) || 0;
-        const scheduledMin = Number(monthlyTotalsByDebtId[debtId]) || 0;
-        if (balance <= 0 || scheduledMin <= 0) return;
-        const actualMin = roundToCents(Math.min(balance, scheduledMin));
-        balances[debtId] = roundToCents(balance - actualMin);
-      });
-
-      // Overlay the real plan's payoffs: a debt the snowball plan cleared in a
-      // strictly earlier month is gone, so an infusion here must skip it and
-      // flow to the next surviving debt. The payoff month itself is left active
-      // so an infusion landing the same month the plan clears the debt is still
-      // attributed to it (the plan applies infusions before its lump-sum sweep).
-      Object.keys(planPayoffIndexByDebtId).forEach((debtId) => {
-        if (
-          planPayoffIndexByDebtId[debtId] < monthIndex &&
-          Number(balances[debtId]) > 0
-        ) {
-          balances[debtId] = 0;
-        }
-      });
-
-      const monthInfusions = infusionsByMonthKey[monthKey] || [];
-
-      // Process each infusion individually to track allocation
-      monthInfusions.forEach((infusion) => {
-        const infusionAmount = Number(infusion.amount) || 0;
-        if (infusionAmount <= 0) return;
-
-        if (infusion.targetDebtId && balances[infusion.targetDebtId] > 0) {
-          // Targeted infusion
-          const currentBalance = Number(balances[infusion.targetDebtId]) || 0;
-          const applied = Math.min(currentBalance, infusionAmount);
-          balances[infusion.targetDebtId] = roundToCents(currentBalance - applied);
-          infusionAllocations[infusion.id][infusion.targetDebtId] = applied;
-          if (balances[infusion.targetDebtId] === 0 && !payoffByDebtId[infusion.targetDebtId]) {
-            payoffByDebtId[infusion.targetDebtId] = { year, month };
-          }
-        } else {
-          // Auto infusion — or a targeted infusion whose target is already
-          // paid off/unknown, redistributed like the projection walk and the
-          // historical snapshot - apply snowball priority
-          const debtOrder = Object.keys(balances)
-            .filter((debtId) => balances[debtId] > 0)
-            .sort(byPayoffOrder(balances));
-
-          let remaining = infusionAmount;
-          debtOrder.forEach((debtId) => {
-            if (remaining <= 0) return;
-            const currentBalance = Number(balances[debtId]) || 0;
-            if (currentBalance <= 0) return;
-            const applied = Math.min(currentBalance, remaining);
-            balances[debtId] = roundToCents(currentBalance - applied);
-            infusionAllocations[infusion.id][debtId] =
-              (infusionAllocations[infusion.id][debtId] || 0) + applied;
-            remaining -= applied;
-            if (balances[debtId] === 0 && !payoffByDebtId[debtId]) {
-              payoffByDebtId[debtId] = { year, month };
-            }
-          });
-        }
-      });
-
-      const activeDebtIds = Object.keys(balances).filter((id) => balances[id] > 0);
-      if (activeDebtIds.length === 0) break;
-
-      month += 1;
-      if (month > 11) {
-        month = 0;
-        year += 1;
-      }
+    if (!projection || !projection.infusionAllocations) {
+      const today = new Date();
+      const viewYear =
+        typeof this.currentViewYear === "number"
+          ? this.currentViewYear
+          : today.getFullYear();
+      const viewMonth =
+        typeof this.currentViewMonth === "number"
+          ? this.currentViewMonth
+          : today.getMonth();
+      projection = this.calculateSnowballProjection(viewYear, viewMonth, true);
     }
-
-    return infusionAllocations;
+    const startString = projection.projectionStartDateString;
+    const past = this.getHistoricalDebtSnapshot(
+      this.getDateFromString(startString)
+    ).infusionAllocations;
+    const future = projection.infusionAllocations;
+    Object.keys(allocations).forEach((infusionId) => {
+      const applied = past[infusionId] || future[infusionId];
+      if (applied) allocations[infusionId] = { ...applied };
+    });
+    return allocations;
   },
 
 });
