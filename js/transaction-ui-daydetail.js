@@ -356,6 +356,13 @@ Object.assign(TransactionUI.prototype, {
             transactionDiv.appendChild(remainingSpan);
           }
 
+          // The status chip and the row's controls travel as ONE inline unit:
+          // appended straight to the row they wrapped one at a time, leaving a
+          // lone "Edit" at the end of a line and the rest under it.
+          const actions = document.createElement("span");
+          actions.className = "transaction-actions";
+          let hasActions = false;
+
           let bankChip = null;
           if (
             showBankChips &&
@@ -363,7 +370,8 @@ Object.assign(TransactionUI.prototype, {
             !isAllocated && !isSkipped && !isHidden
           ) {
             bankChip = this._createBankStatusChip(date, index, t);
-            transactionDiv.appendChild(bankChip);
+            actions.appendChild(bankChip);
+            hasActions = true;
           }
 
           // Debt-linked transactions (minimum payments, snowball payments) are
@@ -385,7 +393,7 @@ Object.assign(TransactionUI.prototype, {
               }`
             );
             editBtn.textContent = "Edit";
-            transactionDiv.appendChild(editBtn);
+            actions.appendChild(editBtn);
 
             deleteBtn = document.createElement("span");
             deleteBtn.className = "delete-btn";
@@ -397,7 +405,8 @@ Object.assign(TransactionUI.prototype, {
               }`
             );
             deleteBtn.textContent = "Delete";
-            transactionDiv.appendChild(deleteBtn);
+            actions.appendChild(deleteBtn);
+            hasActions = true;
           }
 
           let skipBtn = null;
@@ -411,7 +420,8 @@ Object.assign(TransactionUI.prototype, {
               `${isSkipped ? "Unskip" : "Skip"} recurring ${normalizedType}`
             );
             skipBtn.textContent = isSkipped ? "Unskip" : "Skip";
-            transactionDiv.appendChild(skipBtn);
+            actions.appendChild(skipBtn);
+            hasActions = true;
           }
 
           // Add Settle/Unsettle button for expenses.
@@ -445,7 +455,11 @@ Object.assign(TransactionUI.prototype, {
               );
               settleBtn.textContent = isCurrentlyUnsettled ? "Mark Settled" : "Mark Unsettled";
             }
-            transactionDiv.appendChild(settleBtn);
+            actions.appendChild(settleBtn);
+            hasActions = true;
+          }
+          if (hasActions) {
+            transactionDiv.appendChild(actions);
           }
 
           const editForm = document.createElement("div");
@@ -660,6 +674,7 @@ Object.assign(TransactionUI.prototype, {
           }
 
           const saveButton = document.createElement("button");
+          saveButton.className = "primary-button";
           saveButton.setAttribute("aria-label", "Save changes");
           saveButton.textContent = "Save";
           saveButton.addEventListener("click", () => {
@@ -668,6 +683,7 @@ Object.assign(TransactionUI.prototype, {
           editForm.appendChild(saveButton);
 
           const cancelButton = document.createElement("button");
+          cancelButton.className = "secondary-button";
           cancelButton.setAttribute("aria-label", "Cancel editing");
           cancelButton.textContent = "Cancel";
           cancelButton.addEventListener("click", () => {
@@ -836,6 +852,9 @@ Object.assign(TransactionUI.prototype, {
             fromLabel.textContent = ` (from ${shortDate})`;
             div.appendChild(fromLabel);
 
+            const actions = document.createElement("span");
+            actions.className = "transaction-actions";
+
             const settleBtn = document.createElement("span");
             settleBtn.className = "settle-btn";
             settleBtn.setAttribute("role", "button");
@@ -932,7 +951,7 @@ Object.assign(TransactionUI.prototype, {
                 doSettle();
               }
             });
-            div.appendChild(settleBtn);
+            actions.appendChild(settleBtn);
 
             if (isRecurringItem) {
               // Recurring: show Skip button instead of Delete
@@ -955,7 +974,7 @@ Object.assign(TransactionUI.prototype, {
                   doSkip();
                 }
               });
-              div.appendChild(skipBtn);
+              actions.appendChild(skipBtn);
             } else {
               // One-time: show Delete button
               const deleteBtn = document.createElement("span");
@@ -1004,8 +1023,9 @@ Object.assign(TransactionUI.prototype, {
                   doDelete();
                 }
               });
-              div.appendChild(deleteBtn);
+              actions.appendChild(deleteBtn);
             }
+            div.appendChild(actions);
 
             modalTransactions.appendChild(div);
           });

@@ -369,12 +369,7 @@ class CloudSync {
     modalContent.appendChild(autoSyncDiv);
     const saveBtn = document.createElement("button");
     saveBtn.id = "save-credentials";
-    saveBtn.style.padding = "8px 16px";
-    saveBtn.style.backgroundColor = "#3498db";
-    saveBtn.style.color = "white";
-    saveBtn.style.border = "none";
-    saveBtn.style.borderRadius = "4px";
-    saveBtn.style.cursor = "pointer";
+    saveBtn.className = "primary-button";
     saveBtn.textContent = "Save Credentials";
     modalContent.appendChild(saveBtn);
     const noteText = document.createElement("p");

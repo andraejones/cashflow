@@ -620,8 +620,10 @@ body.app-locked .fab-today {
 /* Checkboxes are excluded: these are ID-specificity declarations, so they would
    beat `.settled-toggle-label input[type="checkbox"]` on every property they
    share and turn the toggles into wide padded fields. (.last-day-option-group
-   handles the same conflict for the one toggle inside an .option-group.) */
-#transactionForm input:not([type="checkbox"]),
+   handles the same conflict for the one toggle inside an .option-group.)
+   Radios are excluded for the same reason: the end-condition radios became
+   140px-wide boxed fields with the dot floating in the middle. */
+#transactionForm input:not([type="checkbox"]):not([type="radio"]),
 #transactionForm select {
   margin: 0;
   padding: 8px 10px;
@@ -1638,6 +1640,24 @@ body.app-locked #calendarOptions {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  /* #appModalClose is a <button>, the rest are <span>s: without these it kept
+     the UA's grey button face and padding, and its × sat off-centre in a grey
+     disc. */
+  box-sizing: border-box;
+  padding: 0;
+  border: none;
+  background: none;
+  line-height: 1;
+  font-family: inherit;
+}
+
+/* The close control is floated, and it is taller than a one-line title. A
+   block that starts beside a float and establishes its own formatting context
+   (the day detail's balance rows, the search box) is narrowed for its WHOLE
+   height, so those ended 36px short of everything below them. Making the
+   title at least as tall as the control ends the float inside the title. */
+.modal-content > .close + h3 {
+  min-height: 36px;
 }
 
 .modal-balance {
@@ -1766,6 +1786,11 @@ body.app-locked #calendarOptions {
   gap: 10px;
   background-color: #fff;
   box-shadow: var(--shadow-soft);
+  margin-bottom: 8px;
+}
+
+.debt-list {
+  margin-bottom: 12px;
 }
 
 .debt-details {
@@ -1805,6 +1830,23 @@ body.app-locked #calendarOptions {
   grid-template-columns: 140px 1fr;
   gap: 8px 12px;
   align-items: center;
+}
+
+.debt-form-grid input,
+.debt-form-grid select,
+.cash-infusion-form-grid input,
+.cash-infusion-form-grid select,
+.debt-plan-controls input[type="number"],
+.debt-plan-controls input[type="month"] {
+  padding: 8px 10px;
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+.debt-plan-controls input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary-color);
 }
 
 .debt-form-actions {
@@ -1943,6 +1985,17 @@ body.app-locked #calendarOptions {
   color: var(--primary-color);
 }
 
+/* A day-detail row's status chip and controls, kept together: inline after the
+   text when the whole group fits on the line, otherwise the GROUP drops to the
+   next line (it never splits a control off on its own). */
+.transaction-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  max-width: 100%;
+  vertical-align: middle;
+}
+
 .convert-debt-btn {
   cursor: pointer;
   background-color: var(--accent-color);
@@ -2070,6 +2123,9 @@ body.app-locked #calendarOptions {
 
   .day-content {
     font-size: 10px;
+    /* A 5-figure amount ("+5,425.70") is 2px wider than a 7-column cell at
+       390px and ran into the cell border. */
+    letter-spacing: -0.3px;
   }
 
   .transaction-count {
@@ -2527,10 +2583,16 @@ body.app-locked #calendarOptions {
   transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
 }
 
-.primary-button:hover {
+.primary-button:hover:not(:disabled) {
   background: linear-gradient(135deg, #0b5d53 0%, #0f7a6c 100%);
   transform: translateY(-1px);
   box-shadow: 0 16px 26px rgba(15, 122, 108, 0.26);
+}
+
+.primary-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
 }
 
 .secondary-button {
@@ -2644,8 +2706,36 @@ body.app-locked #calendarOptions {
   margin-bottom: 10px;
 }
 
+/* The radios sit inside an `.option-group`, whose generic rules make every
+   label a bold block and every input a bordered, padded field — which put each
+   radio on its own line above its label. Reassert an inline radio + label. */
+.radio-group label {
+  display: inline;
+  margin-bottom: 0;
+  font-weight: normal;
+  color: var(--ink-color);
+  cursor: pointer;
+}
+
+/* "End after [12] occurrences" stays one line: the count field would otherwise
+   take the forms' 140px / full-width text-field sizing and push its own unit
+   onto the next line. */
+.radio-group input[type="number"],
+#transactionForm .radio-group input[type="number"] {
+  width: 72px;
+  min-width: 0;
+  flex-grow: 0;
+  margin: 0 6px;
+}
+
 .radio-group input[type="radio"] {
-  margin-right: 8px;
+  width: auto;
+  min-width: 0;
+  margin: 0 8px 0 0;
+  padding: 0;
+  border: none;
+  vertical-align: middle;
+  accent-color: var(--primary-color);
 }
 
 
@@ -2812,7 +2902,7 @@ body.app-locked #calendarOptions {
 
   /* Checkboxes excluded for the same reason as the desktop rule above — a
      100%-wide, 10px-padded checkbox is not a toggle. */
-  #transactionForm input:not([type="checkbox"]),
+  #transactionForm input:not([type="checkbox"]):not([type="radio"]),
   #transactionForm select,
   #transactionForm button {
     width: 100%;
@@ -2840,13 +2930,22 @@ body.app-locked #calendarOptions {
     margin-top: 8px;
   }
 
+  /* The inline edit form's own fields (not the draw editor's rows, which size
+     themselves) fill the row instead of each stopping at its intrinsic width. */
+  .edit-form > input:not([type="checkbox"]),
+  .edit-form > select {
+    width: calc(100% - 10px);
+    box-sizing: border-box;
+  }
+
 
   #modalTransactions div {
     padding: 10px 5px;
     border-bottom: 1px solid #eee;
   }
 
-  .debt-form-grid {
+  .debt-form-grid,
+  .cash-infusion-form-grid {
     grid-template-columns: 1fr;
   }
 
@@ -2899,6 +2998,12 @@ body.app-locked #calendarOptions {
     margin-bottom: 5px;
   }
 
+  /* Stacked, the row layout's left indents only make a ragged left edge. */
+  .search-result-description,
+  .search-result-recurring {
+    margin-left: 0;
+  }
+
 
   .option-group select,
   .option-group input[type="number"],
@@ -2929,7 +3034,11 @@ body.app-locked #calendarOptions {
 
   .close {
     font-size: 32px;
-    padding: 5px;
+    width: 44px;
+    height: 44px;
+    /* Tucked into the corner so the taller touch target does not push the
+       title (which has to clear it — see `.close + h3`) further down. */
+    margin: -8px -8px 0 0;
   }
 
 
@@ -3128,6 +3237,18 @@ body.app-locked #calendarOptions {
   border: 1px dashed var(--border-color);
   border-radius: var(--radius-sm);
   background: var(--surface-muted);
+  box-sizing: border-box;
+}
+
+.bank-reconcile-upload input[type="file"]::file-selector-button {
+  font: inherit;
+  margin-right: 10px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  color: var(--ink-color);
+  cursor: pointer;
 }
 
 .bank-reconcile-summary {
@@ -3275,6 +3396,25 @@ body.app-locked #calendarOptions {
   color: var(--accent-strong);
   font-style: normal;
   font-size: 0.82rem;
+}
+
+/* Phone-width reconcile rows: four columns left the merchant about six
+   characters on one clipped line (and seven lines once it could wrap beside an
+   action button). Date, amount and action share the first line; the merchant
+   gets the full width under them. (Here, after the base rules, because an
+   earlier media block would lose to them.) */
+@media (max-width: 480px) {
+  .bank-reconcile-row {
+    grid-template-columns: 2.6rem 1fr auto;
+    row-gap: 0.15rem;
+  }
+
+  .bank-reconcile-row .br-desc {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
 }
 
 
