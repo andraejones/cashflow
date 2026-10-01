@@ -1618,17 +1618,75 @@ async function dismissAlert(page) {
       window.app.updateUI();
       await new Promise((r) => setTimeout(r, 200));
       const row = document.querySelector(`[data-date="${today}"]`);
+      // Contrast of the agenda figure against ITS OWN background. Today's row
+      // is an amber gradient, which the allocation purple did not read on, so
+      // the figure has to bring an opaque background of its own.
+      const figure = document.querySelector("#calendarAgenda .balance.free-funds");
+      const luminance = (rgb) => {
+        const [r, g, b] = rgb.map((v) => {
+          const c = v / 255;
+          return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+        });
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      };
+      const parse = (css) => (css.match(/[\d.]+/g) || []).map(Number);
+      let contrast = 0;
+      let opaque = false;
+      if (figure) {
+        const cs = getComputedStyle(figure);
+        const bg = parse(cs.backgroundColor);
+        opaque = bg.length === 3 || bg[3] === 1;
+        const [hi, lo] = [luminance(parse(cs.color)), luminance(bg)].sort((a, b) => b - a);
+        contrast = (hi + 0.05) / (lo + 0.05);
+      }
       return {
         id,
         holder: store.getFreeFundsRecurringId(),
         shown: row ? !!row.querySelector(".balance.free-funds") : false,
         text: row ? row.textContent : "",
+        agendaFigure: !!figure,
+        opaque,
+        contrast: Math.round(contrast * 100) / 100,
       };
     });
     check("designating a free-funds bucket takes effect",
       freeFunds.holder === freeFunds.id);
     check("the current day shows the free-funds figure instead of a balance",
       freeFunds.shown, freeFunds.text.slice(0, 80));
+    check("the agenda free-funds figure is legible on today's highlighted row",
+      freeFunds.agendaFigure && freeFunds.opaque && freeFunds.contrast >= 4.5,
+      JSON.stringify({ figure: freeFunds.agendaFigure, opaque: freeFunds.opaque, contrast: freeFunds.contrast }));
+
+    // The add FAB is position:fixed in the bottom-right corner, exactly where
+    // an agenda row keeps its balance. The page ends where the list does, so
+    // without room below it the LAST row cannot be scrolled out from under the
+    // button — and on the last day of a month that row is today's. Measured at
+    // a mobile width (the FABs are display:none above 767px), at full scroll.
+    const fabViewport = page.viewport();
+    await page.setViewport({ width: 375, height: 812 });
+    await sleep(300);
+    const fabClearance = await page.evaluate(async () => {
+      window.scrollTo(0, document.documentElement.scrollHeight);
+      await new Promise((r) => setTimeout(r, 300));
+      const rows = document.querySelectorAll("#calendarAgenda .agenda-row");
+      const last = rows[rows.length - 1];
+      const fab = document.getElementById("mobileAddBtn").getBoundingClientRect();
+      const row = last ? last.getBoundingClientRect() : null;
+      return {
+        agenda: window.app.calendarUI.viewMode === "agenda",
+        fabShown: fab.width > 0,
+        scrolled: window.scrollY > 0,
+        rowBottom: row ? Math.round(row.bottom) : null,
+        fabTop: Math.round(fab.top),
+      };
+    });
+    check("the last agenda row scrolls clear of the add button",
+      fabClearance.agenda && fabClearance.fabShown && fabClearance.scrolled &&
+        fabClearance.rowBottom !== null && fabClearance.rowBottom <= fabClearance.fabTop,
+      JSON.stringify(fabClearance));
+    if (fabViewport) await page.setViewport(fabViewport);
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await sleep(300);
 
     // The designation flag lives on the recurring definition and outlives the
     // series' periods. End the series the way "delete all future occurrences"
