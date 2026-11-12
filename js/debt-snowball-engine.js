@@ -321,6 +321,21 @@ Object.assign(DebtSnowballUI.prototype, {
     // calculateInfusionAllocations).
     const infusionAllocations = {};
 
+    // The day each debt reached zero, for the debts that are at zero by the
+    // cutoff: the date of the payment or infusion that cleared it, or — for a
+    // balance typed as 0 — its balance date (null when that debt has none).
+    // The minimum series of a cleared debt ends on this day (see
+    // computeMinimumPaymentEndDate). It is a fact about the past, so it does
+    // not move as "today" does.
+    const clearedOnByDebtId = {};
+    const noteCleared = (debtId, dateKey) => {
+      if ((Number(remainingByDebtId[debtId]) || 0) > 0) {
+        delete clearedOnByDebtId[debtId];
+      } else if (clearedOnByDebtId[debtId] === undefined) {
+        clearedOnByDebtId[debtId] = dateKey;
+      }
+    };
+
     const ensureDateBucket = (dateString) => {
       if (!eventsByDate.has(dateString)) {
         eventsByDate.set(dateString, {
@@ -405,6 +420,12 @@ Object.assign(DebtSnowballUI.prototype, {
         }
         ensureDateBucket(dateKey).transactions.push(t);
       });
+    });
+
+    // At zero before any event: the typed balance itself (after the add-backs
+    // above, which can lift it for a cutoff before the balance date).
+    debts.forEach((debt) => {
+      noteCleared(debt.id, basisById[debt.id].asOf || null);
     });
 
     cashInfusions.forEach((infusion) => {
@@ -540,6 +561,9 @@ Object.assign(DebtSnowballUI.prototype, {
         }
         distributeAuto(infusion.id, rest, dateKey);
       });
+      if (bucket.infusions.length > 0) {
+        debts.forEach((debt) => noteCleared(debt.id, dateKey));
+      }
 
       bucket.transactions.forEach((transaction) => {
         const debtId = transaction.debtId;
@@ -551,6 +575,7 @@ Object.assign(DebtSnowballUI.prototype, {
         remainingByDebtId[debtId] = roundToCents(
           Math.max(0, remainingByDebtId[debtId] - amount)
         );
+        noteCleared(debtId, dateKey);
       });
     });
 
@@ -561,7 +586,12 @@ Object.assign(DebtSnowballUI.prototype, {
       accrueThrough(cutoffDateString, false);
     }
 
-    return { paidByDebtId, remainingByDebtId, infusionAllocations };
+    return {
+      paidByDebtId,
+      remainingByDebtId,
+      infusionAllocations,
+      clearedOnByDebtId,
+    };
   },
 
   getDebtSummaries(cutoffDate = null) {
@@ -574,6 +604,9 @@ Object.assign(DebtSnowballUI.prototype, {
         debt,
         paid,
         remaining,
+        // The day this debt reached zero (see getHistoricalDebtSnapshot);
+        // undefined while it still owes.
+        clearedOn: snapshot.clearedOnByDebtId[debt.id],
       };
     });
   },
@@ -637,9 +670,11 @@ Object.assign(DebtSnowballUI.prototype, {
     let balances = {};
     const debtById = {};
     const recurringTemplates = {};
-    baseSummaries.forEach(({ debt, remaining }) => {
+    const clearedOnById = {};
+    baseSummaries.forEach(({ debt, remaining, clearedOn }) => {
       balances[debt.id] = Number(remaining) || 0;
       debtById[debt.id] = debt;
+      clearedOnById[debt.id] = clearedOn;
     });
     debts.forEach((debt) => {
       if (!debtById[debt.id]) {
@@ -680,6 +715,11 @@ Object.assign(DebtSnowballUI.prototype, {
           alreadyPaid: true,
           seq: payoffSeq++,
         };
+        // The day it reached zero, when the snapshot knows it: where its
+        // minimum series ends (computeMinimumPaymentEndDate).
+        if (typeof clearedOnById[debtId] === "string" && clearedOnById[debtId]) {
+          payoffByDebtId[debtId].clearedOn = clearedOnById[debtId];
+        }
       }
     });
 
@@ -762,6 +802,27 @@ Object.assign(DebtSnowballUI.prototype, {
       const todayDateString = Utils.formatDateString(
         new Date(currentYear, currentMonth, today.getDate(), 12, 0, 0)
       );
+      // getRunningBalanceForDate walks this month from its STARTING balance,
+      // and that comes from the store's monthlyBalances map, which only
+      // updateMonthlyBalances rebuilds — the cache invalidation at the top of
+      // this method does not touch it. CalendarUI runs the projection BEFORE
+      // its own rebuild, so anything that had moved a prior month since the
+      // last render left the plan seeded from yesterday's figure: an entry
+      // added or re-dated in an earlier month, and every month turnover, when
+      // rollForwardAllocations carries the rolling buckets across the month
+      // boundary (their reserve was then counted in the stale opening balance
+      // AND again on today). The plan was materialized from the wrong
+      // checking balance and corrected itself only on the next render, so
+      // payoffs — and the 30-day Minimum — moved between two renders of the
+      // same day (TEST 160). Rebuilt for the later of the viewed and current
+      // month, so the map this leaves behind covers whatever the calendar is
+      // showing.
+      if (typeof this.calculationService.updateMonthlyBalances === "function") {
+        const seedIndex = Math.max(viewIndex, currentIndex);
+        this.calculationService.updateMonthlyBalances(
+          new Date(Math.floor(seedIndex / 12), seedIndex % 12, 1, 12, 0, 0)
+        );
+      }
       startingChecking =
         Number(
           this.calculationService.getRunningBalanceForDate(todayDateString)

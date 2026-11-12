@@ -1889,9 +1889,16 @@ try {
   }
 
   // A stale non-forced leftover (e.g. from an auto-generate-on era on another
-  // device) appears before the next render's sweep.
-  s.addTransaction("2026-06-03", {
+  // device) appears before the next render's sweep. It is still to come, so
+  // it is the sweep's to remove. One whose day has already passed is not: it
+  // happened (TEST 159), and turning auto-generate off must not un-pay it.
+  s.addTransaction("2026-06-20", {
     id: "stale-snow", amount: 10, type: "expense",
+    description: "Snowball Payoff: Card F", debtId, debtRole: "snowball",
+    debtName: "Card F", snowballMonth: "2026-06", snowballGenerated: true,
+  });
+  s.addTransaction("2026-06-03", {
+    id: "past-snow", amount: 10, type: "expense",
     description: "Snowball Payoff: Card F", debtId, debtRole: "snowball",
     debtName: "Card F", snowballMonth: "2026-06", snowballGenerated: true,
   });
@@ -1905,8 +1912,11 @@ try {
   ) {
     throw new Error("Auto-off sweep must keep the force-generated row");
   }
-  if ((s.getTransactions()["2026-06-03"] || []).some((t) => t.id === "stale-snow")) {
+  if ((s.getTransactions()["2026-06-20"] || []).some((t) => t.id === "stale-snow")) {
     throw new Error("Stale non-forced snowball row must still be swept");
+  }
+  if (!(s.getTransactions()["2026-06-03"] || []).some((t) => t.id === "past-snow")) {
+    throw new Error("A payoff whose day has passed is history and must survive the sweep");
   }
   if (!s._deletedItems.transactions.some((x) => x.id === "stale-snow")) {
     throw new Error("Swept stale row must be tombstoned");
@@ -14371,6 +14381,300 @@ console.log("TEST 155: The Balance Date Survives Storage, Import And The Cloud M
     assert.deepStrictEqual(u.getDebts().map((d) => [d.id, d.balanceAsOf, d.interestFrom]).sort(),
       [["dated", "2026-10-02", null], ["old", null, "2026-10-01"], ["remoteOnly", null, "2026-09-20"]]);
     console.log("✅ balanceAsOf and the interest stamp survive normalization, import/export and the merge");
+  } finally {
+    clock.restore();
+    stores.forEach((st) => st.cancelPendingSave());
+  }
+}
+
+console.log("TEST 156: A Category Label Is Not A Payee The Bank Prints");
+{
+  // The payee-conflict block (_blockMatch) refuses an exact-amount pair when
+  // BOTH names are payees the other side knows. The app side's "known to the
+  // bank" check was prefix-tolerant, so an unrelated "TIKTOK SHOP" line made
+  // the category label "Car Shopping" read as a bank payee (SHOP is a prefix
+  // of SHOPPING). A same-day, same-amount withdrawal was then refused its only
+  // entry: reported "Missing from app", the entry stamped Not in bank, and
+  // Add would have put the money on the calendar twice. A truncation (the
+  // shorter word is most of the longer) still attests; a stem does not.
+  const s = new TransactionStore();
+  s.resetData();
+  const rm = new RecurringTransactionManager(s);
+  const ui = new BankReconcileUI(s, rm, () => {}, () => {});
+  ui._renderReport = () => {};
+  // An older entry makes the bank payee one the app already knows.
+  s.addTransaction("2026-05-02", { amount: 900, type: "expense", description: "Transactor: Jane Example", settled: true });
+  s.addTransaction("2026-07-06", { amount: 3500, type: "expense", description: "Car Shopping", settled: false });
+  const csv =
+    "Posted Date,Transaction Date,Description,Deposit,Withdrawal,Balance\n" +
+    "7/6/2026,7/6/2026,Withdrawal Transactor: JANE EXAMPLE,,($3500.00),$1000.00\n" +
+    "7/7/2026,7/7/2026,Withdrawal Debit Card TIKTOK SHOP TIKTOK.COM CA Card 1111,,($19.99),$980.01\n";
+  const parsed = ui._parseSuncoastCsv(csv);
+  ui._run(parsed.rows);
+  const missing = ui.result.missingFromApp.map((b) => b.signed);
+  if (missing.includes(-3500)) {
+    throw new Error("The $3,500 withdrawal must match its entry, not be reported missing");
+  }
+  const big = parsed.rows.find((b) => b.signed === -3500);
+  if (!big._match || big._match.description !== "Car Shopping") {
+    throw new Error("The withdrawal must pair with the Car Shopping entry");
+  }
+  // Truncation still attests: "TALKIAT" stands for "TALKIATRY".
+  if (!ui._attestedIn(new Set(["TALKIAT"]), new Set(["TALKIATRY"]), true)) {
+    throw new Error("A truncated word must still attest");
+  }
+  if (ui._attestedIn(new Set(["SHOPPING"]), new Set(["SHOP"]), true)) {
+    throw new Error("A stem must not attest");
+  }
+  s.cancelPendingSave();
+  console.log("✅ A stem on the statement no longer blocks a category-labelled entry");
+}
+
+console.log("TEST 157: A Moved Copy Stays A Moved Copy When It Is Re-Dated Again");
+{
+  // Moving a recurring occurrence leaves a one-time copy that names its
+  // occurrence (originalRecurringId + movedFrom) and a move record. The paths
+  // that rebuild a row to re-date it (reconcile's Move / Mark settled, the
+  // carried-forward Settle) dropped both fields when the row was ALREADY a
+  // moved copy, so "delete all future", a split, the merge's one-copy rule and
+  // a move back could no longer find it, and the move record still pointed at
+  // the date it had left.
+  const clock = __balanceAsOfClock();
+  const stores = [];
+  try {
+    clock.at(2026, 6, 20);
+    const s = new TransactionStore();
+    stores.push(s);
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    const ui = new BankReconcileUI(s, rm, () => {}, () => {});
+    const rid = s.addRecurringTransaction({
+      startDate: "2026-06-05", amount: 40, type: "expense",
+      description: "Gym", recurrence: "monthly", settled: true, allocated: false,
+    });
+    rm.applyRecurringTransactions(2026, 6);
+    const occIndex = s.getTransactions()["2026-07-05"].findIndex((t) => t.recurringId === rid);
+    ui._relocateEntry({ date: "2026-07-05", recurringId: rid, id: null }, occIndex, "2026-07-07", false);
+    const first = s.getTransactions()["2026-07-07"].find((t) => t.originalRecurringId === rid);
+    if (!first) throw new Error("The first move must leave a moved copy");
+    // Re-date the copy (reconcile's fix-date on a one-time row).
+    const idx = s.getTransactions()["2026-07-07"].indexOf(first);
+    ui._relocateEntry({ date: "2026-07-07", recurringId: null, id: first.id }, idx, "2026-07-08", true);
+    const again = (s.getTransactions()["2026-07-08"] || []).find((t) => t.description === "Gym");
+    if (!again || again.originalRecurringId !== rid || again.movedFrom !== "2026-07-05") {
+      throw new Error("The re-dated copy must keep naming its occurrence");
+    }
+    const move = s.getMoveForRecurring(rid, "2026-07-05");
+    if (!move || move.toDate !== "2026-07-08") {
+      throw new Error(`The move record must follow the copy, got ${move && move.toDate}`);
+    }
+    // Back onto the scheduled day: no longer a move.
+    const target = { amount: 40, type: "expense" };
+    s.carryMoveProvenance(again, target, "2026-07-05");
+    if (s.getMoveForRecurring(rid, "2026-07-05") || target.movedFrom !== "2026-07-05") {
+      throw new Error("Landing back on the scheduled day must drop the move record but keep the link");
+    }
+    s.moveTransaction(rid, "2026-07-05", "2026-07-08");
+    // Ending the series from the occurrence removes the copy with it.
+    rm.endSeriesFrom(rid, "2026-07-05");
+    if ((s.getTransactions()["2026-07-08"] || []).some((t) => t.description === "Gym")) {
+      throw new Error("Delete all future must remove the re-dated copy too");
+    }
+    console.log("✅ A re-dated moved copy keeps its occurrence and its move record");
+  } finally {
+    clock.restore();
+    stores.forEach((st) => st.cancelPendingSave());
+  }
+}
+
+console.log("TEST 158: A Minimum Series Pays What The Debt Says, Fitted In One Pass");
+{
+  // The debt and its minimum series are two rows, and the merge keeps the
+  // newer copy of each on its own, so an edited debt can be paired with a
+  // stale series: the projection paid debt.minPayment while the calendar
+  // expanded the series' old amount (and old name). reconcileMinimumSeriesSchedules
+  // now rewrites both from the debt. Separately, when the month's target ROSE,
+  // adjustMinimumPaymentTransactions released its reduced rows but left them
+  // at the reduced amount and returned, so the calendar disagreed with the
+  // plan until the next render.
+  const clock = __balanceAsOfClock();
+  const stores = [];
+  try {
+    clock.at(2026, 6, 1);
+    const s = new TransactionStore();
+    stores.push(s);
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    const calc = new CalculationService(s, rm);
+    const ui = new DebtSnowballUI(s, rm, () => {}, calc);
+    const debtId = s.addDebt({
+      name: "Card N", balance: 900, balanceAsOf: "2026-06-30", minPayment: 50,
+      recurrence: "semi-monthly", semiMonthlyDays: [5, 20], dueStartDate: "2026-06-05",
+      interestRate: 0,
+    });
+    ui.ensureMinimumPaymentRecurring(s.getDebts().find((d) => d.id === debtId));
+    const rt = s.getRecurringTransactions().find((r) => r.debtId === debtId);
+    rt.amount = 61.31;
+    rt.description = "Debt Payment: Old Name";
+    rt.debtName = "Old Name";
+    if (!ui.reconcileMinimumSeriesSchedules()) {
+      throw new Error("A drifted series amount/name must be reported as a change");
+    }
+    if (rt.amount !== 50 || rt.description !== "Debt Payment: Card N" || rt.debtName !== "Card N") {
+      throw new Error(`The series must follow the debt, got ${rt.amount} ${rt.description}`);
+    }
+    if (ui.reconcileMinimumSeriesSchedules()) {
+      throw new Error("A series already in step must not be rewritten");
+    }
+
+    // Two rows this month, previously fitted to a lower target.
+    rm.invalidateCache();
+    rm.applyRecurringTransactions(2026, 6);
+    const rows = () => ["2026-07-05", "2026-07-20"].map((d) =>
+      (s.getTransactions()[d] || []).find((t) => t.debtId === debtId && t.debtRole === "minimum"));
+    const [a, b] = rows();
+    a.amount = 25; a.modifiedInstance = true; a.id = a.id || "minA";
+    b.amount = 0; b.hidden = true; b.modifiedInstance = true; b.id = b.id || "minB";
+    ui.adjustMinimumPaymentTransactions(2026, 6, { [debtId]: 75 });
+    const total = rows().reduce((sum, t) => sum + Number(t.amount), 0);
+    if (Math.abs(total - 75) > 0.005) {
+      throw new Error(`One pass must fit the month to its new target, got ${total}`);
+    }
+    if (rows()[0].hidden === true) {
+      throw new Error("The released first payment must be visible again");
+    }
+    console.log("✅ The series follows the debt, and a risen target is fitted in one pass");
+  } finally {
+    clock.restore();
+    stores.forEach((st) => st.cancelPendingSave());
+  }
+}
+
+console.log("TEST 159: A Payoff Stays Paid Once Its Day Comes, And Stays Ended");
+{
+  // (a) The horizon sweep reconciled every snowball row against the
+  // projection's expected payoffs — and the projection only schedules from
+  // tomorrow, so on the payoff's own day the row was deleted, the debt read
+  // unpaid, and the payoff was rescheduled for tomorrow, every day. (b) A
+  // debt already at zero ended its minimum series at "the last day of the
+  // month before now", which slid forward each month and re-admitted one more
+  // full-amount minimum on a debt that owed nothing. It now ends on the day
+  // the debt reached zero.
+  const clock = __balanceAsOfClock();
+  const stores = [];
+  const setup = (debt, settings) => {
+    const s = new TransactionStore();
+    stores.push(s);
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    const calc = new CalculationService(s, rm);
+    const ui = new DebtSnowballUI(s, rm, () => {}, calc);
+    const id = s.addDebt(debt);
+    ui.ensureMinimumPaymentRecurring(s.getDebts().find((d) => d.id === id));
+    s.setDebtSnowballSettings(settings);
+    const render = () => {
+      const now = new Date();
+      s.autoSettleExpiredRecurring();
+      if (s.closeOutExpiredAllocations()) rm.invalidateCache();
+      s.rollForwardAllocations();
+      rm.applyRecurringTransactions(now.getFullYear(), now.getMonth());
+      ui.ensureSnowballPaymentsForHorizon(now.getFullYear(), now.getMonth());
+      calc.updateMonthlyBalances(now);
+    };
+    return { s, rm, calc, ui, id, render };
+  };
+  try {
+    // (a)
+    clock.at(2026, 5, 10);
+    const A = setup(
+      { name: "Card P", balance: 600, balanceAsOf: "2026-06-01", minPayment: 25,
+        recurrence: "monthly", dueDay: 20, dueStartDate: "2026-06-20", interestRate: 0 },
+      { dailyFloor: 500, extraPaymentStartMonth: "", autoGenerate: true }
+    );
+    A.s.addTransaction("2026-06-01", { amount: 1000, type: "balance", description: "Ending Balance" });
+    A.s.addTransaction("2026-06-12", { amount: 2000, type: "income", description: "Pay" });
+    A.render();
+    if (!(A.s.getTransactions()["2026-06-12"] || []).some((t) => t.snowballGenerated === true)) {
+      throw new Error("Expected the payoff on 2026-06-12");
+    }
+    const balances = [];
+    [12, 13, 21].forEach((day) => {
+      clock.at(2026, 5, day);
+      A.render();
+      A.render();
+      const payoff = (A.s.getTransactions()["2026-06-12"] || []).find((t) => t.snowballGenerated === true);
+      if (!payoff || Number(payoff.amount) !== 600) {
+        throw new Error(`The payoff must survive its own day (Jun ${day})`);
+      }
+      const remaining = A.ui.getHistoricalDebtSnapshot(new Date(2026, 5, day + 1)).remainingByDebtId[A.id];
+      if (remaining !== 0) throw new Error(`The debt must stay paid on Jun ${day}, got ${remaining}`);
+      balances.push(A.calc.getRunningBalanceForDate(Utils.formatDateString(new Date())));
+    });
+    if (new Set(balances).size !== 1 || balances[0] !== 2400) {
+      throw new Error(`Balances must hold at 2400 after the payoff, got ${balances.join(",")}`);
+    }
+
+    // (b) Cleared by its own minimums on May 20; walk the months after.
+    clock.at(2026, 3, 10);
+    const B = setup(
+      { name: "Card Q", balance: 50, balanceAsOf: "2026-04-01", minPayment: 25,
+        recurrence: "monthly", dueDay: 20, dueStartDate: "2026-04-20", interestRate: 0 },
+      { dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: false }
+    );
+    B.s.addTransaction("2026-04-01", { amount: 1000, type: "balance", description: "Ending Balance" });
+    [[3, 10], [4, 21], [5, 25], [6, 2], [7, 3], [8, 5]].forEach(([m, d]) => {
+      clock.at(2026, m, d);
+      B.render();
+      B.render();
+    });
+    const minimums = Object.keys(B.s.getTransactions()).filter((date) =>
+      B.s.getTransactions()[date].some((t) => t.debtId === B.id && Number(t.amount) > 0));
+    if (minimums.join() !== "2026-04-20,2026-05-20") {
+      throw new Error(`A paid-off debt must not regrow minimums, got ${minimums.join()}`);
+    }
+    const end = B.s.getRecurringTransactions().find((r) => r.debtId === B.id).endDate;
+    if (end !== "2026-05-20") throw new Error(`The series must end the day it cleared, got ${end}`);
+    console.log("✅ A payoff survives its day; a paid-off debt's minimums stay ended");
+  } finally {
+    clock.restore();
+    stores.forEach((st) => st.cancelPendingSave());
+  }
+}
+
+console.log("TEST 160: The Plan Seeds From Today's Balance, Not The Last Render's");
+{
+  // calculateSnowballProjection seeds checking from getRunningBalanceForDate,
+  // which walks the month from the stored monthlyBalances — rebuilt only by
+  // updateMonthlyBalances, which the calendar runs AFTER the projection. An
+  // entry added to an earlier month (and every month turnover) therefore
+  // left the plan seeded from the previous render's figure for one render.
+  const clock = __balanceAsOfClock();
+  const stores = [];
+  try {
+    clock.at(2026, 6, 10);
+    const s = new TransactionStore();
+    stores.push(s);
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    const calc = new CalculationService(s, rm);
+    const ui = new DebtSnowballUI(s, rm, () => {}, calc);
+    s.addTransaction("2026-06-01", { amount: 1000, type: "balance", description: "Ending Balance" });
+    s.addRecurringTransaction({ startDate: "2026-08-01", amount: 2000, type: "income", description: "Pay", recurrence: "monthly" });
+    const id = s.addDebt({ name: "Card R", balance: 1200, balanceAsOf: "2026-07-01", minPayment: 0,
+      recurrence: "monthly", dueDay: 28, dueStartDate: "2026-07-28", interestRate: 0 });
+    ui.ensureMinimumPaymentRecurring(s.getDebts().find((d) => d.id === id));
+    s.setDebtSnowballSettings({ dailyFloor: 0, extraPaymentStartMonth: "", autoGenerate: true });
+    rm.applyRecurringTransactions(2026, 6);
+    ui.ensureSnowballPaymentsForHorizon(2026, 6);
+    calc.updateMonthlyBalances(new Date(2026, 6, 1));
+    // An entry in LAST month lifts today's checking above the debt.
+    s.addTransaction("2026-06-20", { amount: 500, type: "income", description: "Refund" });
+    const projection = ui.calculateSnowballProjection(2026, 6, true);
+    const lump = projection.monthTargets["2026-07"].lumpSumDateByDebtId[id];
+    if (lump !== "2026-07-11") {
+      throw new Error(`The plan must see the new entry at once (payoff tomorrow), got ${lump}`);
+    }
+    console.log("✅ The plan seeds from a freshly rebuilt balance");
   } finally {
     clock.restore();
     stores.forEach((st) => st.cancelPendingSave());

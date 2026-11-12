@@ -11,8 +11,8 @@ CashFlow Calendar is an offline-first, single-page personal finance application 
 **No build process required.** Open `index.html` directly in a browser or serve via any static server.
 
 **Tests:** `npm test` (or run the two scripts directly with Node) — it must pass before every commit:
-- `node scripts/verify-logic.js` — 149 numbered integration tests over vm-loaded sources
-  (numbered up to TEST 155; the numbering has gaps where tests were merged or
+- `node scripts/verify-logic.js` — 154 numbered integration tests over vm-loaded sources
+  (numbered up to TEST 160; the numbering has gaps where tests were merged or
   removed along with the feature they covered).
   Seven of them are SWEEPS rather than scenarios, and they are the ones worth
   extending when something new is added:
@@ -155,7 +155,7 @@ and it is what `Utils.formatAmount` and the snowball hero's `formatWhole` use,
 so both collapse `-0` explicitly. TEST 81 asserts the rule, not just that the
 two harness stubs agree with the real Utils.
 
-Money entering the store is normalized, never trusted: the domain collections go through `_normalizeDebt` / `_normalizeCashInfusion` (both built on `_finiteNumber`), and the three inputs the balance walk steps through — the transactions map, the recurring definitions, and the monthly anchors — are swept by `_repairWalkAmounts()` in both `loadData` and `importData`. That sweep is the only guard covering data that never passed a form: `"1e999"` is valid JSON that parses to `Infinity`, so an imported backup can otherwise put a non-finite amount straight into the walk. It rewrites non-finite values only, so finite money is never re-rounded. Use `Number.isFinite`, never bare `isNaN`, on any amount that gets persisted. A value the FORM rejects has to be rejected on every other path too: the snowball's `dailyFloor` was coerced with `_finiteNumber` in `loadData`, `importData` and `setDebtSnowballSettings`, none of which refused a negative — and a negative floor makes the projection schedule payoffs that drive the projected balance below zero. `_normalizeDailyFloor` is the single choke point now (TEST 97). Debt and infusion money follows the same rule through `_normalizeDebtMoney` (a debt's `balance` / `minPayment`, an infusion's `amount`: never below 0, on add/update, load, import and the merge's import), and `reconcileMinimumSeriesSchedules` gives a minimum series left at a negative amount the debt's minimum; a restored -50 minimum was booked on the calendar as +$50 income every month (TEST 144).
+Money entering the store is normalized, never trusted: the domain collections go through `_normalizeDebt` / `_normalizeCashInfusion` (both built on `_finiteNumber`), and the three inputs the balance walk steps through — the transactions map, the recurring definitions, and the monthly anchors — are swept by `_repairWalkAmounts()` in both `loadData` and `importData`. That sweep is the only guard covering data that never passed a form: `"1e999"` is valid JSON that parses to `Infinity`, so an imported backup can otherwise put a non-finite amount straight into the walk. It rewrites non-finite values only, so finite money is never re-rounded. Use `Number.isFinite`, never bare `isNaN`, on any amount that gets persisted. A value the FORM rejects has to be rejected on every other path too: the snowball's `dailyFloor` was coerced with `_finiteNumber` in `loadData`, `importData` and `setDebtSnowballSettings`, none of which refused a negative — and a negative floor makes the projection schedule payoffs that drive the projected balance below zero. `_normalizeDailyFloor` is the single choke point now (TEST 97). Debt and infusion money follows the same rule through `_normalizeDebtMoney` (a debt's `balance` / `minPayment`, an infusion's `amount`: never below 0, on add/update, load, import and the merge's import), and `reconcileMinimumSeriesSchedules` gives any minimum series whose amount differs from the debt's minimum the debt's minimum: a restored -50 minimum was booked on the calendar as +$50 income every month (TEST 144), and a merge that paired an edited debt with a stale series paid one amount in the plan and another on the calendar (TEST 158).
 
 Shape is guarded per FIELD too, and that is the reader's job. Only money
 (`_repairWalkAmounts`) and the domain collections (`_normalizeDebt` /
@@ -344,7 +344,13 @@ standing while the other buckets are quietly credited back. It must also call
 itself (the settle paths stamp "cleared"): a copy rebuilt without its
 `bankStatus` falls back to `getBankStatus`'s defaults, so a Cleared recurring
 bill came back "Not in bank" and a Not-in-bank purchase came back Pending on a
-mere re-date (TESTs 94, 131). And when the copy is itself an allocation BUCKET,
+mere re-date (TESTs 94, 131). When the row being copied is ALREADY a moved copy of a
+recurring occurrence, the copy must call `store.carryMoveProvenance(source,
+target, newDate)`, which keeps `originalRecurringId` / `movedFrom` and re-aims
+the move record (dropping it on a move back to the scheduled day): without the
+pair the payment became an anonymous one-time row that "delete all future",
+a split, the merge's one-copy rule and a move back could no longer find
+(TEST 157). And when the copy is itself an allocation BUCKET,
 it lands under a fresh id, so its drawers must be re-pointed at it with
 `repointAllocationDraws` — a date move does that, and so does undo-delete, which
 passes the deleted row's id to `_restoreDeletedTransaction` (TEST 133).
@@ -408,7 +414,11 @@ something actually changes; a stamp that wrote re-runs the report once. The
 re-run files a stamped entry the statement lacks under `appOnlyExpected`, and
 that list (in-window only) counts toward the report's "needs attention", so
 the "Everything reconciles" banner never shows while an entry is missing from
-the bank (TEST 147). Its
+the bank (TEST 147). The payee-conflict block's app-side "known to the bank"
+check is STRICT (`_attestedIn(..., true)`: the shorter word must be at least
+`attestMinPrefixRatio` of the longer, a truncation rather than a stem),
+because it is what turns a category label into a bank payee; "TIKTOK SHOP"
+attesting "Car Shopping" refused a same-day $3,500 match (TEST 156). Its
 exact matching ranks an entry on/before the latest anchor LAST for a line
 posted after it: that entry was absorbed by the anchor, so it is only a
 fallback when nothing after the anchor fits (TEST 136). The
@@ -473,6 +483,22 @@ projection, which every path that changes the panel's inputs already calls. A
 calendar render re-drawing the list put a minimums-only plan under the
 snowball hero (TEST 138).
 
+History is never re-planned. A snowball payoff row dated before the
+projection start has happened, so `syncSnowballTransactionsForMonth` leaves
+it alone (the projection only schedules from tomorrow and used to delete every
+payoff on its own day, rescheduling it daily). A debt already at zero ends its
+minimum series ON the day it reached zero — `clearedOn`, recorded by
+`getHistoricalDebtSnapshot` — never on "the month before now", which slid
+forward and re-admitted one full minimum a month on a debt that owed nothing;
+with no such day the today-relative bound may only tighten. And
+`adjustMinimumPaymentTransactions` puts released rows back at the definition's
+amount in the same pass, so a risen target is fitted in one render (TESTs 158,
+159). The projection seeds checking from a freshly rebuilt
+`updateMonthlyBalances` (for the later of the viewed and current month): the
+calendar runs it before its own rebuild, and the stale map left the plan one
+render behind after any earlier-month edit and at every month turnover
+(TEST 160).
+
 The projection must pay exactly the debt payments the calendar pays.
 `getDayFlow` excludes only the rows the sim schedules itself — recurring
 minimum instances (injected from each debt's template, **skip-aware**: the
@@ -492,7 +518,10 @@ series. `reconcileMinimumSeriesSchedules` (run at the top of
 `ensureSnowballPaymentsForHorizon`) repairs drift left by older builds: a
 start-date-only difference is adopted INTO the debt (the series start never
 moves — that would push paid history out of the cleanup window), anything
-else is rewritten from the debt (TEST 122). "Last day of the month" is the
+else is rewritten from the debt (TEST 122). The series' `amount`, `description` and `debtName` are always
+rewritten from the debt: the debt and its series are two rows, the merge keeps
+the newer copy of each separately, and every payoff sync re-stamps the series,
+so a stale series can win over an edited debt (TEST 158). "Last day of the month" is the
 debt's explicit `dueLastDay`, decided in `saveDebt` from the due day the user
 typed (31, or a day the first due month is too short for); `null` = saved
 before the flag, which keeps the old start-date inference (TEST 121).
@@ -655,7 +684,7 @@ local_last_sync, _backup_before_merge, calendar_view_mode
 
 - `styles.css` - CSS variables for theming (primary, accent, error colors)
 - `README.md` - Project documentation and feature overview
-- `scripts/verify-logic.js` - Standalone logic verification utility (149 tests)
+- `scripts/verify-logic.js` - Standalone logic verification utility (154 tests)
 - `scripts/verify-walk-parity.js` - Randomized balance-walk parity harness + source guard
 - `scripts/verify-ui.js` - Optional headless-Chromium UI harness (`npm run test:ui`)
 - `scripts/verify-sync.js` - Optional two-device cloud-sync harness (`npm run test:sync`)

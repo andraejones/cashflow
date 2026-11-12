@@ -50,6 +50,10 @@ class BankReconcileUI {
     this.nameMatchMinRatio = 0.5;
     this.distinctiveMaxDocFreq = 2;
     this.nameMinTokenLen = 4;
+    // For the payee-conflict block's app-side attestation only (_attestedIn's
+    // strict mode): a prefix match counts when the shorter word is at least
+    // this fraction of the longer one — a truncation, not a stem.
+    this.attestMinPrefixRatio = 0.6;
     // Dropped from name tokens: transaction-type noise and generic business
     // words that aren't distinguishing on their own.
     this._nameStopwords = new Set([
@@ -472,9 +476,11 @@ class BankReconcileUI {
       // A debt payment's description is the creditor's actual name (system-
       // labeled), never a category — authoritative for the conflict guard.
       a._isDebtPayment = !!(a.recurringId && debtRecurringIds.has(a.recurringId));
+      // Strict on this side (see _attestedIn): this flag is what turns a
+      // category label into "a payee the bank prints", and a stem is not that.
       a._payeeKnownToBank =
-        this._attestedIn(a._normTokens, bankVocab) ||
-        this._attestedIn(a._tokens, bankVocab);
+        this._attestedIn(a._normTokens, bankVocab, true) ||
+        this._attestedIn(a._tokens, bankVocab, true);
     });
 
     // Pass 1: exact amount, same sign, best name and nearest date within
@@ -1240,11 +1246,38 @@ class BankReconcileUI {
   }
 
   // True when any token prefix-matches a vocabulary word at nameMinTokenLen+.
-  _attestedIn(tokens, vocab) {
-    return (
-      this._distinctiveSharedScore(tokens, vocab, () => true) >=
-      this.nameMinTokenLen
-    );
+  //
+  // `strict` additionally requires the shorter word to be MOST of the longer
+  // one (attestMinPrefixRatio), i.e. the same word cut short, not merely its
+  // stem. Prefix tolerance exists for truncation ("TALKIAT" for "TALKIATRY");
+  // for ranking that looseness is harmless, but the app-side attestation feeds
+  // the HARD block in _blockMatch, where it decides that an entry's label is a
+  // payee the bank prints. An unrelated "TIKTOK SHOP" line attested the
+  // category label "Car Shopping" that way (SHOP is a prefix of SHOPPING), so
+  // a same-day, same-amount $3,500 withdrawal was refused its only entry: the
+  // line was reported "Missing from app", the entry stamped "Not in bank",
+  // and Add put a second $3,500 on the calendar (TEST 156).
+  _attestedIn(tokens, vocab, strict = false) {
+    if (!strict) {
+      return (
+        this._distinctiveSharedScore(tokens, vocab, () => true) >=
+        this.nameMinTokenLen
+      );
+    }
+    for (const token of tokens) {
+      for (const word of vocab) {
+        const shorter = token.length <= word.length ? token : word;
+        const longer = token.length <= word.length ? word : token;
+        if (
+          shorter.length >= this.nameMinTokenLen &&
+          shorter.length >= this.attestMinPrefixRatio * longer.length &&
+          longer.startsWith(shorter)
+        ) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   // True when each token set has a distinctive word (>= nameMinTokenLen) that
@@ -1881,6 +1914,11 @@ class BankReconcileUI {
       moved.originalRecurringId = recId;
       this.store.addTransaction(targetDate, moved);
     } else {
+      // An entry that is ALREADY a moved copy of a recurring occurrence (a
+      // carried-forward Settle, an earlier Move) stays one: the copy keeps
+      // naming its occurrence and the move record follows it to the new date
+      // (see TransactionStore.carryMoveProvenance).
+      this.store.carryMoveProvenance(tx, moved, targetDate);
       this.store.deleteTransaction(appItem.date, index);
       this.store.addTransaction(targetDate, moved);
     }

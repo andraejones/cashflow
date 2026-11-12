@@ -938,6 +938,10 @@ Object.assign(TransactionUI.prototype, {
                 }
                 // Carry the allocation split forward (see recurring branch).
                 this.store.carryAllocationDraws(u.transaction, settledCopy);
+                // A carried item can itself be the moved copy of a recurring
+                // occurrence (settled once already, then marked pending again):
+                // it stays that occurrence's copy on the day it settles.
+                this.store.carryMoveProvenance(u.transaction, settledCopy, date);
                 this.store.addTransaction(date, settledCopy);
               }
               this.showTransactionDetails(date);

@@ -1082,8 +1082,16 @@ async function dismissAlert(page) {
       const el = document.getElementById("debtBalanceAsOf");
       return { value: el.value, max: el.max };
     });
+    // Select through the DOM, not a triple click: puppeteer's `clickCount: 3`
+    // is one click that only CLAIMS to be the third, and current puppeteer /
+    // Chrome no longer select the field on it. Backspace then removed a single
+    // digit and every later "typed" balance was appended to the old one
+    // (400 -> 40380 -> 4038400 -> 403840360), failing the two checks below
+    // for a reason that had nothing to do with the app. The keystrokes are
+    // still real, so the live `input` listener is still what is under test.
     const retype = async (selector, text) => {
-      await page.click(selector, { clickCount: 3 });
+      await page.focus(selector);
+      await page.evaluate((s) => document.querySelector(s).select(), selector);
       await page.keyboard.press("Backspace");
       await page.type(selector, text);
     };

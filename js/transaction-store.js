@@ -467,6 +467,47 @@ class TransactionStore {
   }
 
 
+  // Keep a moved copy a moved copy when it is rebuilt on another date.
+  //
+  // Moving a recurring occurrence leaves three things behind: the skipped
+  // original, a move record (`movedTransactions`), and a one-time copy naming
+  // its occurrence through `originalRecurringId` + `movedFrom`. That pair of
+  // fields is how everything else finds the copy: "delete all future" removes
+  // it with its occurrence, a "this and future" split re-points it, the cloud
+  // merge collapses two devices' copies of one occurrence onto one row, and a
+  // date edit back to the scheduled day restores the occurrence. The paths
+  // that rebuild a row field by field to re-date it (reconcile's Move / Mark
+  // settled, the carried-forward Settle) dropped both fields whenever the row
+  // was ALREADY a moved copy, so the payment became an anonymous one-time
+  // entry none of those could see, and the move record kept pointing at the
+  // date it had left (TEST 157).
+  //
+  // Copies the pair onto `target` and re-aims the move record at `newDate`.
+  // Landing back on the scheduled day is not a move any more, so the record is
+  // dropped rather than written with fromDate === toDate (which loadData
+  // discards as stale anyway); the copy still names its occurrence. A row
+  // that is not a moved copy is left alone.
+  carryMoveProvenance(source, target, newDate) {
+    if (!source || !target) return target;
+    const recurringId = source.originalRecurringId;
+    const movedFrom = source.movedFrom;
+    if (
+      typeof recurringId !== "string" || !recurringId ||
+      typeof movedFrom !== "string" || !movedFrom
+    ) {
+      return target;
+    }
+    target.movedFrom = movedFrom;
+    target.originalRecurringId = recurringId;
+    if (newDate === movedFrom) {
+      this.cancelMoveTransaction(recurringId, movedFrom);
+    } else if (newDate) {
+      this.moveTransaction(recurringId, movedFrom, newDate);
+    }
+    return target;
+  }
+
+
   // Date of the latest Ending Balance on/before `dateString`, or null. Skip-
   // aware the way calculateDailyTotals is, so it names the anchor the walk uses.
   getLatestAnchorDate(dateString) {

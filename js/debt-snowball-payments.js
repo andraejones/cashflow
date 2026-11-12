@@ -94,16 +94,38 @@ Object.assign(DebtSnowballUI.prototype, {
       const rt = recurrings.find((r) => r && r.id === debt.minRecurringId);
       if (!rt) return;
       let template = this.buildDebtRecurringTransaction(debt);
-      // A negative minimum (restored from a backup an older build wrote) is
-      // booked by the expansion as INCOME every month. _normalizeDebt refuses
-      // one on the debt; the series it left behind gets the debt's own
-      // minimum. Only a negative is touched: a positive series amount that
-      // differs from the debt is the adjusted-minimum machinery's business.
-      if (Number(rt.amount) < 0) {
+      // What the series PAYS and what it is CALLED come from the debt too.
+      // saveDebt writes the debt and its series together, but they are two
+      // rows, and the cloud merge keeps the newer copy of each on its own:
+      // every payoff-date sync re-stamps the series, so a device that has not
+      // yet pulled a debt edit can hold a stale series with the NEWER stamp.
+      // The merge then pairs the edited debt with the old series — the new
+      // minimum (or the new name) on the debt, the old one on the calendar.
+      // The projection pays debt.minPayment while the calendar expanded
+      // rt.amount; the monthly adjustment could only trim the difference off
+      // the month's last payment, and only when the series was the larger of
+      // the two, so each payment landed on a different amount than the plan
+      // used, and the day one passed the calendar and the plan disagreed for
+      // a render (TEST 158). A negative amount (a backup an older build
+      // wrote, booked as INCOME by the expansion) is the same repair (TEST
+      // 144). Adjusted instances are untouched: they are rows, not the
+      // definition, and the adjust pass re-fits them to the new amount.
+      const cents = (value) => Math.round((Number(value) || 0) * 100);
+      if (
+        !Number.isFinite(Number(rt.amount)) ||
+        cents(rt.amount) !== cents(template.amount)
+      ) {
         rt.amount = template.amount;
         rt._lastModified = now;
         changed = true;
       }
+      ["description", "debtName"].forEach((key) => {
+        if (rt[key] !== template[key]) {
+          rt[key] = template[key];
+          rt._lastModified = now;
+          changed = true;
+        }
+      });
       let diff = diffKeys(rt, template);
       if (!diff.length) return;
       if (diff.includes("startDate") && this.isValidDateString(rt.startDate)) {
@@ -264,9 +286,26 @@ Object.assign(DebtSnowballUI.prototype, {
     const userEnd = debt && debt.endDate ? debt.endDate : null;
     let payoffEnd = null;
     if (payoff && typeof payoff.year === "number" && typeof payoff.month === "number") {
-      if (payoff.alreadyPaid === true) {
-        // Already at zero: end the month before "now" so no payment shows in the
-        // current or future months.
+      if (payoff.alreadyPaid === true && this._strictDayString(payoff.clearedOn)) {
+        // Already at zero, and the snapshot knows the day it got there (the
+        // payment or infusion that cleared it, or the date of a balance typed
+        // as 0): the series ends ON that day. It is a landing date like every
+        // other bound here, so a minimum that cleared the debt stays inside
+        // its own window, and nothing after it is ever generated.
+        //
+        // The old bound was "the last day of the month before now", which is
+        // a function of today: it slid forward every month, and each slide
+        // pulled one more occurrence of a paid-off debt back inside the
+        // window. A debt cleared in May grew a full-amount minimum in June
+        // once July began, another in July once August began, and so on —
+        // each one a real row that lowered every balance after it and counted
+        // as "paid" on a debt that owed nothing (TEST 159).
+        payoffEnd = payoff.clearedOn;
+      } else if (payoff.alreadyPaid === true) {
+        // Already at zero with no day to pin it to (a balance typed as 0 on a
+        // debt saved before balance dates): end the month before "now" so no
+        // payment shows in the current or future months.
+        // syncMinimumPaymentEndDates never lets this bound move LATER.
         let endYear = payoff.year;
         let endMonth = payoff.month - 1;
         if (endMonth < 0) {
@@ -323,11 +362,23 @@ Object.assign(DebtSnowballUI.prototype, {
       if (!rt) {
         return;
       }
-      const desired = this.computeMinimumPaymentEndDate(
-        debt,
-        payoffByDebtId ? payoffByDebtId[debt.id] : null
-      );
+      const payoff = payoffByDebtId ? payoffByDebtId[debt.id] : null;
+      let desired = this.computeMinimumPaymentEndDate(debt, payoff);
       const current = rt.endDate ? rt.endDate : null;
+      // A debt already at zero with no known clearing day gets a bound that is
+      // relative to today (see computeMinimumPaymentEndDate). It may tighten,
+      // never loosen: a later one would re-admit occurrences of a debt that
+      // owes nothing.
+      if (
+        payoff &&
+        payoff.alreadyPaid === true &&
+        !this._strictDayString(payoff.clearedOn) &&
+        typeof current === "string" &&
+        desired &&
+        desired > current
+      ) {
+        desired = current;
+      }
       if (current !== desired) {
         rt.endDate = desired;
         rt._lastModified = new Date().toISOString();
@@ -585,6 +636,9 @@ Object.assign(DebtSnowballUI.prototype, {
 
     const epsilon = 0.01;
     let changed = false;
+    const recurringById = new Map(
+      this.store.getRecurringTransactions().map((rt) => [rt.id, rt])
+    );
 
     // Promoting an expanded recurring instance to a hand-edit (modifiedInstance)
     // must also assign an id + _lastModified, or the cloud merge (_mergeById)
@@ -603,41 +657,62 @@ Object.assign(DebtSnowballUI.prototype, {
       const occurrences = minOccurrencesByDebtId[debtId].sort((a, b) =>
         a.dateKey.localeCompare(b.dateKey)
       );
-      const currentTotal = occurrences.reduce(
-        (sum, occ) => sum + (Number(occ.transaction.amount) || 0),
-        0
-      );
+      const totalOf = () =>
+        occurrences.reduce(
+          (sum, occ) => sum + (Number(occ.transaction.amount) || 0),
+          0
+        );
+      let currentTotal = totalOf();
       if (currentTotal <= targetTotal + epsilon) {
         // At or below target. If strictly below AND we previously hid/reduced
         // instances, the target has since risen (e.g. a debt's projected payoff
-        // moved later, so more minimums are now genuinely due). Clearing the
-        // hand-edit flags lets the next re-expansion regenerate those instances
-        // at their definition amount; a later adjust pass then re-reduces only
-        // what's truly needed. Otherwise a zeroed minimum would be trapped here.
-        if (currentTotal < targetTotal - epsilon) {
-          let released = false;
-          occurrences.forEach(({ transaction }) => {
-            if (transaction.modifiedInstance === true) {
-              transaction.hidden = false;
-              transaction.modifiedInstance = false;
-              changed = true;
-              released = true;
-            }
-          });
-          // The released row is now a plain expansion, so the next expansion
-          // clears it — and a cached month replays only what it captured,
-          // which never includes a row that was a modified instance at
-          // capture time. Force a full re-expansion so it comes back at its
-          // definition amount rather than disappearing.
-          if (
-            released &&
-            this.recurringManager &&
-            typeof this.recurringManager.invalidateCache === "function"
-          ) {
-            this.recurringManager.invalidateCache();
-          }
+        // moved later, so more minimums are now genuinely due). Release those
+        // instances back to plain expansions at their definition amount, then
+        // carry on and re-reduce only what is truly needed. Otherwise a zeroed
+        // minimum would be trapped here.
+        if (!(currentTotal < targetTotal - epsilon)) {
+          return;
         }
-        return;
+        let released = false;
+        occurrences.forEach(({ transaction }) => {
+          if (transaction.modifiedInstance !== true) {
+            return;
+          }
+          transaction.hidden = false;
+          transaction.modifiedInstance = false;
+          // Back to the definition's amount NOW, not on the next expansion.
+          // Leaving the reduced figure for the expansion to replace meant this
+          // pass ended with the released rows unfitted: the render then
+          // re-expanded them at the full amount, over a target they had not
+          // been trimmed to, and only the NEXT render's pass trimmed them — so
+          // the day a month's first payment passed into history, the calendar
+          // paid a different final amount than the plan until something
+          // re-rendered (TEST 158).
+          const definition = recurringById.get(transaction.recurringId);
+          if (definition && Number.isFinite(Number(definition.amount))) {
+            transaction.amount = Number(definition.amount);
+          }
+          changed = true;
+          released = true;
+        });
+        if (!released) {
+          return;
+        }
+        // A released row is a plain expansion again, so the next expansion
+        // clears and regenerates it — and a cached month replays only what it
+        // captured, which never includes a row that was a modified instance at
+        // capture time. Force a full re-expansion so it comes back rather than
+        // disappearing.
+        if (
+          this.recurringManager &&
+          typeof this.recurringManager.invalidateCache === "function"
+        ) {
+          this.recurringManager.invalidateCache();
+        }
+        currentTotal = totalOf();
+        if (currentTotal <= targetTotal + epsilon) {
+          return;
+        }
       }
       // Allocate the target chronologically: the walk pays minimums in date
       // order until the payoff day and suppresses everything after it, so the
@@ -700,11 +775,29 @@ Object.assign(DebtSnowballUI.prototype, {
     let changed = false;
     let snowballAdded = false;
 
+    // A payoff dated before the projection start has HAPPENED: it is in the
+    // running balance the projection seeds from and in the debt snapshot,
+    // exactly like a minimum that has passed (same boundary as
+    // adjustMinimumPaymentTransactions and prunePaidOffDebtMinimumPayments).
+    // The projection only schedules from tomorrow, so it never "expects" such
+    // a row — and reconciling it against that forward-only list deleted every
+    // payoff on the day it arrived. The debt then read unpaid again, the next
+    // render scheduled the payoff for tomorrow, and the same thing happened
+    // tomorrow: the debt was never paid, and the first render of each day
+    // showed balances a whole payoff higher than the second (TEST 159).
+    const now = new Date();
+    const projectionStartString = Utils.formatDateString(
+      new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+    );
+
     // Scan every date (not just this month's) so a snowball row that drifted
     // into an adjacent month — e.g. a payoff payment pushed by a business-day
     // adjustment — is still reconciled against monthKey instead of being left
     // behind as a stray that double-counts.
     Object.keys(transactions).forEach((dateKey) => {
+      if (dateKey < projectionStartString) {
+        return;
+      }
       const list = transactions[dateKey];
       const filtered = list.filter((t) => {
         const isSnowball =
