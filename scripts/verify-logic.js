@@ -14681,6 +14681,127 @@ console.log("TEST 160: The Plan Seeds From Today's Balance, Not The Last Render'
   }
 }
 
+console.log("TEST 161: The Day List Is Ordered For Reading, And Carried Holds Wear Their Pill");
+{
+  // The day modal used to list the stored array in insertion order, so a
+  // recurring minimum landed wherever its month was expanded. It now lists
+  // balance → income → expenses (in the bank window: Pending, Not in bank,
+  // Cleared), then buckets, then skipped/hidden — DISPLAY ONLY: the stored
+  // array is untouched and each row keeps its stored index for its actions.
+  // A carried-forward row still on hold shows the Pending pill, static.
+  const assert = require("assert");
+  class El {
+    constructor(tag) {
+      this.tag = tag; this.children = []; this.className = ""; this._text = "";
+      this.style = {}; this.dataset = {}; this.options = []; this.value = ""; this.id = "";
+      this.classList = {
+        add: (...c) => { this.className = (this.className + " " + c.join(" ")).trim(); },
+        remove: () => {}, toggle: () => {},
+        contains: (c) => this.className.split(/\s+/).includes(c),
+      };
+    }
+    appendChild(c) { this.children.push(c); return c; }
+    insertBefore(c) { this.children.push(c); return c; }
+    removeChild(c) { this.children = this.children.filter((x) => x !== c); return c; }
+    set textContent(v) { this._text = String(v); this.children = []; }
+    get textContent() { return this._text + this.children.map((c) => c.textContent).join(""); }
+    set innerHTML(v) { this._text = String(v).replace(/<[^>]*>/g, ""); this.children = []; }
+    get innerHTML() { return this._text; }
+    setAttribute(k, v) { this["attr_" + k] = v; } getAttribute(k) { return this["attr_" + k]; }
+    removeAttribute() {} focus() {} addEventListener() {} removeEventListener() {} remove() {}
+    querySelector() { return null; } querySelectorAll() { return []; } contains() { return false; }
+    find(cls) {
+      const out = [];
+      const walk = (n) => { (n.children || []).forEach((ch) => {
+        if (ch.classList && ch.classList.contains(cls)) out.push(ch); walk(ch); }); };
+      walk(this);
+      return out;
+    }
+  }
+  const els = {};
+  const prevDoc = global.document;
+  global.document = {
+    ...prevDoc,
+    addEventListener: () => {}, removeEventListener: () => {},
+    getElementById: (id) => { if (!els[id]) { els[id] = new El("div"); els[id].id = id; } return els[id]; },
+    querySelector: () => null, querySelectorAll: () => [],
+    createElement: (tag) => new El(tag),
+    createTextNode: (t) => { const n = new El("#text"); n._text = String(t); return n; },
+    activeElement: null, body: new El("body"),
+  };
+  const clock = __balanceAsOfClock();
+  const stores = [];
+  try {
+    clock.at(2026, 10, 12);
+    const s = new TransactionStore();
+    stores.push(s);
+    s.resetData();
+    const rm = new RecurringTransactionManager(s);
+    const cs = new CalculationService(s, rm);
+    const tui = new TransactionUI(s, rm, () => {}, null, cs);
+    const day = "2026-11-12";
+    s.addTransaction("2026-11-01", { amount: 1000, type: "balance", description: "Ending Balance" });
+    // Carried forward: one still on hold (unsettled → Pending by default), one
+    // the bank has never seen (stamped Not in bank).
+    s.addTransaction("2026-11-05", { amount: 9, type: "expense", description: "CarryHold", settled: false });
+    s.addTransaction("2026-11-06", { amount: 4, type: "expense", description: "CarryMissing", settled: false });
+    s.setTransactionBankStatus("2026-11-06", 0, "expected");
+    // Today, in a deliberately scrambled entry order.
+    s.addTransaction(day, { amount: 70, type: "expense", description: "RowCleared" });
+    s.addTransaction(day, { amount: 28, type: "expense", description: "RowPending", settled: false });
+    s.addTransaction(day, { amount: 500, type: "income", description: "RowIncome" });
+    s.addTransaction(day, { amount: 25, type: "expense", description: "RowMissing" });
+    s.setTransactionBankStatus(day, 3, "expected");
+    const storedBefore = s.getTransactions()[day].map((t) => t.description);
+
+    tui.showTransactionDetails(day);
+    const list = els.modalTransactions;
+    const rows = list.children.filter((c) => !c.classList.contains("carried-forward-header") &&
+      !c.classList.contains("carried-forward-transaction"));
+    const names = rows.map((r) => (r.textContent.match(/Row(?:Income|Pending|Missing|Cleared)/) || [""])[0]);
+    assert.deepStrictEqual(names, ["RowIncome", "RowPending", "RowMissing", "RowCleared"],
+      `day rows in reading order (got ${names.join(", ")})`);
+    assert.deepStrictEqual(s.getTransactions()[day].map((t) => t.description), storedBefore,
+      "the stored array is never reordered");
+    // Each row still carries its STORED index (the edit form's id is built from it).
+    rows.forEach((r) => {
+      const form = r.children.find((c) => c.className === "edit-form");
+      const idx = Number(form.id.split("-").pop());
+      assert.ok(r.textContent.includes(s.getTransactions()[day][idx].description),
+        `row ${r.textContent.slice(0, 30)} keeps its stored index ${idx}`);
+    });
+
+    const carried = list.children.filter((c) => c.classList.contains("carried-forward-transaction"));
+    const hold = carried.find((c) => c.textContent.includes("CarryHold"));
+    const missing = carried.find((c) => c.textContent.includes("CarryMissing"));
+    assert.ok(hold && missing, "setup: both items carry forward");
+    const holdPill = hold.find("bank-status-chip");
+    assert.strictEqual(holdPill.length, 1, "a carried item still on hold wears one pill");
+    assert.strictEqual(holdPill[0].textContent, "Pending");
+    assert.ok(holdPill[0].classList.contains("bank-status-pending"));
+    assert.strictEqual(holdPill[0].attr_role, undefined, "the carried pill is static, not a button");
+    assert.strictEqual(missing.find("bank-status-chip").length, 0,
+      "a carried item the bank never saw has no Pending pill");
+
+    // Outside the bank window (no chips) the status grouping is off: entry
+    // order within expenses, balance anchors first.
+    const outside = tui._dayDisplayOrder("2026-12-01", [
+      { type: "expense", amount: 1, bankStatus: "cleared" },
+      { type: "income", amount: 2 },
+      { type: "expense", amount: 3, bankStatus: "pending" },
+      { type: "balance", amount: 4 },
+      { type: "expense", amount: 5, hidden: true },
+      { type: "expense", amount: 6, allocated: true },
+    ], false).map((r) => r.index);
+    assert.deepStrictEqual(outside, [3, 1, 0, 2, 5, 4]);
+    console.log("✅ Day rows list in reading order by stored index; carried holds show Pending");
+  } finally {
+    clock.restore();
+    global.document = prevDoc;
+    stores.forEach((st) => st.cancelPendingSave());
+  }
+}
+
 // Run the async network tests sequentially (shared global.fetch mock): TEST 32
 // first, then TEST 30, which prints the final banner.
 async function runUnreadableGistTest() {

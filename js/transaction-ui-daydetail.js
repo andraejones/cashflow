@@ -133,6 +133,40 @@ Object.assign(TransactionUI.prototype, {
     return chip;
   },
 
+  // The order the day's rows are LISTED in. Display only: the stored array is
+  // never reordered (that would churn _lastModified and sync), and every row
+  // keeps its stored index, which is what Edit / Delete / Settle / the chip
+  // address it by. Balance anchors come first, then income, then expenses;
+  // inside the open bank window (where the chips show) expenses group by bank
+  // status — Pending, Not in bank, Cleared — then allocation buckets, and
+  // skipped / hidden rows last. Ties keep entry order (the sort is stable and
+  // the comparator returns 0 for equal ranks).
+  _dayDisplayOrder(date, rows, groupByBankStatus) {
+    const TYPE_RANK = { balance: 0, income: 1, expense: 2 };
+    const STATUS_RANK = { pending: 0, expected: 1, cleared: 2 };
+    const rankOf = (t) => {
+      if (!t || typeof t !== "object") return 99;
+      const type = this.normalizeTransactionType(t.type);
+      const skipped =
+        t.recurringId !== undefined &&
+        this.recurringManager.isTransactionSkipped(date, t.recurringId);
+      if (t.hidden === true || skipped) return 90;
+      const typeRank = Object.prototype.hasOwnProperty.call(TYPE_RANK, type)
+        ? TYPE_RANK[type]
+        : 3;
+      if (type !== "expense") return typeRank * 10;
+      if (t.allocated === true) return typeRank * 10 + 5;
+      const status = groupByBankStatus ? this.store.getBankStatus(t) : null;
+      const statusRank = Object.prototype.hasOwnProperty.call(STATUS_RANK, status)
+        ? STATUS_RANK[status]
+        : 0;
+      return typeRank * 10 + statusRank;
+    };
+    return rows
+      .map((t, index) => ({ t, index, rank: rankOf(t) }))
+      .sort((a, b) => a.rank - b.rank || a.index - b.index);
+  },
+
   showTransactionDetails(date) {
     try {
 
@@ -208,7 +242,7 @@ Object.assign(TransactionUI.prototype, {
 
       if (transactions[date]) {
         let hasVisible = false;
-        transactions[date].forEach((t, index) => {
+        this._dayDisplayOrder(date, transactions[date], showBankChips).forEach(({ t, index }) => {
           const isHidden = t.hidden === true;
           if (!isHidden) {
             hasVisible = true;
@@ -854,6 +888,19 @@ Object.assign(TransactionUI.prototype, {
 
             const actions = document.createElement("span");
             actions.className = "transaction-actions";
+
+            // Still on hold at the bank: show the same Pending pill the row
+            // wears on its own day. Static, not the cycling chip — clearing it
+            // here would settle it in place on its original date, and a
+            // cleared entry belongs on the day it cleared (Settle moves it).
+            if (this.store.getBankStatus(u.transaction) === "pending") {
+              const pendingPill = document.createElement("span");
+              pendingPill.className =
+                "bank-status-chip bank-status-pending bank-status-static";
+              pendingPill.setAttribute("aria-label", "Bank status: Pending");
+              pendingPill.textContent = "Pending";
+              actions.appendChild(pendingPill);
+            }
 
             const settleBtn = document.createElement("span");
             settleBtn.className = "settle-btn";
